@@ -1,0 +1,29 @@
+# Build and IDE
+build/
+.vscode/
+.cursor/
+out/
+
+# Databases and Local State
+*.db
+*.sqlite
+blockchain.db
+utxodb.sqlite
+test_enc1.db
+test_enc2.db
+test_peer_discovery_*.db
+utxo_enc*.db
+
+# Secrets and Sensitive Data
+restore.json
+*.key
+*.pem
+
+# Dependencies
+# Including external if not using submodules, but common to ignore large vendor folders
+# external/
+
+# OS and Log files
+.DS_Store
+*.log
+Thumbs.db

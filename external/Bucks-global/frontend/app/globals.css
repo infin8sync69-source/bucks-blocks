@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #ffffff;
+  --color-foreground: #171717;
+  --color-primary: #7C3AED;
+  --color-secondary: #6B7280;
+  --color-accent: #EC4899;
+  --color-glass: rgba(255, 255, 255, 0.8);
+  --color-glass-border: rgba(255, 255, 255, 0.5);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --animate-fade-in: fadeIn 0.5s ease-out;
+  --animate-slide-up: slideUp 0.5s ease-out;
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideUp {
+    from {
+      transform: translateY(20px);
+      opacity: 0;
+    }
+
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+}
+
+/* Base styles */
+body {
+  color: var(--color-foreground);
+  background: var(--color-background);
+  font-family: var(--font-sans);
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-glass backdrop-blur-md border border-glass-border;
+  }
+}

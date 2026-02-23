@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>bucks — liquid wallet prototype</title>
+  <link rel="stylesheet" href="wallet.css">
+  <style>
+    /* Inline styles preserved for quick prototyping, could be moved to wallet.css fully later */
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      background: radial-gradient(1200px 800px at 10% -10%, #2a2f45 0%, #0b0d13 60%);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .app {
+      width: 390px;
+      min-height: 760px;
+      padding: 24px;
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(22px) saturate(140%);
+      -webkit-backdrop-filter: blur(22px) saturate(140%);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 40px 80px rgba(0, 0, 0, 0.6);
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .logo {
+      width: 60px;
+      height: 60px;
+      margin: 0 auto 10px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, rgba(255, 215, 120, 0.9), rgba(180, 140, 60, 0.9));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 22px;
+      color: #1a1306;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      text-transform: lowercase;
+    }
+
+    .subtitle {
+      font-size: 13px;
+      opacity: 0.7;
+    }
+
+    .screen {
+      display: none;
+      animation: fade .25s ease;
+    }
+
+    .screen.active {
+      display: block;
+    }
+
+    @keyframes fade {
+      from {
+        opacity: 0;
+        transform: translateY(6px);
+      }
+
+      to {
+        opacity: 1;
+        transform: none;
+      }
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.10);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      backdrop-filter: blur(14px);
+      border-radius: 20px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .balance {
+      font-size: 36px;
+      font-weight: 700;
+      margin-top: 8px;
+    }
+
+    .gold {
+      font-size: 14px;
+      opacity: .75;
+      margin-top: 4px;
+    }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      margin-top: 10px;
+      border-radius: 16px;
+      border: none;
+      background: linear-gradient(135deg, #ffd27a, #c89b3c);
+      color: #1a1306;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform .1s;
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+
+    button.secondary {
+      background: rgba(255, 255, 255, 0.14);
+      color: #fff;
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      margin-top: 6px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(0, 0, 0, 0.25);
+      color: #fff;
+      outline: none;
+      font-family: inherit;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 10px;
+      margin: 18px 0;
+    }
+
+    .tab {
+      flex: 1;
+      text-align: center;
+      padding: 10px;
+      border-radius: 14px;
+      font-size: 13px;
+      background: rgba(255, 255, 255, 0.12);
+      cursor: pointer;
+      opacity: .7;
+      transition: all .2s;
+    }
+
+    .tab.active {
+      opacity: 1;
+      background: linear-gradient(135deg, #ffd27a, #c89b3c);
+      color: #1a1306;
+    }
+
+    .address {
+      margin: 12px 0;
+      padding: 12px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.12);
+      font-family: monospace;
+      font-size: 11px;
+      text-align: center;
+      word-break: break-all;
+      color: #ffd27a;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .col {
+      flex: 1;
+    }
+
+    .muted {
+      font-size: 12px;
+      opacity: .65;
+      margin-top: 6px;
+    }
+
+    /* Mining specific */
+    .mining-status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.10);
+      margin-top: 8px;
+    }
+
+    .mining-status-badge.active {
+      background: rgba(80, 220, 100, 0.18);
+      color: #6effa0;
+    }
+
+    .mining-status-badge.stopped {
+      background: rgba(255, 80, 80, 0.14);
+      color: #ff8080;
+    }
+
+    .pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      animation: pulse 1.2s infinite;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      50% {
+        opacity: .4;
+        transform: scale(0.7);
+      }
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 13px;
+    }
+
+    .stat-row:last-child {
+      border-bottom: none;
+    }
+
+    .stat-label {
+      opacity: .65;
+    }
+
+    .mnemonic-box {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 215, 100, 0.25);
+      border-radius: 14px;
+      padding: 14px;
+      font-family: monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      word-break: break-word;
+      filter: blur(5px);
+      transition: filter .3s;
+      cursor: pointer;
+      color: #ffd27a;
+    }
+
+    .mnemonic-box.revealed {
+      filter: none;
+    }
+
+    .mnemonic-hint {
+      font-size: 11px;
+      opacity: .55;
+      text-align: center;
+      margin-top: 6px;
+    }
+
+    button.mine-start {
+      background: linear-gradient(135deg, #50dc6e, #26a045);
+      color: #fff;
+    }
+
+    button.mine-stop {
+      background: linear-gradient(135deg, #ff5555, #cc2222);
+      color: #fff;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="app">
+    <div class="header">
+      <div class="logo">b</div>
+      <h1>bucks</h1>
+      <div class="subtitle">liquid wallet</div>
+    </div>
+
+    <!-- Screen 1: Welcome -->
+    <div id="welcome" class="screen active">
+      <div class="card">
+        Welcome to Bucks. Setup your secure liquid wallet to start transacting and mining.
+      </div>
+      <button onclick="createNewWallet()">Create New Wallet</button>
+      <button class="secondary" onclick="go('restore')">Restore Existing</button>
+    </div>
+
+    <!-- Screen 2: Recovery Phrase Generation -->
+    <div id="recovery" class="screen">
+      <div class="card">
+        <strong>Recovery Phrase</strong>
+        <p class="muted">Write this down and store it safely. It is the ONLY way to recover your funds if you lose your
+          phone or password.</p>
+        <div class="mnemonic-box revealed" id="displayMnemonic" style="filter:none; cursor:default; margin-top:12px">
+          ...
+        </div>
+        <div style="margin-top:20px; display:flex; gap:12px; align-items:center">
+          <input type="checkbox" id="savedCheck" style="width:20px; height:20px; margin:0">
+          <label for="savedCheck" style="font-size:13px; opacity:.8">I have written down my backup phrase</label>
+        </div>
+      </div>
+      <button onclick="finalizeCreation()">Continue to Wallet</button>
+      <button class="secondary" onclick="go('welcome')">Back</button>
+    </div>
+
+    <!-- Screen 3: Restore Wallet -->
+    <div id="restore" class="screen">
+      <div class="card">
+        <strong>Restore Wallet</strong>
+        <p class="muted">Enter your 12 or 24 word recovery phrase to regain access to your Bucks.</p>
+        <textarea id="restoreMnemonic" rows="4" placeholder="word1 word2 ..."></textarea>
+      </div>
+      <button onclick="restoreWallet()">Confirm Restore</button>
+      <button class="secondary" onclick="go('welcome')">Back</button>
+    </div>
+
+    <!-- Screen 4: Home -->
+    <div id="home" class="screen">
+      <div class="card">
+        <div class="muted">Total balance</div>
+        <div class="balance" id="balance">0.00</div>
+        <div class="gold" id="gold">≈ 0.00 mg gold</div>
+      </div>
+
+      <div class="address" id="homeAddress">Connecting...</div>
+
+      <div class="tabs">
+        <div class="tab active" onclick="switchTab('send', this)">Send</div>
+        <div class="tab" onclick="switchTab('receive', this)">Receive</div>
+        <div class="tab" onclick="switchTab('mine', this)">⛏ Mine</div>
+      </div>
+
+      <!-- Tab: Send -->
+      <div id="send" class="tabview">
+        <input id="recipientAddr" placeholder="Recipient address">
+        <div class="row" style="margin-top:8px">
+          <div class="col">
+            <input id="sendAmount" type="number" placeholder="Amount (bucks)" oninput="updateGoldCalc()">
+          </div>
+          <div class="col">
+            <input id="sendGold" readonly placeholder="Gold eq.">
+          </div>
+        </div>
+        <div class="muted" id="rate">Loading rate...</div>
+        <button onclick="sendTransaction()">Confirm Send</button>
+      </div>
+
+      <!-- Tab: Receive -->
+      <div id="receive" class="tabview" style="display:none">
+        <div class="card" style="text-align:center; padding: 40px 20px;">
+          <div
+            style="background: white; padding: 10px; display: inline-block; border-radius: 12px; margin-bottom: 20px;">
+            <div style="width: 160px; height: 160px; background: #eee;"></div>
+          </div>
+          <div class="muted">Your Public Address</div>
+          <div class="address">...</div>
+        </div>
+      </div>
+
+      <!-- Tab: Mine -->
+      <div id="mine" class="tabview" style="display:none">
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <strong>Miner Status</strong>
+            <div class="mining-status-badge stopped" id="miningBadge">
+              <span class="pulse"></span><span id="miningLabel">Stopped</span>
+            </div>
+          </div>
+          <div class="stat-row" style="margin-top:12px">
+            <span class="stat-label">Hash Rate</span>
+            <span id="hashRate">—</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Blocks Found</span>
+            <span id="blocksFound">—</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Miner Address</span>
+            <span id="minerAddr"
+              style="font-family:monospace;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis">—</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <strong>Primary Wallet Security</strong>
+          <p class="muted">Tap to reveal recovery phrase. Keep this secret!</p>
+          <div class="mnemonic-box" id="mnemonicBox">Loading...</div>
+          <div class="mnemonic-hint" id="mnemonicHint">👆 tap to reveal recovery phrase</div>
+        </div>
+
+        <button id="mineBtn" class="mine-start" onclick="toggleMining()">▶ Start Mining</button>
+      </div>
+
+      <button class="secondary" style="margin-top:20px" onclick="location.reload()">Refresh Session</button>
+    </div>
+  </div>
+
+  <script src="wallet.js"></script>
+</body>
+
+</html>

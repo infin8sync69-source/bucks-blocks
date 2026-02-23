@@ -1,0 +1,46 @@
+# Created by Antigravity
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env.bak/
+env/
+.env
+.pytest_cache/
+
+# Node
+node_modules/
+.next/
+dist/
+dist-ssr/
+*.tsbuildinfo
+.eslintcache
+
+# Project specific
+.ipfs_data/
+bin/
+bundle_app.sh
+setup_node2.sh
+start_app.sh
+
+# Data and Backups
+*.db
+*.db-journal
+*.sqlite
+*.bak
+*.tmp
+
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
