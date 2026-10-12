@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "block.h"
+#include "chainparams.h"
 #include "utxodb.h"
 #include "blockdb.h"
 #include "blockheader.h"
@@ -36,7 +37,14 @@ struct BlockIndex {
  */
 class Blockchain {
 public:
-    Blockchain(const std::string& utxoPath = "utxodb.sqlite", const std::string& blockPath = "blockchain.db");
+    // `params` selects the network; the default is regtest (tests). The node
+    // passes the network chosen with --network. Throws std::runtime_error if
+    // the genesis check fails or the stored chain belongs to another network.
+    Blockchain(const std::string& utxoPath = "utxodb.sqlite",
+               const std::string& blockPath = "blockchain.db",
+               const ChainParams& params = chainParams(NetworkId::REGTEST));
+
+    const ChainParams& params() const { return params_; }
 
     // ---- Chain state ----
     const Block* tip() const;
@@ -54,6 +62,8 @@ public:
 
     // ---- Genesis ----
     static const Block& genesis();
+    // Hash of block 0, committed to by every signature (sighash v1).
+    Hash256 genesisHash() const { return params_.genesisHash; }
     
     // ---- Median Time Past ----
     uint32_t getMedianTimePast() const;
@@ -86,6 +96,8 @@ public:
     uint64_t getCirculatingSupply() const;
 
 private:
+    const ChainParams& params_;
+
     // Block storage
     std::vector<Block> blocks;                    // All blocks in order
     size_t tipIndex;                              // Index of best tip
@@ -100,7 +112,6 @@ private:
     std::vector<Transaction> mempool;
 
     // Internal helpers
-    Block createGenesisBlock();
     bool connectBlock(const Block& block);
     bool disconnectBlock(const Block& block);
     bool loadPersistedBlocks();

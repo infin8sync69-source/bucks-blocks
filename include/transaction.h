@@ -1,89 +1,64 @@
 #ifndef TRANSACTION_H
 #define TRANSACTION_H
 
-#include <vector>
 #include <array>
 #include <cstdint>
-#include <ctime>
+#include <string>
+#include <vector>
 
 #include "crypto.h"
 #include "script.h"
+#include "serialize.h"
 
 namespace Bucks {
 
-constexpr size_t MAX_TX_INPUTS = 1000;
-constexpr size_t MAX_TX_OUTPUTS = 1000;
-constexpr size_t MAX_TX_SIZE = 100000; // 100KB
+// Transaction v2 (docs/design/consensus-validation.md section 4.3).
+// Everything validation needs is inside the serialized bytes: there is no
+// witness, no separate pubkey, no timestamp and no fee field.
 
-// ------------------------------------------------------------
-// Transaction Input
-// ------------------------------------------------------------
 struct TransactionInput {
-    Hash256 prevTxid;              // 32-byte txid
-    uint32_t prevIndex;            // output index
-    std::vector<uint8_t> scriptSig;  // unlocking script
-    std::vector<uint8_t> pubKey;     // pubkey (filled when signed)
+    Hash256 prevTxid;                // 32-byte txid
+    uint32_t prevIndex;              // output index
+    std::vector<uint8_t> scriptSig;  // coinbase data or P2PKH unlock script
     uint32_t sequence;
 
     TransactionInput();
     TransactionInput(const Hash256& prevTx, uint32_t idx);
-    bool isCoinbase() const;
 };
 
-// ------------------------------------------------------------
-// Transaction Output
-// ------------------------------------------------------------
 struct TransactionOutput {
-    uint64_t amount;                  // amount in awraq
-    Script scriptPubKey;              // locking script
+    uint64_t amount;                 // amount in awraq
+    Script scriptPubKey;             // P2PKH or NULL_DATA
 
     TransactionOutput();
     TransactionOutput(uint64_t amt, const Script& spk);
     TransactionOutput(uint64_t amt, const std::string& scriptStr); // convenience for tests
 };
 
-// Witness (SegWit)
-struct Witness {
-    std::vector<std::vector<uint8_t>> stack;
-};
-
-// ------------------------------------------------------------
-// Transaction
-// ------------------------------------------------------------
 class Transaction {
 public:
     uint32_t version;
     std::vector<TransactionInput> inputs;
     std::vector<TransactionOutput> outputs;
     uint32_t lockTime;
-    std::time_t timestamp;
-    std::vector<Witness> witnesses; // one per input (optional)
-    uint64_t fee_amount = 0;
 
     Transaction();
     Transaction(const std::vector<TransactionInput>& in, const std::vector<TransactionOutput>& out);
 
-    // Serialization: includeWitness controls segwit serialization
-    std::vector<uint8_t> serialize(bool includeWitness = false) const;
+    std::vector<uint8_t> serialize() const;
+    // Throws ParseError on any structural problem, including trailing bytes.
     static Transaction deserialize(const std::vector<uint8_t>& data);
+    // Reads one transaction from the stream (used inside blocks); the
+    // transaction itself is capped at MAX_TX_SIZE bytes.
+    static Transaction parse(Reader& r);
 
-    // TXID / WTXID
-    Hash256 txid() const;   // legacy hash (NO witness)
-    Hash256 wtxid() const;  // witness hash (WITH witness)
+    // txid = SHA256d(serialization); the unlock script is part of it.
+    Hash256 txid() const;
 
-    // Signature hashing and signing helpers
-    Hash256 legacySignatureHash(size_t inputIndex) const;
-    bool signInput(size_t inputIndex, const PrivateKey& privKey, const PublicKey& pubKey);
-    bool verifyInput(size_t inputIndex) const;
-
-    // Helpers
+    // Exactly one input, prevTxid all zero and prevIndex == 0xFFFFFFFF.
     bool isCoinbase() const;
+    // Sum of output amounts; saturates at UINT64_MAX instead of wrapping.
     uint64_t totalOutput() const;
-    bool verify() const; // verify all inputs
-
-    // Fee helpers (policy fields)
-    void setFee(uint64_t f) { fee_amount = f; }
-    uint64_t fee() const { return fee_amount; }
 };
 
 } // namespace Bucks

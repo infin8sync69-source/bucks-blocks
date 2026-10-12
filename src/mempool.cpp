@@ -1,149 +1,109 @@
 #include "mempool.h"
+#include "validation.h"
 
 namespace Bucks {
 
-// -----------------------------------------------------------------------------
-// Constructor
-// -----------------------------------------------------------------------------
+Mempool::Mempool() {}
 
-Mempool::Mempool(UTXODB& db)
-    : utxoDB(db) {}
-
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
-
-std::string Mempool::outpointKey(const OutPoint& op) const {
-    return std::string(
-        reinterpret_cast<const char*>(op.txid.data()),
-        32
-    ) + std::to_string(op.index);
+bool Mempool::Outpoint::operator==(const Outpoint& other) const {
+    return txid == other.txid && vout == other.vout;
 }
 
-// -----------------------------------------------------------------------------
-// Add transaction (POLICY checks)
-// -----------------------------------------------------------------------------
+size_t Mempool::OutpointHasher::operator()(const Outpoint& o) const {
+    size_t h = 0;
+    for (size_t i = 0; i < 8 && i < o.txid.size(); ++i)
+        h ^= static_cast<size_t>(o.txid[i]) << (i * 8);
+    h ^= std::hash<uint32_t>{}(o.vout);
+    return h;
+}
 
-bool Mempool::addTransaction(const Transaction& tx) {
-    std::lock_guard<std::mutex> lock(mtx);
+bool Mempool::addTransaction(const Transaction& tx, const UTXODB& utxoDB) {
+    std::lock_guard<std::mutex> lock(mutex);
 
-    // Coinbase is NEVER allowed in mempool
-    if (tx.isCoinbase())
+    Hash256 txid = tx.txid();
+
+    if (transactions.count(txid))
         return false;
 
-    // Already exists
-    if (pool.count(tx.txid))
+    if (checkDoubleSpend(tx))
         return false;
 
-    uint64_t inputSum = 0;
-    uint64_t outputSum = 0;
-
-    // -------------------------------------------------------------------------
-    // Inputs
-    // -------------------------------------------------------------------------
-
-    for (size_t i = 0; i < tx.inputs.size(); ++i) {
-        const TransactionInput& in = tx.inputs[i];
-        OutPoint op{in.prevTxid, in.prevIndex};
-
-        std::string key = outpointKey(op);
-
-        // Already spent by another mempool tx
-        if (spent.count(key))
-            return false;
-
-        // Must exist in UTXO set
-        UTXO prev;
-        if (!utxoDB.get(op, prev))
-            return false;
-
-        // Verify signature
-        if (!tx.verifyInput(i))
-            return false;
-
-        inputSum += prev.amount;
-    }
-
-    // -------------------------------------------------------------------------
-    // Outputs
-    // -------------------------------------------------------------------------
-
-    for (const auto& out : tx.outputs) {
-        if (out.amount == 0)
-            return false;
-        outputSum += out.amount;
-    }
-
-    // Fee sanity (policy rule)
-    if (inputSum < outputSum)
-        return false;
-
-    // -------------------------------------------------------------------------
-    // Accept transaction
-    // -------------------------------------------------------------------------
-
-    pool.emplace(tx.txid, tx);
-
-    // Mark spent outpoints
-    for (const auto& in : tx.inputs) {
-        OutPoint op{in.prevTxid, in.prevIndex};
-        spent.insert(outpointKey(op));
-    }
-
+    transactions.emplace(txid, tx);
+    markInputsSpent(tx);
     return true;
 }
 
-// -----------------------------------------------------------------------------
-// Remove transaction
-// -----------------------------------------------------------------------------
-
-void Mempool::removeTransaction(const TxID& txid) {
-    std::lock_guard<std::mutex> lock(mtx);
-
-    auto it = pool.find(txid);
-    if (it == pool.end())
-        return;
-
-    // Free spent outpoints
-    for (const auto& in : it->second.inputs) {
-        OutPoint op{in.prevTxid, in.prevIndex};
-        spent.erase(outpointKey(op));
-    }
-
-    pool.erase(it);
+void Mempool::removeTransaction(const Hash256& txid) {
+    std::lock_guard<std::mutex> lock(mutex);
+    auto it = transactions.find(txid);
+    if (it == transactions.end()) return;
+    unmarkInputsSpent(it->second);
+    transactions.erase(it);
 }
 
-// -----------------------------------------------------------------------------
-// Queries
-// -----------------------------------------------------------------------------
+void Mempool::removeConflicts(const Transaction& confirmedTx) {
+    std::lock_guard<std::mutex> lock(mutex);
+    for (const auto& in : confirmedTx.inputs) {
+        Outpoint op{in.prevTxid, in.prevIndex};
+        auto sit = spentOutpoints.find(op);
+        if (sit != spentOutpoints.end()) {
+            Hash256 spendingTxid = sit->second;
+            auto tit = transactions.find(spendingTxid);
+            if (tit != transactions.end()) {
+                unmarkInputsSpent(tit->second);
+                transactions.erase(tit);
+            }
+        }
+    }
+}
 
-bool Mempool::exists(const TxID& txid) const {
-    std::lock_guard<std::mutex> lock(mtx);
-    return pool.count(txid) != 0;
+bool Mempool::exists(const Hash256& txid) const {
+    std::lock_guard<std::mutex> lock(mutex);
+    return transactions.count(txid) != 0;
+}
+
+std::vector<Transaction> Mempool::getTransactionsForBlock(size_t maxBlockSize) const {
+    std::lock_guard<std::mutex> lock(mutex);
+    std::vector<Transaction> result;
+    for (const auto& [id, tx] : transactions) {
+        result.push_back(tx);
+        if (result.size() >= maxBlockSize) break;
+    }
+    return result;
+}
+
+void Mempool::clear() {
+    std::lock_guard<std::mutex> lock(mutex);
+    transactions.clear();
+    spentOutpoints.clear();
 }
 
 size_t Mempool::size() const {
-    std::lock_guard<std::mutex> lock(mtx);
-    return pool.size();
+    std::lock_guard<std::mutex> lock(mutex);
+    return transactions.size();
 }
 
-// -----------------------------------------------------------------------------
-// Miner interface
-// -----------------------------------------------------------------------------
-
-std::vector<Transaction> Mempool::collect(size_t maxCount) const {
-    std::lock_guard<std::mutex> lock(mtx);
-
-    std::vector<Transaction> txs;
-    txs.reserve(maxCount);
-
-    for (const auto& it : pool) {
-        txs.push_back(it.second);
-        if (txs.size() >= maxCount)
-            break;
+bool Mempool::checkDoubleSpend(const Transaction& tx) const {
+    for (const auto& in : tx.inputs) {
+        Outpoint op{in.prevTxid, in.prevIndex};
+        if (spentOutpoints.count(op)) return true;
     }
+    return false;
+}
 
-    return txs;
+void Mempool::markInputsSpent(const Transaction& tx) {
+    Hash256 txid = tx.txid();
+    for (const auto& in : tx.inputs) {
+        Outpoint op{in.prevTxid, in.prevIndex};
+        spentOutpoints.emplace(op, txid);
+    }
+}
+
+void Mempool::unmarkInputsSpent(const Transaction& tx) {
+    for (const auto& in : tx.inputs) {
+        Outpoint op{in.prevTxid, in.prevIndex};
+        spentOutpoints.erase(op);
+    }
 }
 
 } // namespace Bucks

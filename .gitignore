@@ -3,6 +3,10 @@ build/
 .vscode/
 .cursor/
 out/
+compile_commands.json
+.cache/
+*.profraw
+*.profdata
 
 # Databases and Local State
 *.db
@@ -13,15 +17,23 @@ test_enc1.db
 test_enc2.db
 test_peer_discovery_*.db
 utxo_enc*.db
+.bucks/
 
 # Secrets and Sensitive Data
 restore.json
 *.key
 *.pem
+wallets.json
+*.cookie
+.env
+.env.*
+!.env.example
 
 # Dependencies
 # Including external if not using submodules, but common to ignore large vendor folders
 # external/
+node_modules/
+frontend/dist/
 
 # OS and Log files
 .DS_Store

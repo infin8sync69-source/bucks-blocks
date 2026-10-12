@@ -130,6 +130,7 @@ bool checkTransactionInputs(
     const Transaction& tx,
     const UTXODB& utxoDB,
     uint64_t currentHeight,
+    const Hash256& genesisHash,
     ValidationError& error
 );
 
@@ -151,6 +152,7 @@ bool checkBlock(
     uint64_t currentHeight,
     uint32_t medianTimePast,
     uint32_t expectedBits,
+    const Hash256& genesisHash,
     ValidationError& error
 );
 
@@ -168,6 +170,7 @@ bool connectBlock(
     const Block& block,
     UTXODB& utxoDB,
     BlockDB* blockDB,
+    const Hash256& genesisHash,
     ValidationError& error
 );
 

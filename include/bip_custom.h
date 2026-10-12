@@ -12,45 +12,40 @@ namespace Bucks {
 /**
  * @file bip_custom.h
  *
- * ⚠️ Compatibility wrapper.
- * Canonical implementation: BIP-8192
+ * Compatibility wrapper around the Bucks Mnemonic v2 API (bip_8192.h).
+ * The wordlist-path arguments are ignored: lists are always loaded from the
+ * manifest directory (see setWordlistDir / BUCKS_WORDLIST_DIR). New code
+ * should call mnemonicFromEntropy / validateMnemonic / mnemonicToSeed.
  */
 
 /**
- * @deprecated Use bip8192MnemonicFromEntropy directly.
+ * @deprecated Use mnemonicFromEntropy directly.
  */
 inline std::string generateCustomMnemonicFromEntropy(
     const std::vector<uint8_t>& entropy,
     const std::string& /*unused*/
 ) {
-    static constexpr const char* WORDLIST =
-        "wordlists/bip_8192.txt";
-
-    return bip8192MnemonicFromEntropy(entropy, WORDLIST, nullptr);
+    return mnemonicFromEntropy(entropy, "", nullptr);
 }
 
 /**
- * @deprecated Use bip8192ValidateMnemonic directly.
+ * @deprecated Use validateMnemonic directly.
  */
 inline bool validateCustomMnemonic(
     const std::string& mnemonic,
     const std::string& /*unused*/
 ) {
-    static constexpr const char* WORDLIST =
-        "wordlists/bip_8192.txt";
-
-    return bip8192ValidateMnemonic(mnemonic, WORDLIST)
-           == Bip8192Error::OK;
+    return validateMnemonic(mnemonic) == MnemonicError::OK;
 }
 
 /**
- * @deprecated Use bip8192MnemonicToSeed directly.
+ * @deprecated Use mnemonicToSeed directly.
  */
 inline std::vector<uint8_t> mnemonicToSeedCustom(
     const std::string& mnemonic,
     const std::string& passphrase
 ) {
-    return bip8192MnemonicToSeed(mnemonic, passphrase);
+    return mnemonicToSeed(mnemonic, passphrase);
 }
 
 } // namespace Bucks

@@ -100,12 +100,23 @@ function showRestoreStep() { showStep('restore'); }
 
 async function generateNewWallet() {
     try {
-        const response = await fetch(`${API_BASE}/wallets/create`, { method: 'POST' });
+        const mnemonicResponse = await fetch(`${API_BASE}/wallets/mnemonic/generate`);
+        const mnemonicData = await mnemonicResponse.json();
+
+        if (!mnemonicData.success || !mnemonicData.mnemonic) {
+            alert('Failed to generate wallet: ' + (mnemonicData.error || 'No mnemonic returned'));
+            return;
+        }
+
+        const response = await fetch(`${API_BASE}/wallets/restore`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mnemonic: mnemonicData.mnemonic, passphrase: '' })
+        });
         const data = await response.json();
 
         if (data.success) {
-            const mnemonic = data.wallet.mnemonic;
-            displayMnemonic(mnemonic);
+            displayMnemonic(mnemonicData.mnemonic);
             showStep(2);
             loadWallets();
         } else {
@@ -118,6 +129,11 @@ async function generateNewWallet() {
 
 function displayMnemonic(mnemonic) {
     const container = document.getElementById('mnemonicDisplay');
+    if (!container) return;
+    if (typeof mnemonic !== 'string' || mnemonic.trim() === '') {
+        container.innerHTML = '<div class="empty-state">Recovery phrase is not available from this API response.</div>';
+        return;
+    }
     const words = mnemonic.split(' ');
     container.innerHTML = words.map((w, i) => `
         <div class="mnemonic-word"><span>${i + 1}.</span> ${w}</div>

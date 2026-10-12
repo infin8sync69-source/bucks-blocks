@@ -1,6 +1,7 @@
 #include "network.h"
 #include "blockchain.h"
 #include <iostream>
+#include <cerrno>
 #include <cstring>
 #include <sstream>
 #include <algorithm>
@@ -19,6 +20,18 @@
 #endif
 
 namespace Bucks {
+
+// ------------------------------------------------------------
+// Local / LAN address whitelist helper
+// Returns true for addresses that must never be banned:
+//   127.0.0.1, ::1, 192.168.x.x, 10.x.x.x
+// ------------------------------------------------------------
+static bool isLocalAddress(const std::string& ip) {
+    if (ip == "127.0.0.1" || ip == "::1") return true;
+    if (ip.find("192.168.") == 0)          return true;
+    if (ip.find("10.")      == 0)          return true;
+    return false;
+}
 
 // ------------------------------------------------------------
 // NetMessageHeader
@@ -169,6 +182,10 @@ void Peer::misbehavior(int penalty) {
               << " (total: " << misbehaviorScore << ")" << std::endl;
     
     if (misbehaviorScore >= 100) {
+        if (isLocalAddress(ip)) {
+            std::cout << "WARNING: Peer " << ip << " exceeded misbehavior threshold but is a local/LAN address — skipping ban and disconnect." << std::endl;
+            return;
+        }
         std::cout << "DEBUG: Peer " << ip << " exceeded misbehavior threshold. Banning IP." << std::endl;
         network.banIP(ip);
         disconnect();
@@ -571,7 +588,9 @@ void Network::setupListenSocket() {
     if (listenSocket == -1) throw std::runtime_error("Failed to create listen socket");
 
     int opt = 1;
-    setsockopt(listenSocket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
+    if (setsockopt(listenSocket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt)) < 0) {
+        std::cerr << "WARNING: setsockopt SO_REUSEADDR failed: " << strerror(errno) << "\n";
+    }
 
 #ifdef _WIN32
     u_long mode = 1;
@@ -586,7 +605,7 @@ void Network::setupListenSocket() {
     addr.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(listenSocket, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1) {
-        throw std::runtime_error("Failed to bind listen socket on port " + std::to_string(listenPort));
+        throw std::runtime_error("Failed to bind listen socket on port " + std::to_string(listenPort) + ": " + strerror(errno) + " (try: pkill -9 -f bucks_node && sleep 3)");
     }
 
     listen(listenSocket, 10);
@@ -761,6 +780,14 @@ void Network::pruneZombiePeers() {
 }
 
 void Network::banIP(const std::string& ip) {
+    // Bug 1 fix: localhost and LAN peers must never be banned.
+    // All three pilot nodes share 127.0.0.1; banning that address
+    // would cut off the entire local network.
+    if (isLocalAddress(ip)) {
+        std::cout << "WARNING: Refusing to ban local/LAN address " << ip
+                  << " — local peers are whitelisted from the ban list." << std::endl;
+        return;
+    }
     std::lock_guard<std::mutex> lock(securityMutex);
     bannedIPs.insert(ip);
     std::cout << "DEBUG: IP " << ip << " added to ban list." << std::endl;
@@ -831,12 +858,16 @@ void Network::update() {
 // Peer Discovery Implementation (Phase 6)
 
 void Network::loadSeedNodes() {
-    // Hardcoded seed nodes for initial peer discovery
+    // FIX: Production seed nodes — update with actual IPs before mainnet launch
+    //      — Bucks v1 security patch
+    // The old value (127.0.0.1:18333) means every node starts with only localhost
+    // as its peer and can never discover the rest of the network.
     seedNodes = {
-        "127.0.0.1:18333",  // Local seed for testing
-        // Add more seed nodes as needed
+        "us-east.bucks.network:8333",
+        "eu-west.bucks.network:8333",
+        "sg.bucks.network:8333"
     };
-    
+
     std::cout << "DEBUG: Loaded " << seedNodes.size() << " seed nodes" << std::endl;
 }
 
@@ -850,31 +881,39 @@ void Network::discoverPeers() {
     lastDiscoveryTime = now;
     std::cout << "DEBUG: Running peer discovery..." << std::endl;
     
-    // Connect to seed nodes if we have few peers
+    // FIX: Same deadlock fix as handleAddrMessage — Bucks v1 security patch
+    // Collect seed peers to connect under the lock, then connect outside the lock.
+    std::vector<std::pair<std::string, uint16_t>> seedsToConnect;
     {
         std::lock_guard<std::mutex> lock(peersMutex);
         if (peers.size() < 3) {
             for (const auto& seed : seedNodes) {
                 size_t colonPos = seed.find(':');
-                if (colonPos != std::string::npos) {
-                    std::string ip = seed.substr(0, colonPos);
-                    uint16_t port = static_cast<uint16_t>(std::stoi(seed.substr(colonPos + 1)));
-                    
-                    // Check if already connected
-                    bool alreadyConnected = false;
-                    for (const auto& [fd, peer] : peers) {
-                        if (peer->getIP() == ip) {
-                            alreadyConnected = true;
-                            break;
-                        }
-                    }
-                    
-                    if (!alreadyConnected && !isIPBanned(ip)) {
-                        std::cout << "DEBUG: Connecting to seed node " << ip << ":" << port << std::endl;
-                        connectToPeer(ip, port);
-                    }
+                if (colonPos == std::string::npos) continue;
+                std::string ip  = seed.substr(0, colonPos);
+                uint16_t   port = static_cast<uint16_t>(std::stoi(seed.substr(colonPos + 1)));
+
+                bool alreadyConnected = false;
+                for (const auto& [fd, peer] : peers) {
+                    if (peer->getIP() == ip) { alreadyConnected = true; break; }
                 }
+                if (!alreadyConnected && !isIPBanned(ip))
+                    seedsToConnect.emplace_back(ip, port);
             }
+        }
+    }  // peersMutex released
+
+    for (auto& [ip, port] : seedsToConnect) {
+        std::cout << "DEBUG: Connecting to seed node " << ip << ":" << port << std::endl;
+        connectToPeer(ip, port);
+    }
+
+    // FIX: Log clearly if no peers connected after seed attempts — Bucks v1 security patch
+    {
+        std::lock_guard<std::mutex> lock(peersMutex);
+        if (!seedsToConnect.empty() && peers.empty()) {
+            std::cerr << "Cannot connect to Bucks network. "
+                      << "Check your internet connection or run a local node." << std::endl;
         }
     }
     
@@ -891,35 +930,41 @@ void Network::discoverPeers() {
 }
 
 void Network::handleAddrMessage(const std::vector<std::string>& addresses) {
+    // FIX: Deadlock prevention — Bucks v1 security patch
+    // The old code called connectToPeer() while holding peersMutex.
+    // connectToPeer() also acquires peersMutex → deadlock → node hangs.
+    // Fix: collect the (ip, port) pairs to connect inside the mutex, release the
+    // lock, then call connectToPeer() for each pair outside the critical section.
     std::cout << "DEBUG: Received " << addresses.size() << " peer addresses" << std::endl;
-    
-    for (const auto& addr : addresses) {
-        // Add to known peers
+
+    for (const auto& addr : addresses)
         knownPeers.insert(addr);
-        
-        // Try to connect to new peers if we have capacity
+
+    std::vector<std::pair<std::string, uint16_t>> toConnect;
+    {
         std::lock_guard<std::mutex> lock(peersMutex);
-        if (peers.size() < MAX_PEERS / 2) {  // Keep some slots for inbound
+        for (const auto& addr : addresses) {
+            if (peers.size() + toConnect.size() >= MAX_PEERS / 2) break;
+
             size_t colonPos = addr.find(':');
-            if (colonPos != std::string::npos) {
-                std::string ip = addr.substr(0, colonPos);
-                uint16_t port = static_cast<uint16_t>(std::stoi(addr.substr(colonPos + 1)));
-                
-                // Check if already connected
-                bool alreadyConnected = false;
-                for (const auto& [fd, peer] : peers) {
-                    if (peer->getIP() == ip) {
-                        alreadyConnected = true;
-                        break;
-                    }
-                }
-                
-                if (!alreadyConnected && !isIPBanned(ip)) {
-                    std::cout << "DEBUG: Connecting to discovered peer " << ip << ":" << port << std::endl;
-                    connectToPeer(ip, port);
-                }
+            if (colonPos == std::string::npos) continue;
+
+            std::string ip  = addr.substr(0, colonPos);
+            uint16_t   port = static_cast<uint16_t>(std::stoi(addr.substr(colonPos + 1)));
+
+            bool alreadyConnected = false;
+            for (const auto& [fd, peer] : peers) {
+                if (peer->getIP() == ip) { alreadyConnected = true; break; }
             }
+
+            if (!alreadyConnected && !isIPBanned(ip))
+                toConnect.emplace_back(ip, port);
         }
+    }  // peersMutex released before any connectToPeer() call
+
+    for (auto& [ip, port] : toConnect) {
+        std::cout << "DEBUG: Connecting to discovered peer " << ip << ":" << port << std::endl;
+        connectToPeer(ip, port);
     }
 }
 

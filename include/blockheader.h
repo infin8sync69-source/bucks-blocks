@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "crypto.h"
+#include "serialize.h"
 
 namespace Bucks {
 
@@ -29,10 +30,14 @@ struct BlockHeader {
     BlockHeader();
 
     /**
-     * Serialize header into canonical byte form (80 bytes)
+     * Serialize header into canonical byte form (exactly 84 bytes).
      * Used for hashing and network transmission.
      */
     std::vector<uint8_t> serialize() const;
+
+    /** Parse exactly 84 bytes; throws ParseError otherwise. */
+    static BlockHeader deserialize(const std::vector<uint8_t>& data);
+    static BlockHeader parse(Reader& r);
 
     /**
      * Double-SHA256 hash of the serialized header.

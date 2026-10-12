@@ -5,6 +5,7 @@
 #include <cstdint>
 #include "blockheader.h"
 #include "transaction.h"
+#include "merkle.h"
 
 namespace Bucks {
 
@@ -21,7 +22,6 @@ public:
 
     Block();
     Block(const BlockHeader& hdr, const std::vector<Transaction>& txs);
-    Block(uint32_t height, const Hash256& prevHash, const std::vector<Transaction>& txs); // convenience
 
     // ---- Hashing ----
     /**
@@ -31,12 +31,10 @@ public:
 
     // ---- Merkle tree ----
     /**
-     * Compute merkle root from transactions
+     * Compute merkle root from transactions. *mutated (if given) is set when
+     * the transaction list contains a duplicated pair (section 4.6).
      */
-    Hash256 computeMerkleRoot() const;
-
-    // ---- Validation ----
-    bool isValid() const;
+    Hash256 computeMerkleRoot(bool* mutated = nullptr) const;
 
     // ---- Accessors ----
     uint32_t getHeight() const { return header.height; }
@@ -48,18 +46,17 @@ public:
 
     // ---- Serialization ----
     /**
-     * Serialize block to binary format for storage
+     * Wire and disk format (section 4.5): 84-byte header, CompactSize
+     * transaction count, then the transactions back to back. No magic bytes,
+     * no length prefixes.
      */
     std::vector<uint8_t> serialize() const;
-    
+
     /**
-     * Deserialize block from binary format
+     * Throws ParseError. The data length is checked against MAX_BLOCK_SIZE
+     * before anything is parsed; trailing bytes are rejected.
      */
     static Block deserialize(const std::vector<uint8_t>& data);
-
-    // Public fields for compatibility
-    Hash256 hash;
-    uint32_t difficulty;
 };
 
 } // namespace Bucks

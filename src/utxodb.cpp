@@ -167,7 +167,7 @@ std::vector<UTXO> UTXODB::getUTXOsByAddress(const std::string& address) const {
     std::vector<UTXO> result;
     std::lock_guard<std::mutex> lock(mtx);
 
-    const char* sql = "SELECT txid, vout, amount, script FROM utxos";
+    const char* sql = "SELECT txid, vout, amount, script, is_coinbase, height FROM utxos";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         return result;
@@ -203,6 +203,8 @@ std::vector<UTXO> UTXODB::getUTXOsByAddress(const std::string& address) const {
                 utxo.outpoint.index = vout;
                 utxo.amount = amount;
                 utxo.scriptPubKey = script;
+                utxo.isCoinbase = (sqlite3_column_int(stmt, 4) != 0);
+                utxo.height = sqlite3_column_int(stmt, 5);
                 result.push_back(utxo);
             }
         }

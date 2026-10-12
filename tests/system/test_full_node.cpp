@@ -9,7 +9,9 @@ namespace fs = std::filesystem;
 
 class FullNodeSystemTest : public ::testing::Test {
 protected:
-    std::string testDir = "system_test_data";
+    // Temp dir, never the CWD: the server writes its wallet file and cookie
+    // into the configured data directory.
+    std::string testDir = (fs::temp_directory_path() / "bucks-test-full-node").string();
 
     void SetUp() override {
         if (fs::exists(testDir)) fs::remove_all(testDir);
@@ -24,36 +26,43 @@ protected:
 TEST_F(FullNodeSystemTest, StartupAndMineBlock) {
     // 1. Initialize Blockchain
     Bucks::Blockchain chain(testDir + "/utxo.db", testDir + "/blocks.db");
-    
+
     // 2. Configure Server (Full Node mode)
     Bucks::ServerConfig config;
-    config.port = 8092; 
+    config.port = 0; // any free port
     config.maxWorkers = 2;
     config.enableLogging = false;
-    
+    config.dataDir = testDir + "/data";
+    config.legacyWalletFile.clear();
+    config.webRoot = testDir + "/web";
+    config.apiToken = "full-node-test-token";
+
     // 3. Start Server
     Bucks::Server server(chain, nullptr, config);
     ASSERT_TRUE(server.start());
-    
+    ASSERT_GT(server.port(), 0);
+
     // 4. Create a wallet and add it (needed for mining rewards)
     Bucks::Wallet minerWallet;
     minerWallet.generateKeys();
-    server.addWallet(minerWallet);
-    
+    EXPECT_TRUE(server.addWallet(minerWallet));
+    EXPECT_TRUE(fs::exists(config.dataDir + "/wallets.json"));
+
     // 5. Simulate Mining (if API allows internal call or we simulate via generic method)
-    // Server has private `mineBlock` but exposed via API. 
+    // Server has private `mineBlock` but exposed via API.
     // We can also interact via Blockchain directly to see if it accepts a block?
     // Or we can just check if it stays up and chain is accessible.
-    
+
     // Let's verify initial state
     EXPECT_EQ(chain.height(), 0);
-    
+
     // Wait a bit to ensure threads are active
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    
+
     // Validation: Server is running
     EXPECT_TRUE(server.running());
-    
+
     // 6. Stop
     server.stop();
+    EXPECT_FALSE(server.running());
 }

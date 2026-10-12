@@ -1,6 +1,8 @@
 #include "validation.h"
 #include "blockdb.h"
+#include "sighash.h"
 #include <iostream>
+#include <limits>
 
 namespace Bucks {
 namespace Validation {
@@ -18,12 +20,36 @@ bool checkTransactionBasic(
         return false;
     }
 
-    if (tx.inputs.size() > MAX_TX_INPUTS) {
+    for (size_t i = 0; i < tx.inputs.size(); ++i) {
+        for (size_t j = i + 1; j < tx.inputs.size(); ++j) {
+            if (tx.inputs[i].prevTxid == tx.inputs[j].prevTxid &&
+                tx.inputs[i].prevIndex == tx.inputs[j].prevIndex) {
+                error = ValidationError::TX_DUPLICATE_INPUT;
+                return false;
+            }
+        }
+    }
+
+    uint64_t totalOut = 0;
+    for (const auto& out : tx.outputs) {
+        if ((out.amount == 0 && !parseNullData(out.scriptPubKey)) ||
+            out.amount > Consensus::MAX_MONEY) {
+            error = ValidationError::TX_INVALID_OUTPUT_VALUE;
+            return false;
+        }
+        if (totalOut > Consensus::MAX_MONEY - out.amount) {
+            error = ValidationError::TX_OUTPUT_OVERFLOW;
+            return false;
+        }
+        totalOut += out.amount;
+    }
+
+    if (tx.inputs.size() > Consensus::MAX_TX_INPUTS) {
         std::cerr << "DEBUG: Transaction has too many inputs: " << tx.inputs.size() << std::endl;
         error = ValidationError::TX_TOO_LARGE;
         return false;
     }
-    if (tx.outputs.size() > MAX_TX_OUTPUTS) {
+    if (tx.outputs.size() > Consensus::MAX_TX_OUTPUTS) {
         std::cerr << "DEBUG: Transaction has too many outputs: " << tx.outputs.size() << std::endl;
         error = ValidationError::TX_TOO_LARGE;
         return false;
@@ -38,23 +64,8 @@ bool checkTransactionBasic(
         }
     }
     
-    for (const auto& w : tx.witnesses) {
-        if (w.stack.size() > 100) {
-            std::cerr << "DEBUG: witness stack too deep: " << w.stack.size() << " items" << std::endl;
-            error = ValidationError::TX_TOO_LARGE;
-            return false;
-        }
-        for (const auto& item : w.stack) {
-            if (item.size() > 520) {
-                std::cerr << "DEBUG: witness item too large: " << item.size() << " bytes" << std::endl;
-                error = ValidationError::TX_TOO_LARGE;
-                return false;
-            }
-        }
-    }
-
-    size_t size = tx.serialize(true).size();
-    if (size > MAX_TX_SIZE) {
+    size_t size = tx.serialize().size();
+    if (size > Consensus::MAX_TX_SIZE) {
         std::cerr << "DEBUG: Transaction is too large: " << size << " bytes" << std::endl;
         error = ValidationError::TX_TOO_LARGE;
         return false;
@@ -74,6 +85,9 @@ bool checkBlockProofOfWork(
     uint32_t mantissa = header.bits & 0x00ffffff;
 
     if (exponent > 0x20 || mantissa > 0x00ffffff) {
+        std::cerr << "DEBUG: Block validation failed: Proof-of-work bits out of range"
+                  << " (bits=0x" << std::hex << header.bits << std::dec
+                  << ", height=" << header.height << ")" << std::endl;
         error = ValidationError::INVALID_POW;
         return false;
     }
@@ -83,6 +97,9 @@ bool checkBlockProofOfWork(
     uint32_t zeroBytes = 0x20 - exponent;
     for (uint32_t i = 0; i < zeroBytes; ++i) {
         if (hash[i] != 0) {
+            std::cerr << "DEBUG: Block validation failed: Proof-of-work check fails"
+                      << " (hash prefix non-zero at byte " << i
+                      << ", height=" << header.height << ")" << std::endl;
             error = ValidationError::INVALID_POW;
             return false;
         }
@@ -100,6 +117,10 @@ bool checkBlockProofOfWork(
         }
 
         if (hashVal > mantissa) {
+            std::cerr << "DEBUG: Block validation failed: Proof-of-work check fails"
+                      << " (hashVal=0x" << std::hex << hashVal
+                      << " > mantissa=0x" << mantissa << std::dec
+                      << ", height=" << header.height << ")" << std::endl;
             error = ValidationError::INVALID_POW;
             return false;
         }
@@ -115,16 +136,26 @@ bool checkBlockHeader(
     ValidationError& error
 ) {
     if (header.version == 0) {
+        std::cerr << "DEBUG: Block validation failed: Invalid block version"
+                  << " (version=0, height=" << header.height << ")" << std::endl;
         error = ValidationError::INVALID_VERSION;
         return false;
     }
     // BIP-113: Median Time Past
     if (header.timestamp <= medianTimePast) {
+        std::cerr << "DEBUG: Block validation failed: Timestamp before median of last 11 blocks"
+                  << " (timestamp=" << header.timestamp
+                  << ", medianTimePast=" << medianTimePast
+                  << ", height=" << header.height << ")" << std::endl;
         error = ValidationError::INVALID_TIMESTAMP;
         return false;
     }
     // Future time limit (2 hours)
     if (header.timestamp > currentTime + 7200) {
+        std::cerr << "DEBUG: Block validation failed: Timestamp too far in future"
+                  << " (timestamp=" << header.timestamp
+                  << ", currentTime=" << currentTime
+                  << ", height=" << header.height << ")" << std::endl;
         error = ValidationError::INVALID_TIMESTAMP;
         return false;
     }
@@ -136,6 +167,8 @@ bool checkMerkleRoot(
     ValidationError& error
 ) {
     if (block.computeMerkleRoot() != block.header.merkleRoot) {
+        std::cerr << "DEBUG: Block validation failed: Merkle root mismatch"
+                  << " (height=" << block.header.height << ")" << std::endl;
         error = ValidationError::INVALID_MERKLE_ROOT;
         return false;
     }
@@ -146,43 +179,34 @@ bool checkTransactionInputs(
     const Transaction& tx,
     const UTXODB& utxoDB,
     uint64_t currentHeight,
+    const Hash256& genesisHash,
     ValidationError& error
 ) {
     if (tx.isCoinbase()) return true;
 
-    uint64_t totalIn = 0;
+    // Look up every spent output first: the signature hash commits to all of
+    // them (docs/design/consensus-validation.md section 5.1).
+    std::vector<UTXO> coins(tx.inputs.size());
+    std::vector<SpentOutput> spent(tx.inputs.size());
     for (size_t i = 0; i < tx.inputs.size(); ++i) {
         const auto& in = tx.inputs[i];
         OutPoint op{in.prevTxid, in.prevIndex};
-        UTXO utxo;
-        if (!utxoDB.get(op, utxo)) {
+        if (!utxoDB.get(op, coins[i])) {
+            std::cerr << "DEBUG: Block validation failed: Transaction input references missing UTXO"
+                      << " (prevIndex=" << in.prevIndex
+                      << ", height=" << currentHeight << ")" << std::endl;
             error = ValidationError::TX_MISSING_UTXO;
             return false;
         }
+        spent[i] = SpentOutput{coins[i].amount, coins[i].scriptPubKey};
+    }
+    SigHashCache sigCache(tx, spent);
 
-        // 1. Ownership Check (P2PKH)
-        // scriptPubKey: DUP HASH160 <20-byte-hash> EQUALVERIFY CHECKSIG
-        if (utxo.scriptPubKey.size() == 25 && 
-            utxo.scriptPubKey[0] == 0x76 && utxo.scriptPubKey[1] == 0xa9 &&
-            utxo.scriptPubKey[2] == 0x14 && utxo.scriptPubKey[23] == 0x88 &&
-            utxo.scriptPubKey[24] == 0xac) 
-        {
-            Hash160 providedPubkeyHash = hash160(in.pubKey);
-            bool match = true;
-            for (int k = 0; k < 20; ++k) {
-                if (providedPubkeyHash[k] != utxo.scriptPubKey[3 + k]) {
-                    match = false;
-                    break;
-                }
-            }
-            if (!match) {
-                std::cerr << "DEBUG: Ownership check FAILED! Signer is not the owner of UTXO " << i << std::endl;
-                error = ValidationError::INVALID_SIGNATURE; // Or a specific OWNERSHIP_ERROR
-                return false;
-            }
-        }
+    uint64_t totalIn = 0;
+    for (size_t i = 0; i < tx.inputs.size(); ++i) {
+        const UTXO& utxo = coins[i];
 
-        // 2. Coinbase Maturity Check
+        // 1. Coinbase Maturity Check
         if (utxo.isCoinbase) {
             if (currentHeight < utxo.height + Consensus::COINBASE_MATURITY) {
                 std::cerr << "DEBUG: Coinbase maturity check FAILED! Height: " << currentHeight << " required: " << utxo.height + 100 << std::endl;
@@ -192,7 +216,10 @@ bool checkTransactionInputs(
         }
 
         // 3. Signature Check
-        if (!tx.verifyInput(i)) {
+        SpendError spendErr = verifyP2PKHInput(tx, uint32_t(i), sigCache, spent[i], genesisHash);
+        if (spendErr != SpendError::OK) {
+            std::cerr << "DEBUG: Block validation failed: " << spendErrorCode(spendErr) << " on input " << i
+                      << " (height=" << currentHeight << ")" << std::endl;
             error = ValidationError::INVALID_SIGNATURE;
             return false;
         }
@@ -203,6 +230,9 @@ bool checkTransactionInputs(
     // 3. Value Integrity
     uint64_t totalOut = tx.totalOutput();
     if (totalIn < totalOut) {
+        std::cerr << "DEBUG: Block validation failed: Transaction inputs (" << totalIn
+                  << ") less than outputs (" << totalOut
+                  << ") (height=" << currentHeight << ")" << std::endl;
         error = ValidationError::TX_INPUT_VALUE_LESS_THAN_OUTPUT;
         return false;
     }
@@ -217,16 +247,22 @@ bool checkBlock(
     uint64_t currentHeight,
     uint32_t medianTimePast,
     uint32_t expectedBits,
+    const Hash256& genesisHash,
     ValidationError& error
 ) {
     // 1. Header checks
     if (!checkBlockHeader(block.header, std::time(nullptr), medianTimePast, error)) return false;
     if (!checkBlockProofOfWork(block.header, error)) return false;
     if (block.header.prevBlockHash != prevHeader.hash()) {
+        std::cerr << "DEBUG: Block validation failed: Previous block hash mismatch"
+                  << " (height=" << block.header.height << ")" << std::endl;
         error = ValidationError::INVALID_PREV_BLOCK;
         return false;
     }
     if (block.header.height != prevHeader.height + 1) {
+        std::cerr << "DEBUG: Block validation failed: Block height mismatch"
+                  << " (expected=" << (prevHeader.height + 1)
+                  << ", got=" << block.header.height << ")" << std::endl;
         error = ValidationError::INVALID_VERSION; // height mismatch
         return false;
     }
@@ -241,15 +277,21 @@ bool checkBlock(
     // 2. Structural checks
     if (!checkMerkleRoot(block, error)) return false;
     if (block.transactions.empty()) {
+        std::cerr << "DEBUG: Block validation failed: Empty block (no transactions"
+                  << ", height=" << block.header.height << ")" << std::endl;
         error = ValidationError::EMPTY_BLOCK;
         return false;
     }
     if (!block.transactions[0].isCoinbase()) {
+        std::cerr << "DEBUG: Block validation failed: First transaction is not a coinbase"
+                  << " (height=" << block.header.height << ")" << std::endl;
         error = ValidationError::INVALID_COINBASE;
         return false;
     }
     for (size_t i = 1; i < block.transactions.size(); ++i) {
         if (block.transactions[i].isCoinbase()) {
+            std::cerr << "DEBUG: Block validation failed: Multiple coinbase transactions"
+                      << " (tx index=" << i << ", height=" << block.header.height << ")" << std::endl;
             error = ValidationError::MULTIPLE_COINBASE;
             return false;
         }
@@ -262,7 +304,7 @@ bool checkBlock(
     // First pass: Basic sanity + SigOps (Cheap)
     for (const auto& tx : block.transactions) {
         if (!checkTransactionBasic(tx, error)) return false;
-        totalBlockSize += tx.serialize(true).size();
+        totalBlockSize += tx.serialize().size();
         
         // Count SigOps
         for (const auto& out : tx.outputs) {
@@ -274,6 +316,10 @@ bool checkBlock(
     }
 
     if (totalBlockSize > Consensus::MAX_BLOCK_SIZE) {
+        std::cerr << "DEBUG: Block validation failed: Block size exceeds limit"
+                  << " (size=" << totalBlockSize
+                  << ", limit=" << Consensus::MAX_BLOCK_SIZE
+                  << ", height=" << block.header.height << ")" << std::endl;
         error = ValidationError::BLOCK_TOO_LARGE;
         return false;
     }
@@ -283,9 +329,82 @@ bool checkBlock(
         return false;
     }
 
-    // Second pass: Stateful checks (Expensive - Signatures)
+    uint64_t totalFees = 0;
+    std::vector<OutPoint> spentInBlock;
+
+    for (size_t txIndex = 1; txIndex < block.transactions.size(); ++txIndex) {
+        const Transaction& tx = block.transactions[txIndex];
+        uint64_t totalIn = 0;
+        for (const auto& in : tx.inputs) {
+            OutPoint op{in.prevTxid, in.prevIndex};
+            for (const auto& spent : spentInBlock) {
+                if (spent == op) {
+                    std::cerr << "DEBUG: Block validation failed: Double spend detected within block"
+                              << " (txIndex=" << txIndex
+                              << ", height=" << block.header.height << ")" << std::endl;
+                    error = ValidationError::TX_ALREADY_SPENT;
+                    return false;
+                }
+            }
+
+            UTXO utxo;
+            if (!utxoDB.get(op, utxo)) {
+                std::cerr << "DEBUG: Block validation failed: Transaction references missing UTXO"
+                          << " (txIndex=" << txIndex
+                          << ", height=" << block.header.height << ")" << std::endl;
+                error = ValidationError::TX_MISSING_UTXO;
+                return false;
+            }
+            if (totalIn > std::numeric_limits<uint64_t>::max() - utxo.amount) {
+                std::cerr << "DEBUG: Block validation failed: Input value overflow"
+                          << " (txIndex=" << txIndex
+                          << ", height=" << block.header.height << ")" << std::endl;
+                error = ValidationError::TX_OUTPUT_OVERFLOW;
+                return false;
+            }
+            totalIn += utxo.amount;
+            spentInBlock.push_back(op);
+        }
+
+        uint64_t totalOut = tx.totalOutput();
+        if (totalIn < totalOut) {
+            std::cerr << "DEBUG: Block validation failed: Invalid transaction"
+                      << " (inputs=" << totalIn << " < outputs=" << totalOut
+                      << ", txIndex=" << txIndex
+                      << ", height=" << block.header.height << ")" << std::endl;
+            error = ValidationError::TX_INPUT_VALUE_LESS_THAN_OUTPUT;
+            return false;
+        }
+        if (totalFees > Consensus::MAX_MONEY - (totalIn - totalOut)) {
+            std::cerr << "DEBUG: Block validation failed: Total fees overflow"
+                      << " (txIndex=" << txIndex
+                      << ", height=" << block.header.height << ")" << std::endl;
+            error = ValidationError::TX_OUTPUT_OVERFLOW;
+            return false;
+        }
+        totalFees += totalIn - totalOut;
+    }
+
+    uint64_t subsidy = Consensus::INITIAL_SUBSIDY;
+    subsidy >>= (block.header.height / Consensus::HALVING_INTERVAL);
+    uint64_t maxCoinbase = subsidy;
+    if (maxCoinbase > Consensus::MAX_MONEY - totalFees) {
+        error = ValidationError::TX_OUTPUT_OVERFLOW;
+        return false;
+    }
+    maxCoinbase += totalFees;
+    if (block.transactions[0].totalOutput() > maxCoinbase) {
+        std::cerr << "DEBUG: Block validation failed: Coinbase reward too large"
+                  << " (coinbaseOut=" << block.transactions[0].totalOutput()
+                  << ", maxAllowed=" << maxCoinbase
+                  << ", height=" << block.header.height << ")" << std::endl;
+        error = ValidationError::TX_INVALID_OUTPUT_VALUE;
+        return false;
+    }
+
+    // Third pass: Stateful checks (Expensive - Signatures)
     for (const auto& tx : block.transactions) {
-        if (!checkTransactionInputs(tx, utxoDB, currentHeight, error)) return false;
+        if (!checkTransactionInputs(tx, utxoDB, currentHeight, genesisHash, error)) return false;
     }
 
     return true;
@@ -299,6 +418,7 @@ bool connectBlock(
     const Block& block,
     UTXODB& utxoDB,
     BlockDB* blockDB,
+    const Hash256& genesisHash,
     ValidationError& error
 ) {
     // Basic structural checks
@@ -325,7 +445,7 @@ bool connectBlock(
             utxoDB.rollbackTransaction();
             return false;
         }
-        if (!checkTransactionInputs(tx, utxoDB, block.header.height, error)) {
+        if (!checkTransactionInputs(tx, utxoDB, block.header.height, genesisHash, error)) {
             std::cerr << "DEBUG: Transaction " << txIndex << " failed stateful validation (Error: " << (int)error << ")" << std::endl;
             utxoDB.rollbackTransaction();
             return false;
@@ -354,6 +474,8 @@ bool connectBlock(
 
         // Create new outputs (for both coinbase and regular tx)
         for (size_t i = 0; i < tx.outputs.size(); ++i) {
+            // NULL_DATA outputs carry data only and never enter the UTXO set.
+            if (parseNullData(tx.outputs[i].scriptPubKey)) continue;
             OutPoint op{tx.txid(), static_cast<uint32_t>(i)};
             UTXO utxo;
             utxo.outpoint = op;

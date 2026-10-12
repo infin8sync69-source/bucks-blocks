@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <memory>
 #include <fstream>
+#include <functional>
 
 #include "blockchain.h"
 #include "wallet.h"
@@ -32,6 +33,7 @@ public:
 
     bool allowRequest(const std::string& key);
     void cleanup();
+    size_t trackedKeys() const;
 
 private:
     size_t maxRequests;
@@ -40,28 +42,68 @@ private:
         std::string,
         std::deque<std::chrono::steady_clock::time_point>
     > history;
+    size_t callsSinceCleanup = 0;
 
-    std::mutex mutex;
+    mutable std::mutex mutex;
 };
 
 // ------------------------------------------------------------
 // Server configuration (NON-CONSENSUS)
 // ------------------------------------------------------------
 struct ServerConfig {
-    uint16_t port = 8080;
-    size_t maxWorkers = 0;
-    size_t maxRequestSize = 1024 * 1024;
+    uint16_t port = 8080;                 // 0 = any free port (see Server::port())
+    size_t maxWorkers = 0;                // 0 = httplib default thread pool
+    size_t maxRequestSize = 1024 * 1024;  // request body limit (bytes)
     bool enableRateLimit = true;
     size_t rateLimitRequests = 100;
     std::chrono::seconds rateLimitWindow{60};
-    bool enableCORS = true;
     bool enableLogging = true;
     std::string webRoot = "web";
-    
+    std::string bindAddress = "127.0.0.1";
+
+    // ---- Data directory (wallet file, API cookie) ----
+    // "" = Server::defaultDataDir() (~/.bucks). Created with mode 0700.
+    std::string dataDir;
+    // Pre-datadir wallet file. Read once, never written (see loadWallets()).
+    std::string legacyWalletFile = "wallets.json";
+
+    // ---- Authentication ----
+    // Token precedence: apiToken (argv) > apiTokenFile > $BUCKS_API_TOKEN >
+    // a random token generated at start and written to <dataDir>/.cookie.
+    std::string apiToken;
+    std::string apiTokenFile;
+    std::chrono::seconds sessionLifetime{12 * 3600};
+    // Exact origins (scheme://host[:port]) that may call the API cross-origin.
+    // Empty = no Access-Control-Allow-Origin header at all.
+    std::vector<std::string> corsOrigins;
+    // Extra Host header values accepted besides loopback and bindAddress.
+    std::vector<std::string> allowedHosts;
+    // Key the rate limiter on X-Forwarded-For (only behind a trusted proxy).
+    bool trustProxy = false;
+    // Sent on every response. The default is what the in-browser-Babel UI in
+    // web/ needs; a bundled UI (frontend/dist) can drop unpkg and
+    // 'unsafe-inline' for scripts.
+    std::string contentSecurityPolicy =
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
+        "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'";
+
     // IPFS Integration
     bool enableIPFS = false;
     uint16_t ipfsPort = 5001;
 };
+
+/**
+ * Domain-separated hash for /api/wallets/sign:
+ *   doubleSha256(varstr("Bucks Signed Message:\n") || varstr(message))
+ * A signature over this hash can never be mistaken for a transaction
+ * signature (those are over serialized transactions).
+ */
+Hash256 signedMessageHash(const std::string& message);
 
 // ------------------------------------------------------------
 // HTTP / REST / WebSocket Server
@@ -80,8 +122,24 @@ public:
     void stop();
     bool running() const;
 
-    // Optional wallet management
-    void addWallet(const Wallet& wallet);
+    // Port actually bound (differs from config.port when that is 0).
+    int port() const { return boundPort; }
+
+    // ~/.bucks (POSIX) or %APPDATA%\Bucks (Windows).
+    static std::string defaultDataDir();
+    const std::string& dataDir() const { return dataDirPath; }
+    const std::string& walletFile() const { return walletFilePath; }
+    // Path of the generated API token, "" when the token came from config/env.
+    const std::string& cookieFile() const { return cookieFilePath; }
+
+    // False when wallets.json could not be read; the file is then never
+    // rewritten and every wallet route answers 503 with walletError().
+    bool walletsEnabled() const;
+    std::string walletError() const;
+
+    // Optional wallet management. addWallet returns false (and keeps the
+    // wallet in memory only) if the file could not be written.
+    bool addWallet(const Wallet& wallet);
     std::vector<Wallet> getWallets() const;
 
     // WebSocket Notifications
@@ -96,10 +154,29 @@ private:
     // ---- Wallets (optional module) ----
     std::vector<Wallet> wallets;
     mutable std::mutex walletMutex;
+    std::string dataDirPath;
+    std::string walletFilePath;
+    nlohmann::json walletDoc;          // on-disk document; unknown fields kept
+    bool walletOk = false;
+    std::string walletErr;
+    bool walletFromLegacy = false;     // loaded from config.legacyWalletFile
+    bool walletBackupDone = false;     // one .bak per process before a rewrite
+
+    // ---- Authentication ----
+    std::string apiToken;
+    bool tokenGenerated = false;
+    std::string cookieFilePath;
+    std::string startupError;          // set in the constructor, fails start()
+    struct Session {
+        std::chrono::steady_clock::time_point expiresAt;
+    };
+    std::unordered_map<std::string, Session> sessions;
+    std::mutex sessionMutex;
 
     // ---- Server state ----
     std::atomic<bool> isRunning;
     std::unique_ptr<std::thread> serverThread;
+    int boundPort = -1;
 
     // ---- Auto-mining ----
     std::atomic<bool> autoMining{false};
@@ -108,15 +185,15 @@ private:
     std::atomic<uint64_t> hashesPerSecond{0};
     std::string minerAddress;
 
-    // httplib server instance (pointer to avoid including implementation in header if possible, 
+    // httplib server instance (pointer to avoid including implementation in header if possible,
     // but httplib is header-only so we can't easily forward declare 'Server' without the header.
-    // For simplicity in this single-header plan, we'll use void* and cast it in cpp, 
-    // OR include httplib.h here. 
+    // For simplicity in this single-header plan, we'll use void* and cast it in cpp,
+    // OR include httplib.h here.
     // Better approach to keep header clean: Pimpl idiom or just void* since it's an internal detail.
-    // However, to avoid complexity with void* casting everywhere, let's include httplib.h in the .cpp 
+    // However, to avoid complexity with void* casting everywhere, let's include httplib.h in the .cpp
     // and use a unique_ptr to a wrapper struct or just void*.
     // actually, let's just use void* for the server instance to avoid including the massive httplib.h in server.h
-    void* svr; 
+    void* svr;
 
     // ---- WebSocket ----
     std::mutex wsMutex;
@@ -133,8 +210,23 @@ private:
 
     // ---- API endpoints (Implementation helpers) ----
     void setupRoutes();
-    void mineBlock(const std::string& body, std::function<void(const std::string&, const std::string&)> response);
+    int mineBlock(const std::string& body, nlohmann::json& out);
     void handleEconomyStatus(std::function<void(const std::string&)> response);
+
+    // ---- Auth helpers ----
+    enum class AuthKind { None, Token, Cookie };
+    bool resolveApiToken();
+    bool tokenMatches(const std::string& presented) const;
+    static bool isPublicRoute(const std::string& path, const std::string& method);
+    AuthKind authenticate(const std::string& authorization,
+                          const std::string& apiTokenHeader,
+                          const std::string& cookieHeader);
+    bool hostAllowed(const std::string& hostHeader) const;
+    bool originAllowed(const std::string& origin) const;
+    bool corsOriginAllowed(const std::string& origin) const;
+    std::string createSession();
+    bool validateSession(const std::string& id);
+    void destroySession(const std::string& id);
 
     // ---- Auto-mining control ----
 public:
@@ -152,8 +244,9 @@ private:
     nlohmann::json txToJSON(const Transaction& tx) const;
 
     // ---- Wallet persistence ----
-    void saveWallets() const;
+    bool saveWalletsLocked();          // caller holds walletMutex
     void loadWallets();
+    bool loadWalletDocument(const std::string& path, bool legacy);
 };
 
 } // namespace Bucks

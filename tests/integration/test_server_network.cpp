@@ -19,7 +19,9 @@ namespace fs = std::filesystem;
 
 class ServerNetworkTest : public ::testing::Test {
 protected:
-    std::string testDir = "test_server_data";
+    // Temp dir, never the CWD: the server writes its wallet file and cookie
+    // into the configured data directory.
+    std::string testDir = (fs::temp_directory_path() / "bucks-test-server-network").string();
 
     void SetUp() override {
         if (fs::exists(testDir)) fs::remove_all(testDir);
@@ -80,19 +82,21 @@ std::string sendHttpRequest(int port, const std::string& path) {
 TEST_F(ServerNetworkTest, ServerStartupAndApiResponse) {
     Bucks::Blockchain chain(testDir + "/utxo.db", testDir + "/blocks.db");
     Bucks::ServerConfig config;
-    config.port = 8091; // Use non-default port
+    config.port = 0; // any free port
     config.enableLogging = false;
+    config.dataDir = testDir + "/data";
+    config.legacyWalletFile.clear();
+    config.webRoot = testDir + "/web";
+    config.apiToken = "server-network-test-token";
 
     Bucks::Server server(chain, nullptr, config);
     bool started = server.start();
     ASSERT_TRUE(started);
-
-    // Give it a moment to bind/listen
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    ASSERT_GT(server.port(), 0);
 
     // Send request to /metrics or /block/height which serves simple JSON
     // We assume default routing handles GET / (static) or api
-    std::string resp = sendHttpRequest(8091, "/metrics"); // Assuming /metrics exists or just checking connectivity
+    std::string resp = sendHttpRequest(server.port(), "/metrics"); // Assuming /metrics exists or just checking connectivity
 
     // If /metrics doesn't exist, we expect 404 but still a response
     EXPECT_FALSE(resp.empty());
