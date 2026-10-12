@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include "server.h"
-#include "blockchain.h"
+#include "node_harness.h"
 #include <thread>
 #include <chrono>
 #include <filesystem>
@@ -80,7 +80,9 @@ std::string sendHttpRequest(int port, const std::string& path) {
 }
 
 TEST_F(ServerNetworkTest, ServerStartupAndApiResponse) {
-    Bucks::Blockchain chain(testDir + "/utxo.db", testDir + "/blocks.db");
+    Bucks::TestUtil::NodeHarness harness;
+    ASSERT_TRUE(harness.node) << harness.error;
+    Bucks::Node& chain = *harness.node;
     Bucks::ServerConfig config;
     config.port = 0; // any free port
     config.enableLogging = false;

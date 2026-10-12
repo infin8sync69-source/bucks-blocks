@@ -3,8 +3,12 @@ add_executable(integration_tests
     test_server_auth.cpp
     test_wallet_db.cpp
     test_chain_spend.cpp
-    test_network_guard.cpp
     test_chainstate.cpp
+    test_mempool.cpp
+    test_miner.cpp
+    test_chaindb.cpp
+    test_startup.cpp
+    test_p2p.cpp
 )
 
 target_include_directories(integration_tests PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/tests/util)

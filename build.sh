@@ -62,8 +62,8 @@ cc "${OPT_FLAGS[@]}" "${HARDEN_FLAGS[@]}" \
 # plus main for the executable)
 echo "Compiling source files..."
 CPP_SOURCES=(
-    crypto serialize u256 chainparams sighash chain coins undo merkle utxo utxodb blockdb transaction block blockchain validation
-    wallet hd_8192 server network bip_8192 protocol_enc genesis validation_rules gold_rules connect_block chainstate pow mempool
+    crypto serialize u256 chainparams sighash chain coins undo merkle    transaction block  
+    wallet hd_8192 server network bip_8192 protocol_enc genesis validation_rules gold_rules connect_block chainstate chaindb node policy miner pow mempool
     script
     main
 )

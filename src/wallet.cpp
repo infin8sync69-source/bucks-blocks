@@ -1,9 +1,8 @@
 #include "wallet.h"
 #include "crypto.h"
-#include "blockchain.h"
-#include "utxodb.h"
+#include "node.h"
+#include "policy.h"
 #include "transaction.h"
-#include "utxo.h"
 #include "script.h"
 #include "consensus.h"
 #include "bip_8192.h"
@@ -176,7 +175,7 @@ std::string Wallet::getAddress() const {
     requireKeys();
     Hash160 pubKeyHash = hash160(pubKey);
     std::vector<uint8_t> payload(pubKeyHash.begin(), pubKeyHash.end());
-    return base58CheckEncode(0x00, payload); // mainnet prefix
+    return base58CheckEncode(addressVersion_, payload);
 }
 
 // ------------------------------------------------------------
@@ -189,11 +188,10 @@ std::vector<uint8_t> Wallet::getP2PKHScript() const {
     return makeP2PKH(hash160(pubKey));
 }
 
-std::vector<uint8_t> Wallet::addressToP2PKHScript(const std::string& address) {
+std::vector<uint8_t> Wallet::addressToP2PKHScript(const std::string& address, uint8_t version) {
     // Decode Base58Check: returns (version || hash160) or empty on checksum failure
     std::vector<uint8_t> decoded = base58CheckDecode(address);
-    if (decoded.size() != 21 || decoded[0] != 0x00) {
-        // decoded[0] == 0x00: Bucks mainnet P2PKH version byte
+    if (decoded.size() != 21 || decoded[0] != version) {
         throw std::runtime_error("Invalid Bucks address (bad checksum or wrong network)");
     }
 
@@ -208,86 +206,67 @@ std::vector<uint8_t> Wallet::addressToP2PKHScript(const std::string& address) {
 // Transaction helpers
 // ------------------------------------------------------------
 
-Transaction Wallet::createTransaction(const std::string& to, uint64_t amount, Blockchain& chain) const {
+Transaction Wallet::createTransaction(const std::string& to, uint64_t amount, Node& node) const {
     requireKeys();
-    // Fetch UTXOs for this wallet address
-    std::vector<UTXO> utxos = chain.utxo().getUTXOsByAddress(getAddress());
-
-    // Skip coins that cannot be spent in the next block: immature coinbase
-    // outputs and outputs already spent by a pending transaction.
-    {
-        const uint64_t spendHeight = uint64_t(chain.height()) + 1;
-        std::vector<OutPoint> pending;
-        for (const auto& mtx : chain.getMempool())
-            for (const auto& in : mtx.inputs) pending.push_back({in.prevTxid, in.prevIndex});
-        utxos.erase(std::remove_if(utxos.begin(), utxos.end(), [&](const UTXO& u) {
-            if (u.isCoinbase && spendHeight < uint64_t(u.height) + Consensus::COINBASE_MATURITY)
-                return true;
-            return std::find(pending.begin(), pending.end(), u.outpoint) != pending.end();
-        }), utxos.end());
-    }
-
-    if (utxos.empty())
-        throw std::runtime_error("No UTXOs available for this address");
+    // Mature coins that no pending transaction already spends.
+    std::vector<CoinRow> coins = node.spendableCoins(hash160(pubKey), 20000);
+    if (coins.empty())
+        throw std::runtime_error("No spendable coins available for this address");
 
     uint64_t totalAvailable = 0;
-    for (const auto& u : utxos) totalAvailable += u.amount;
-
+    for (const auto& c : coins) totalAvailable += c.coin.amount;
     if (totalAvailable < amount)
         throw std::runtime_error("Insufficient balance");
 
-    // Build inputs
-    std::vector<TransactionInput> inputs;
+    // The recipient first, so a wrong-network address fails before anything else.
+    const std::vector<uint8_t> recipientScript = addressToP2PKHScript(to, addressVersion_);
+
+    // Largest coins first: fewer inputs, smaller transaction, lower fee.
+    std::sort(coins.begin(), coins.end(), [](const CoinRow& a, const CoinRow& b) {
+        return a.coin.amount > b.coin.amount;
+    });
+
+    // Fee: max(100000, size * 100), estimated for the transaction with a change output.
+    auto buildFor = [&](size_t nInputs, uint64_t change, uint64_t& fee) {
+        std::vector<TransactionInput> in;
+        for (size_t i = 0; i < nInputs; ++i) in.emplace_back(coins[i].op.txid, coins[i].op.index);
+        std::vector<TransactionOutput> out;
+        out.emplace_back(amount, recipientScript);
+        if (change) out.emplace_back(change, getP2PKHScript());
+        Transaction t(in, out);
+        // Signed inputs add about 107 bytes of unlock script each.
+        const uint64_t size = t.serialize().size() + 107 * nInputs;
+        fee = std::max<uint64_t>(100000ULL, size * 100ULL);
+        return t;
+    };
+
+    size_t n = 0;
+    uint64_t accumulated = 0, fee = 0;
+    for (;;) {
+        if (n == coins.size()) throw std::runtime_error("Insufficient funds for fee");
+        accumulated += coins[n++].coin.amount;
+        buildFor(n, 1, fee);    // upper estimate
+        if (accumulated >= amount + fee) break;
+    }
+
+    // Change below the dust limit is not worth an output: it goes to the miner.
+    uint64_t change = accumulated - amount - fee;
+    if (change < Policy::DUST_LIMIT) change = 0;
+    Transaction tx = buildFor(n, change, fee);
+
     std::vector<SpentOutput> spent;
-    uint64_t accumulated = 0;
-    for (const auto& u : utxos) {
-        if (accumulated >= amount) break;
-        inputs.emplace_back(u.outpoint.txid, u.outpoint.index);
-        spent.push_back(SpentOutput{u.amount, u.scriptPubKey});
-        accumulated += u.amount;
-    }
-
-    // Build outputs: recipient + change if any
-    std::vector<TransactionOutput> outputs;
-    // Create proper P2PKH script for recipient
-    std::vector<uint8_t> recipientScript = addressToP2PKHScript(to);
-    outputs.emplace_back(amount, recipientScript);
-
-    if (accumulated > amount) {
-        uint64_t change = accumulated - amount;
-        std::vector<uint8_t> changeScript = getP2PKHScript();
-        outputs.emplace_back(change, changeScript);
-    }
-
-    Transaction tx(inputs, outputs);
-
-    // Simple fee: max(100000, size * 100)
-    uint64_t fee = std::max<uint64_t>(100000ULL, tx.serialize().size() * 100ULL);
-    // If accumulated covers amount + fee adjust change
-    if (accumulated < amount + fee) {
-        throw std::runtime_error("Insufficient funds for fee");
-    }
-
-    if (outputs.size() > 1) {
-        uint64_t newChange = accumulated - amount - fee;
-        if (newChange == 0) outputs.pop_back();
-        else outputs.back() = TransactionOutput(newChange, getP2PKHScript());
-        tx = Transaction(inputs, outputs);
-    }
+    for (size_t i = 0; i < n; ++i) spent.push_back(SpentOutput{coins[i].coin.amount, coins[i].coin.scriptPubKey});
 
     // Sign all inputs; never return a transaction with missing signatures
-    if (!signTransaction(tx, spent, chain.genesisHash()))
+    if (!signTransaction(tx, spent, node.params().genesisHash))
         throw std::runtime_error("Failed to sign transaction");
 
     return tx;
 }
 
-uint64_t Wallet::getBalance(Blockchain& chain) const {
+uint64_t Wallet::getBalance(Node& node) const {
     requireKeys();
-    uint64_t total = 0;
-    auto utxos = chain.utxo().getUTXOsByAddress(getAddress());
-    for (const auto& u : utxos) total += u.amount;
-    return total;
+    return node.balance(hash160(pubKey));
 }
 
 bool Wallet::signTransaction(Transaction& tx, const std::vector<SpentOutput>& spent,

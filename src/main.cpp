@@ -1,10 +1,13 @@
 #include <iostream>
+#include <atomic>
+#include <chrono>
 #include <csignal>
+#include <thread>
 #include <string>
 #include <memory>
 #include <vector>
 
-#include "blockchain.h"
+#include "node.h"
 #include "chainparams.h"
 #include "genesis.h"
 #include "network.h"
@@ -12,10 +15,10 @@
 
 using namespace Bucks;
 
-static bool running = true;
+static std::atomic<bool> running{true};   // lock-free: safe to store from a signal handler
 
 void handleSignal(int) {
-    running = false;
+    running.store(false);
 }
 
 static void printUsage() {
@@ -27,7 +30,11 @@ static void printUsage() {
         "  --p2p-port <n>            P2P port (default: per network, 8733 on main)\n"
         "  --connect <ip:port>       connect to a peer\n"
         "  --web-root <dir>          static UI directory (default frontend/dist)\n"
-        "  --datadir <dir>           wallet file and API cookie (default ~/.bucks)\n"
+        "  --datadir <dir>           wallets, API cookie and <network>/chain.sqlite (default ~/.bucks)\n"
+        "  --checkblocks <n>         verify the last n blocks at start (default 24, 0 = all)\n"
+        "  --checkdb[=full]          heavier database checks at start\n"
+        "  --reindex-chainstate      rebuild coins, undo and statistics from the stored blocks\n"
+        "  --reindex                 rebuild the block index from the stored block bytes\n"
         "  --api-bind <addr>         API bind address (default 127.0.0.1)\n"
         "  --api-token-file <file>   read the API token from a file (0600)\n"
         "  --api-token <token>       API token on the command line (visible to other users!)\n"
@@ -63,6 +70,7 @@ int main(int argc, char* argv[]) {
     std::vector<std::string> corsOrigins;
     std::vector<std::string> allowedHosts;
     bool trustProxy = false;
+    LoadOptions loadOptions;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -111,6 +119,16 @@ int main(int argc, char* argv[]) {
              allowedHosts.push_back(argv[++i]);
         } else if (arg == "--trust-proxy") {
              trustProxy = true;
+        } else if (arg == "--checkblocks" && i + 1 < argc) {
+             loadOptions.checkBlocks = static_cast<uint32_t>(std::stoul(argv[++i]));
+        } else if (arg == "--checkdb") {
+             loadOptions.checkTier = 2;
+        } else if (arg == "--checkdb=full") {
+             loadOptions.checkTier = 3;
+        } else if (arg == "--reindex-chainstate") {
+             loadOptions.reindexChainstate = true;
+        } else if (arg == "--reindex") {
+             loadOptions.reindex = true;
         } else if (arg == "--help" || arg == "-h") {
              printUsage();
              return 0;
@@ -137,20 +155,23 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Initialize blockchain state
-    std::unique_ptr<Blockchain> chainPtr;
-    try {
-        chainPtr = std::make_unique<Blockchain>("utxodb.sqlite", "blockchain.db", params);
-    } catch (const std::exception& e) {
-        std::cerr << "FATAL: " << e.what() << "\n";
-        return 3;
+    // Open the chain: <datadir>/<network>/chain.sqlite. Exit codes (storage spec section 4):
+    // 3 parameters/genesis/network mismatch, 4 storage failure, 6 database corrupt, 7 unsupported version.
+    if (dataDir.empty()) dataDir = Server::defaultDataDir();
+    const std::string networkDir = dataDir + "/" + params.name;
+    std::string openError;
+    int openCode = 0;
+    std::unique_ptr<Node> nodePtr = Node::open(networkDir, params, loadOptions, openError, openCode);
+    if (!nodePtr) {
+        std::cerr << "FATAL: " << openError << "\n";
+        return openCode ? openCode : 4;
     }
-    Blockchain& chain = *chainPtr;
-    std::cout << "✓ Blockchain initialized\n";
-    std::cout << "✓ Current height: " << chain.height() << "\n";
+    Node& node = *nodePtr;
+    std::cout << "✓ Chain opened at " << networkDir << "\n";
+    std::cout << "✓ Current height: " << node.height() << "\n";
 
     // Start P2P network
-    Network network(chain);
+    Network network(node);
     network.start(p2pPort);
     std::cout << "✓ P2P network started on port " << p2pPort << "\n";
 
@@ -179,7 +200,7 @@ int main(int argc, char* argv[]) {
         serverConfig.corsOrigins = corsOrigins;
         serverConfig.allowedHosts = allowedHosts;
         serverConfig.trustProxy = trustProxy;
-        server = new Server(chain, &network, serverConfig);
+        server = new Server(node, &network, serverConfig);
         if (!server->start(port)) {
             std::cerr << "✗ Failed to start server\n";
             delete server;
@@ -202,7 +223,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Main loop
-    while (running) {
+    while (running.load()) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
@@ -212,6 +233,7 @@ int main(int argc, char* argv[]) {
         delete server;
     }
     network.stop();
+    node.shutdown();
 
     std::cout << "✓ Node stopped cleanly\n";
     return 0;

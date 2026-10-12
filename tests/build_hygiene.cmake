@@ -66,7 +66,7 @@ endforeach()
 
 # --- deleted symbols must not come back (spec section 12) ---
 file(GLOB_RECURSE guarded_files "${BUCKS_ROOT}/src/*.cpp" "${BUCKS_ROOT}/include/*.h")
-foreach(symbol ScriptInterpreter legacySignatureHash wtxid signInput verifyInput MerkleTree findGenesisNonce makeGenesisBlock createGenesisBlock)
+foreach(symbol ScriptInterpreter legacySignatureHash wtxid signInput verifyInput MerkleTree findGenesisNonce makeGenesisBlock createGenesisBlock UTXODB BlockDB saveGoldReserve checkTransactionBasic checkTransactionInputs workForBits accumWork isValidBlock)
     foreach(f IN LISTS guarded_files)
         if(f MATCHES "/(sqlite3|httplib)\\.")
             continue()

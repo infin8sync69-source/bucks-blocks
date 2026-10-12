@@ -15,7 +15,7 @@
 #include <fstream>
 #include <functional>
 
-#include "blockchain.h"
+#include "node.h"
 #include "wallet.h"
 
 #include <nlohmann/json.hpp>
@@ -111,7 +111,7 @@ Hash256 signedMessageHash(const std::string& message);
 class Network; // Forward declaration
 class Server {
 public:
-    explicit Server(Blockchain& chain,
+    explicit Server(Node& node,
                     Network* network = nullptr,
                     const ServerConfig& cfg = {});
 
@@ -147,8 +147,9 @@ public:
 
 private:
     // ---- Core references (read-heavy, write-light) ----
-    Blockchain& chain;
-    Network* network;
+    Node& node;
+    size_t tipListenerId = 0;
+    size_t txListenerId = 0;
     ServerConfig config;
 
     // ---- Wallets (optional module) ----
@@ -180,6 +181,7 @@ private:
 
     // ---- Auto-mining ----
     std::atomic<bool> autoMining{false};
+    std::atomic<bool> autoMineStop{false};
     std::thread autoMinerThread;
     std::atomic<uint64_t> blocksFound{0};
     std::atomic<uint64_t> hashesPerSecond{0};

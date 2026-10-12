@@ -6,7 +6,7 @@
 // API-13 (constant-time token), API-15 (security headers), Server::start.
 #include <gtest/gtest.h>
 #include "server.h"
-#include "blockchain.h"
+#include "node.h"
 #include "wallet.h"
 #include "crypto.h"
 #include "bip_8192.h"
@@ -73,7 +73,7 @@ std::string cookiePair(const std::string& setCookie) {
 class ServerAuthTest : public ::testing::Test {
 protected:
     std::string dir;
-    std::unique_ptr<Bucks::Blockchain> chain;
+    std::unique_ptr<Bucks::Node> chain;
     Bucks::ServerConfig cfg;
     const std::string token = "test-token-0123456789abcdef0123456789abcdef";
     const httplib::Headers tokenHeader{{"X-API-Token", "test-token-0123456789abcdef0123456789abcdef"}};
@@ -83,7 +83,11 @@ protected:
         ::unsetenv("BUCKS_API_TOKEN");
 #endif
         dir = uniqueTempDir("api");
-        chain = std::make_unique<Bucks::Blockchain>(dir + "/utxo.db", dir + "/blocks.db");
+        std::string chainError;
+        int chainCode = 0;
+        chain = Bucks::Node::open(dir + "/chain", Bucks::chainParams(Bucks::NetworkId::REGTEST), {},
+                                  chainError, chainCode);
+        ASSERT_TRUE(chain) << chainError;
         cfg.port = 0;                                   // random free port
         cfg.enableLogging = false;
         cfg.dataDir = dir + "/data";
@@ -615,8 +619,8 @@ TEST_F(ServerAuthTest, MiningWithIndexDoesNotTouchPrimaryWallet) {
     EXPECT_EQ(chain->height(), heightBefore + 1);
 
     // The reward went to wallet 1 ...
-    const Bucks::Block* tip = chain->tip();
-    ASSERT_NE(tip, nullptr);
+    auto tip = chain->blockByHeight(chain->height());
+    ASSERT_TRUE(tip.has_value());
     ASSERT_FALSE(tip->transactions.empty());
     EXPECT_EQ(tip->transactions[0].outputs[0].scriptPubKey, before[1].getP2PKHScript());
 

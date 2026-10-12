@@ -81,10 +81,26 @@ TEST_F(WalletTest, KnownAnswerAddress) {
     Wallet w = Wallet::fromMnemonic(kat128().phrase);
     EXPECT_EQ(w.getPrivateKeyHex(), "676af76915a054759e7036b909709aaa99e44b7c3fe6f510f982d17172c26b49");
     EXPECT_EQ(w.getPublicKeyHex(), "030ed08e028debe59e06f6de0436e1c3e74c7e26e6a535308b62d8a23561b24d76");
+    // The original known answers use Base58Check version 0; the network versions differ only in that byte.
+    w.setAddressVersion(0x00);
     EXPECT_EQ(w.getAddress(), "1BACHKk8wwxSUpd3ydEQS1tqchCQC62DuN");
     Wallet p = Wallet::fromMnemonic(kat128().phrase, "TREZOR");
     EXPECT_EQ(p.getPrivateKeyHex(), "d0c2407b2616107d727b05c81614364d6cdd3130fb5a686a63e77f1eacb5ff5c");
+    p.setAddressVersion(0x00);
     EXPECT_EQ(p.getAddress(), "187oNyHNSkXHT7yPX7b8Ld4uHeZsPFLZyA");
+
+    // The same key on regtest (0x7F), test (0x41) and main (0x1A): independently computed, and every
+    // network refuses the others' addresses.
+    w.setAddressVersion(0x7F);
+    EXPECT_EQ(w.getAddress(), "tH5oL7bj7roiLsL45uXt1wTkYkvCPq65n5");
+    w.setAddressVersion(0x41);
+    EXPECT_EQ(w.getAddress(), "TL8QHP7s6g5PdzggZtt7xAayXUwiKZ5pzi");
+    w.setAddressVersion(0x1A);
+    EXPECT_EQ(w.getAddress(), "Bdwst9VdQe1Dk6FJcXth3GyHyotvh8j5gh");
+    const std::string mainAddress = w.getAddress();
+    EXPECT_NO_THROW(Wallet::addressToP2PKHScript(mainAddress, 0x1A));
+    EXPECT_THROW(Wallet::addressToP2PKHScript(mainAddress, 0x41), std::runtime_error);
+    EXPECT_THROW(Wallet::addressToP2PKHScript(mainAddress, 0x00), std::runtime_error);
 }
 
 // CRY-11 / API-11: restore validates words and checksum, and never echoes
@@ -127,6 +143,7 @@ TEST_F(WalletTest, FromMnemonicFoldsTypedVariantsAndStoresCanonical) {
     for (size_t p = typed.find("\xD9\x8A"); p != std::string::npos; p = typed.find("\xD9\x8A", p + 2))
         typed.replace(p, 2, "\xDB\x8C");                   // Persian yeh
     Wallet w = Wallet::fromMnemonic("  " + typed + "\n");
+    w.setAddressVersion(0x00);
     EXPECT_EQ(w.getAddress(), "1BACHKk8wwxSUpd3ydEQS1tqchCQC62DuN");
     EXPECT_EQ(w.getMnemonic(), kat128().phrase);           // canonical spelling is stored
 }
@@ -138,6 +155,8 @@ TEST_F(WalletTest, IdenticalKeysFromBothLanguages) {
     setWordlistDir(dir.str());
     Wallet ar = Wallet::fromMnemonic(kat128().phrase);
     Wallet xx = Wallet::fromMnemonic(latinPhrase(kat128().indices));
+    ar.setAddressVersion(0x00);
+    xx.setAddressVersion(0x00);
     EXPECT_EQ(ar.getAddress(), "1BACHKk8wwxSUpd3ydEQS1tqchCQC62DuN");
     EXPECT_EQ(xx.getAddress(), ar.getAddress());
     EXPECT_EQ(xx.getPrivateKeyHex(), ar.getPrivateKeyHex());

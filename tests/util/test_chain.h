@@ -67,6 +67,34 @@ inline Transaction spendTx(const OutPoint& prev, uint64_t prevAmount, int ownerK
     return tx;
 }
 
+// Builds a valid block on `parent`. The header is mined; the coinbase claims
+// exactly the subsidy unless cbAmount is given. `tag` makes competing blocks
+// at the same height produce different coinbases.
+inline Block buildTestBlock(const ChainParams& params, const BlockIndex* parent,
+                            const std::vector<Transaction>& extra = {}, uint8_t tag = 0,
+                            uint32_t spacing = 600, uint64_t cbAmount = 0) {
+    const uint32_t height = parent->height + 1;
+    Block block;
+    const uint64_t amount = cbAmount ? cbAmount : Rules::Subsidy(height, params);
+    block.transactions.push_back(coinbaseTx(height, amount, tag));
+    for (const Transaction& t : extra) block.transactions.push_back(t);
+
+    std::vector<Hash256> ids;
+    for (const Transaction& t : block.transactions) ids.push_back(t.txid());
+    bool mutated = false;
+    block.header.version = Consensus::BLOCK_VERSION;
+    block.header.height = height;
+    block.header.prevBlockHash = parent->hash;
+    block.header.merkleRoot = merkleRoot(ids, &mutated);
+    block.header.timestamp = parent->header.timestamp + spacing;
+    block.header.bits = Rules::GetNextWorkRequired(parent, params);
+    for (uint32_t n = 0;; ++n) {
+        block.header.nonce = n;
+        if (Pow::checkProofOfWork(block.header.hash(), block.header.bits, params.powLimit)) break;
+    }
+    return block;
+}
+
 // A chain on its own store, with regtest parameters by default. The clock is
 // set far enough ahead that test blocks are never "in the future".
 class TestChain {
@@ -86,31 +114,10 @@ public:
     MemoryChainStore& store() { return store_; }
     int64_t& now() { return now_; }
 
-    // Builds a valid block on `parent` (default: the tip). The header is
-    // mined; the coinbase claims exactly the subsidy.
-    // cbAmount = 0 means "the subsidy"; anything else is used as given.
+    // Builds a valid block on `parent` (see buildTestBlock).
     Block build(const BlockIndex* parent, const std::vector<Transaction>& extra = {},
                 uint8_t tag = 0, uint32_t spacing = 600, uint64_t cbAmount = 0) const {
-        const uint32_t height = parent->height + 1;
-        Block block;
-        const uint64_t amount = cbAmount ? cbAmount : Rules::Subsidy(height, params_);
-        block.transactions.push_back(coinbaseTx(height, amount, tag));
-        for (const Transaction& t : extra) block.transactions.push_back(t);
-
-        std::vector<Hash256> ids;
-        for (const Transaction& t : block.transactions) ids.push_back(t.txid());
-        bool mutated = false;
-        block.header.version = Consensus::BLOCK_VERSION;
-        block.header.height = height;
-        block.header.prevBlockHash = parent->hash;
-        block.header.merkleRoot = merkleRoot(ids, &mutated);
-        block.header.timestamp = parent->header.timestamp + spacing;
-        block.header.bits = Rules::GetNextWorkRequired(parent, params_);
-        for (uint32_t n = 0;; ++n) {
-            block.header.nonce = n;
-            if (Pow::checkProofOfWork(block.header.hash(), block.header.bits, params_.powLimit)) break;
-        }
-        return block;
+        return buildTestBlock(params_, parent, extra, tag, spacing, cbAmount);
     }
 
     const BlockIndex* tip() const { return state_.tip(); }

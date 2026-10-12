@@ -1,13 +1,12 @@
 #include "server.h"
-#include "blockchain.h"
+#include "node.h"
+#include "pow.h"
 #include "block.h"
 #include "blockheader.h"
 #include "transaction.h"
 #include "wallet.h"
 #include "crypto.h"
-#include "utxodb.h"
 #include "bip_8192.h"
-#include "validation.h"
 #include <openssl/rand.h>
 #include <openssl/crypto.h>
 #include <ctime>
@@ -29,6 +28,7 @@
 #include <cctype>
 #include <set>
 #include <cstdlib>
+#include <cmath>
 #include <filesystem>
 
 #ifdef _WIN32
@@ -262,6 +262,14 @@ void appendCompactSize(std::vector<uint8_t>& buf, uint64_t v) {
     }
 }
 
+// Value of a 256-bit target as a double (only for display: difficulty).
+double targetToDouble(const U256& v) {
+    const unsigned bits = v.bits();
+    if (bits <= 64) return double(v.low64());
+    const unsigned shift = bits - 64;
+    return std::ldexp(double((v >> shift).low64()), int(shift));
+}
+
 json errorJson(const std::string& msg) {
     return json{{"success", false}, {"error", msg}};
 }
@@ -367,9 +375,8 @@ std::string Server::defaultDataDir() {
     return ".bucks";
 }
 
-Server::Server(Blockchain& bc, Network* net, const ServerConfig& cfg)
-    : chain(bc),
-      network(net),
+Server::Server(Node& n, Network*, const ServerConfig& cfg)
+    : node(n),
       config(cfg),
       isRunning(false),
       svr(new httplib::Server()) {
@@ -394,9 +401,19 @@ Server::Server(Blockchain& bc, Network* net, const ServerConfig& cfg)
             config.rateLimitWindow
         );
     }
+
+    // Push chain events to WebSocket clients. Removed again in the destructor.
+    tipListenerId = node.addTipListener([this](const Hash256& hash, uint32_t height) {
+        broadcast("new_tip", json{{"hash", hash256ToHex(hash)}, {"height", height}});
+    });
+    txListenerId = node.addTxListener([this](const Transaction& tx) {
+        broadcast("tx_added", txToJSON(tx));
+    });
 }
 
 Server::~Server() {
+    node.removeTipListener(tipListenerId);
+    node.removeTxListener(txListenerId);
     stop();
     delete static_cast<httplib::Server*>(svr);
 }
@@ -647,6 +664,7 @@ bool Server::start(int port) {
 
 void Server::stop() {
     // Stop the miner first: it reads the wallet list and the chain.
+    autoMineStop.store(true);
     autoMining.store(false);
     if (autoMinerThread.joinable()) autoMinerThread.join();
 
@@ -680,6 +698,7 @@ std::string Server::walletError() const {
 bool Server::addWallet(const Wallet& wallet) {
     std::lock_guard<std::mutex> lock(walletMutex);
     wallets.push_back(wallet);
+    wallets.back().setAddressVersion(node.params().p2pkhAddressVersion);
     wallets.back().setMnemonic(""); // phrases live only in the creation response
     return saveWalletsLocked();
 }
@@ -843,7 +862,7 @@ void Server::setupRoutes() {
 
     auto walletJson = [this](const Wallet& w) {
         uint64_t balance = 0;
-        try { balance = w.getBalance(chain); } catch (...) {}
+        try { balance = w.getBalance(node); } catch (...) {}
         return json{
             {"address", w.getAddress()},
             {"publicKey", w.getPublicKeyHex()},
@@ -931,12 +950,23 @@ void Server::setupRoutes() {
 
     // Blockchain Info
     s->Get("/api/blockchain/info", [this](const httplib::Request&, httplib::Response& res) {
-        uint32_t chainHeight = chain.height();
-        size_t utxoCount = chain.utxo().getCount();
+        const Node::TipInfo t = node.tip();
+        const ChainParams& p = node.params();
+        // difficulty = (proof-of-work limit target) / (current target)
+        const double difficulty = targetToDouble(Pow::decodeCompact(p.powLimitBits).target) /
+                                  std::max(1.0, targetToDouble(Pow::decodeCompact(t.bits).target));
         json j{
-            {"height", chainHeight},
-            {"difficulty", 2},
-            {"utxoCount", utxoCount},
+            {"network", p.name},
+            {"height", t.height},
+            {"tipHash", hash256ToHex(t.hash)},
+            {"bits", t.bits},
+            {"difficulty", difficulty},
+            {"chainWork", hash256ToHex(t.chainWork.toBytesBE())},
+            {"utxoCount", t.stats.count},
+            {"circulatingSupply", t.stats.totalAmount},
+            {"mempoolSize", node.mempoolSize()},
+            {"syncing", t.initialBlockDownload},
+            {"forkAlert", t.forkAlert},
             {"isValid", true}
         };
         res.set_content(j.dump(), "application/json");
@@ -945,16 +975,10 @@ void Server::setupRoutes() {
     // Recent Blocks
     s->Get("/api/blocks/recent", [this](const httplib::Request&, httplib::Response& res) {
         json arr = json::array();
-        const Block* tip = chain.tip();
-        if (tip) {
-            uint32_t currentHeight = chain.height();
-            uint32_t startHeight = (currentHeight > 10) ? currentHeight - 9 : 0;
-            for (uint32_t h = startHeight; h <= currentHeight; ++h) {
-                const Block* block = chain.getBlockByHeight(h);
-                if (block) {
-                    arr.push_back(blockToJSON(*block));
-                }
-            }
+        const uint32_t currentHeight = node.height();
+        const uint32_t startHeight = (currentHeight > 10) ? currentHeight - 9 : 0;
+        for (uint32_t h = startHeight; h <= currentHeight; ++h) {
+            if (auto block = node.blockByHeight(h)) arr.push_back(blockToJSON(*block));
         }
         res.set_content(json{{"blocks", arr}}.dump(), "application/json");
     });
@@ -964,7 +988,7 @@ void Server::setupRoutes() {
         std::string hashStr = req.matches[1];
         try {
             Hash256 hash = hexToHash256(hashStr);
-            const Block* block = chain.getBlock(hash);
+            auto block = node.blockByHash(hash);
             if (block) {
                 res.set_content(json{{"success", true}, {"block", blockToJSON(*block)}}.dump(), "application/json");
             } else {
@@ -981,7 +1005,7 @@ void Server::setupRoutes() {
         std::string heightStr = req.matches[1];
         try {
             uint32_t height = std::stoul(heightStr);
-            const Block* block = chain.getBlockByHeight(height);
+            auto block = node.blockByHeight(height);
             if (block) {
                 res.set_content(json{{"success", true}, {"block", blockToJSON(*block)}}.dump(), "application/json");
             } else {
@@ -1003,7 +1027,7 @@ void Server::setupRoutes() {
         json walletArray = json::array();
         for (const auto& wallet : wallets) {
             uint64_t balance = 0;
-            try { balance = wallet.getBalance(chain); } catch (...) {}
+            try { balance = wallet.getBalance(node); } catch (...) {}
             walletArray.push_back({
                 {"address", wallet.getAddress()},
                 {"balance", balance}
@@ -1059,6 +1083,7 @@ void Server::setupRoutes() {
         try {
             std::string mnemonic;
             Wallet w = Wallet::createNew(&mnemonic, lang, entropyBits);
+            w.setAddressVersion(node.params().p2pkhAddressVersion);
             w.setMnemonic("");
             bool persisted = addWallet(w);
 
@@ -1098,6 +1123,7 @@ void Server::setupRoutes() {
         }
         try {
             Wallet w = Wallet::fromMnemonic(restoreMnemonic, pass);
+            w.setAddressVersion(node.params().p2pkhAddressVersion);
             w.setMnemonic("");
             const std::string address = w.getAddress();
             {
@@ -1127,10 +1153,11 @@ void Server::setupRoutes() {
             catch (...) { reply(res, 400, errorJson("Invalid limit")); return; }
         }
         std::vector<json> collected;
-        uint32_t height = chain.height();
+        uint32_t height = node.height();
         for (uint32_t h = height; collected.size() < limit; --h) {
-            const Block* block = chain.getBlockByHeight(h);
-            if (block) {
+            auto blockOpt = node.blockByHeight(h);
+            if (blockOpt) {
+                const Block* block = &*blockOpt;
                 for (auto it = block->transactions.rbegin(); it != block->transactions.rend() && collected.size() < limit; ++it) {
                     const auto& tx = *it;
                     uint64_t totalAmount = 0;
@@ -1190,13 +1217,10 @@ void Server::setupRoutes() {
         }
 
         try {
-            Transaction tx = sender.createTransaction(toAddress, amount, chain);
-            if (chain.addToMempool(tx)) {
-                if (network) {
-                     std::vector<Inventory> invs = {{InvType::TX, tx.txid()}};
-                     network->broadcast(NetMessage(MessageType::INV, serializeInvs(invs)));
-                }
-                broadcast("tx_added", txToJSON(tx));
+            Transaction tx = sender.createTransaction(toAddress, amount, node);
+            const ValidationState accepted = node.submitTransaction(tx);
+            if (accepted.valid()) {
+                // The network layer and WebSocket clients hear about it through the node's listeners.
                 json txJson = {
                     {"hash", hash256ToHex(tx.txid())},
                     {"inputCount", tx.inputs.size()},
@@ -1205,7 +1229,7 @@ void Server::setupRoutes() {
                 };
                 res.set_content(json{{"success", true}, {"transaction", txJson}}.dump(), "application/json");
             } else {
-                reply(res, 400, errorJson("Transaction rejected"));
+                reply(res, 400, errorJson("Transaction rejected: " + accepted.code));
             }
         } catch (const std::exception& e) {
             reply(res, 400, errorJson(e.what()));
@@ -1321,7 +1345,7 @@ void Server::setupRoutes() {
         }
         const Wallet& w = wallets[0];
         uint64_t balance = 0;
-        try { balance = w.getBalance(chain); } catch (...) {}
+        try { balance = w.getBalance(node); } catch (...) {}
         json resp = {
             {"success", true},
             {"address",  w.getAddress()},
@@ -1333,17 +1357,18 @@ void Server::setupRoutes() {
         // Include transaction history from UTXO set
         json txHistory = json::array();
         try {
-            auto utxos = chain.utxo().getUTXOsByAddress(w.getAddress());
-            resp["utxoCount"] = utxos.size();
-            for (const auto& u : utxos) {
+            const auto coins = node.coinsByHash160(hash160(w.getPublicKey()), 20);
+            uint64_t coinCount = coins.size();
+            node.coinCount(hash160(w.getPublicKey()), coinCount);
+            resp["utxoCount"] = coinCount;
+            for (const auto& u : coins) {
                 txHistory.push_back({
-                    {"hash", hash256ToHex(u.outpoint.txid)},
-                    {"type", u.isCoinbase ? "mining_reward" : "receive"},
-                    {"amount", u.amount},
-                    {"blockHeight", u.height},
+                    {"hash", hash256ToHex(u.op.txid)},
+                    {"type", u.coin.isCoinbase ? "mining_reward" : "receive"},
+                    {"amount", u.coin.amount},
+                    {"blockHeight", u.coin.height},
                     {"timestamp", 0}
                 });
-                if (txHistory.size() >= 20) break;
             }
         } catch (...) {
             resp["utxoError"] = "failed to load UTXOs";
@@ -1392,8 +1417,8 @@ void Server::setupRoutes() {
 // ============================================================================
 
 void Server::handleEconomyStatus(std::function<void(const std::string&)> response) {
-    uint64_t supply = chain.getCirculatingSupply();
-    uint64_t gold = chain.getGoldReserve();
+    uint64_t supply = node.circulatingSupply();
+    uint64_t gold = node.goldReserve();
     double price = 0.0;
     if (supply > 0) {
         price = (double)gold / ((double)supply / 100000000.0);
@@ -1456,95 +1481,53 @@ int Server::mineBlock(const std::string& body, json& out) {
             }
         }
 
-        const Block* tip = chain.tip();
-        if (!tip) { out = errorJson("No tip"); return 503; }
-
-        BlockHeader header;
-        header.version = 1;
-        header.height = chain.height() + 1;
-        header.prevBlockHash = tip->getHash();
-        header.timestamp = static_cast<uint32_t>(std::time(nullptr));
-
-        Transaction coinbaseTx;
-        coinbaseTx.version = Consensus::TX_VERSION;
-        coinbaseTx.lockTime = 0;
-        TransactionInput cbInput;
-        cbInput.prevTxid.fill(0);
-        cbInput.prevIndex = 0xFFFFFFFF;
-
-        // Embed IPFS Peer ID if available
-        std::vector<uint8_t> scriptSig = {0x01, 0x01};
-        std::string extraData;
-        if (!ipfsPeerId.empty()) {
-            extraData = "IPFS:" + ipfsPeerId;
-        }
-
-        // Add pending anchors
+        // Coinbase data: the IPFS peer id travels in the miner tag, anchored CIDs in the single
+        // NULL_DATA output (at most 80 bytes per block; the rest wait for the next block). Neither
+        // goes into the scriptSig any more (API-16).
+        AssemblerOptions options;
+        if (!ipfsPeerId.empty()) options.minerTag = "IPFS:" + ipfsPeerId;
+        std::vector<std::string> anchored;
         {
             std::lock_guard<std::mutex> lock(anchorMutex);
-            for (const auto& cid : pendingCIDs) {
-                if (!extraData.empty()) extraData += ";";
-                extraData += "ANCHOR:" + cid;
+            std::string payload;
+            while (!pendingCIDs.empty()) {
+                const std::string piece = "ANCHOR:" + pendingCIDs.front();
+                const size_t extra = piece.size() + (payload.empty() ? 0 : 1);
+                if (payload.size() + extra > 80) break;
+                if (!payload.empty()) payload += ';';
+                payload += piece;
+                anchored.push_back(pendingCIDs.front());
+                pendingCIDs.erase(pendingCIDs.begin());
             }
-            pendingCIDs.clear();
+            options.extraPayload.assign(payload.begin(), payload.end());
         }
+        auto requeue = [&]() {
+            std::lock_guard<std::mutex> lock(anchorMutex);
+            pendingCIDs.insert(pendingCIDs.begin(), anchored.begin(), anchored.end());
+        };
 
-        if (!extraData.empty()) {
-            scriptSig.assign(extraData.begin(), extraData.end());
+        std::atomic<bool> noStop{false};
+        std::string mineErr;
+        Hash256 foundHash{};
+        const MineResult result = node.mine(minerScript, options, noStop, mineErr, &foundHash, 60);
+        if (result == MineResult::STOPPED) {
+            requeue();
+            out = errorJson("Mining timed out");
+            return 503;
         }
-        cbInput.scriptSig = scriptSig;
-
-        coinbaseTx.inputs.push_back(cbInput);
-        TransactionOutput cbOut;
-        cbOut.amount = 5000000000;
-        cbOut.scriptPubKey = minerScript;
-        coinbaseTx.outputs.push_back(cbOut);
-
-        std::vector<Transaction> transactions = {coinbaseTx};
-        const auto& pending = chain.getMempool();
-        transactions.insert(transactions.end(), pending.begin(), pending.end());
-
-        Block newBlock(header, transactions);
-        newBlock.header.merkleRoot = newBlock.computeMerkleRoot();
-        header = newBlock.header;
-        header.bits = chain.getNextWorkRequired(header.height, header.prevBlockHash);
-        header.nonce = 0;
-
-        bool found = false;
-        // Limit attempts for responsiveness
-        for (uint32_t i = 0; i < 5000000; ++i) {
-             Validation::ValidationError err;
-             if (Validation::checkBlockProofOfWork(header, err)) { found = true; break; }
-             header.nonce++;
+        if (result == MineResult::FAILED) {
+            requeue();
+            out = errorJson(mineErr.empty() ? "Mining failed" : mineErr);
+            return mineErr == "node is syncing" ? 503 : 500;
         }
-
-        if (!found) { out = errorJson("Mining timed out"); return 503; }
-
-        newBlock.header = header;
-        if (chain.addBlock(newBlock)) {
-            // Pin all anchored CIDs
-            // Parse anchors from extraData (now assigned to scriptSig)
-            std::string extra(scriptSig.begin(), scriptSig.end());
-            size_t pos = 0;
-            while ((pos = extra.find("ANCHOR:", pos)) != std::string::npos) {
-                size_t start = pos + 7;
-                size_t end = extra.find(";", start);
-                std::string cid = extra.substr(start, end == std::string::npos ? std::string::npos : end - start);
-                pinCID(cid);
-                if (end == std::string::npos) break;
-                pos = end;
-            }
-
-            if (network) {
-                 std::vector<Inventory> invs = {{InvType::BLOCK, newBlock.getHash()}};
-                 network->broadcast(NetMessage(MessageType::INV, serializeInvs(invs)));
-            }
-            broadcast("block_mined", blockToJSON(newBlock));
-            out = json{{"success", true}, {"block", blockToJSON(newBlock)}, {"minerAddress", minerAddr}};
-            return 200;
+        auto mined = node.blockByHash(foundHash);
+        if (!mined) {
+            out = errorJson("Block rejected");
+            return 500;
         }
-        out = errorJson("Block rejected");
-        return 500;
+        for (const std::string& cid : anchored) pinCID(cid);
+        out = json{{"success", true}, {"block", blockToJSON(*mined)}, {"minerAddress", minerAddr}};
+        return 200;
 
     } catch (const std::exception& e) {
         out = errorJson(e.what());
@@ -1618,6 +1601,7 @@ bool Server::pinCID(const std::string& cid) {
 
 void Server::startAutoMine() {
     if (autoMining.exchange(true)) return; // already running
+    autoMineStop.store(false);
 
     // Check if we have any wallet to mine to
     {
@@ -1638,6 +1622,7 @@ void Server::startAutoMine() {
 }
 
 void Server::stopAutoMine() {
+    autoMineStop.store(true);
     autoMining.store(false);
     std::cout << "[miner] Auto-mining stopped." << std::endl;
 }
@@ -1645,84 +1630,33 @@ void Server::stopAutoMine() {
 void Server::autoMineLoop() {
     using clock = std::chrono::steady_clock;
 
-    while (autoMining.load()) {
-        // ---- Build block template ----
-        const Block* tip = chain.tip();
-        if (!tip) { std::this_thread::sleep_for(std::chrono::milliseconds(500)); continue; }
-
-        BlockHeader header;
-        header.version    = 1;
-        header.height     = chain.height() + 1;
-        header.prevBlockHash = tip->getHash();
-        header.timestamp  = static_cast<uint32_t>(std::time(nullptr));
-        header.bits       = chain.getNextWorkRequired(header.height, header.prevBlockHash);
-        header.nonce      = 0;
-        header.merkleRoot.fill(0);
-
-        // Coinbase tx
-        Transaction coinbaseTx;
-        coinbaseTx.version  = Consensus::TX_VERSION;
-        coinbaseTx.lockTime = 0;
-        TransactionInput cbIn;
-        cbIn.prevTxid.fill(0);
-        cbIn.prevIndex = 0xFFFFFFFF;
-        std::string cbMsg = "Bucks primary miner v1";
-        cbIn.scriptSig.assign(cbMsg.begin(), cbMsg.end());
-        coinbaseTx.inputs.push_back(cbIn);
-
-        // Reward output to primary wallet
-        TransactionOutput cbOut;
-        cbOut.amount = 5000000000ULL; // 50 BUCKS
+    while (autoMining.load() && !autoMineStop.load()) {
+        Script script;
         {
             std::lock_guard<std::mutex> lk(walletMutex);
-            if (!wallets.empty())
-                cbOut.scriptPubKey = wallets[0].getP2PKHScript();
-        }
-        coinbaseTx.outputs.push_back(cbOut);
-
-        std::vector<Transaction> txs = {coinbaseTx};
-        const auto& mempoolTxs = chain.getMempool();
-        txs.insert(txs.end(), mempoolTxs.begin(), mempoolTxs.end());
-
-        Block newBlock(header, txs);
-        newBlock.header.merkleRoot = newBlock.computeMerkleRoot();
-        header = newBlock.header;
-
-        // ---- Proof-of-Work loop ----
-        Validation::ValidationError err;
-        auto tStart = clock::now();
-        uint64_t localHashes = 0;
-
-        while (autoMining.load()) {
-            if (Validation::checkBlockProofOfWork(header, err)) {
-                break;
-            }
-            ++header.nonce;
-            ++localHashes;
-
-            // Refresh timestamp + report hash rate every 65536 hashes
-            if ((header.nonce & 0xFFFF) == 0) {
-                header.timestamp = static_cast<uint32_t>(std::time(nullptr));
-                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(clock::now() - tStart).count();
-                if (elapsed > 0) hashesPerSecond.store(localHashes / elapsed);
-
-                // If chain tip changed (peer found a block), restart
-                if (chain.tip() && chain.tip()->getHash() != header.prevBlockHash) break;
-            }
+            if (wallets.empty()) break;
+            script = wallets[0].getP2PKHScript();
         }
 
-        if (!autoMining.load()) break;
+        AssemblerOptions options;     // tag "Bucks"; templates are rebuilt every minute and on every new tip
+        std::string err;
+        Hash256 found{};
+        const uint64_t hashesBefore = node.minerHashes();
+        const auto started = clock::now();
+        const MineResult r = node.mine(script, options, autoMineStop, err, &found, 0);
 
-        // ---- Submit block ----
-        newBlock.header = header;
-        if (chain.addBlock(newBlock)) {
+        const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(clock::now() - started).count();
+        if (seconds > 0) hashesPerSecond.store((node.minerHashes() - hashesBefore) / seconds);
+
+        if (r == MineResult::FOUND) {
             ++blocksFound;
-            std::cout << "[miner] *** Block found! Height="
-                      << newBlock.header.height
-                      << " nonce=" << header.nonce
+            std::cout << "[miner] *** Block found! hash=" << hash256ToHex(found)
                       << " total=" << blocksFound.load() << " ***" << std::endl;
-        } else {
-            std::cout << "[miner] Block rejected (stale), retrying..." << std::endl;
+        } else if (r == MineResult::FAILED) {
+            // For example "node is syncing": wait and try again.
+            std::cout << "[miner] " << err << ", retrying..." << std::endl;
+            for (int i = 0; i < 10 && autoMining.load() && !autoMineStop.load(); ++i)
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
     std::cout << "[miner] Auto-mine loop exited." << std::endl;
@@ -1848,6 +1782,7 @@ bool Server::loadWalletDocument(const std::string& path, bool legacy) {
             // The constructor rejects a public key that does not belong to
             // the private key, so a tampered entry cannot redirect payouts.
             wallets.emplace_back(privKey, pubKey);
+            wallets.back().setAddressVersion(node.params().p2pkhAddressVersion);
         } catch (const std::exception& e) {
             ++skipped;
             std::cerr << "⚠ Wallet entry " << n << " in " << path << " skipped: " << e.what() << "\n";

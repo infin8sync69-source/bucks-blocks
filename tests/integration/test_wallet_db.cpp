@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "server.h"
 #include "wallet.h"
-#include "blockchain.h"
+#include "node_harness.h"
 #include <filesystem>
 #include <fstream>
 
@@ -29,7 +29,9 @@ protected:
 
 TEST_F(WalletPersistenceTest, SaveAndLoadWallets) {
     // 1. Setup minimal dependencies
-    Bucks::Blockchain chain(testDir + "/utxo.db", testDir + "/blocks.db");
+    Bucks::TestUtil::NodeHarness harness;
+    ASSERT_TRUE(harness.node) << harness.error;
+    Bucks::Node& chain = *harness.node;
     // Server config: wallets live in the data directory, not the CWD
     Bucks::ServerConfig config;
     config.port = 0;

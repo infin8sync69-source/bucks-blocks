@@ -1,5 +1,7 @@
 #include "network.h"
-#include "blockchain.h"
+#include "node.h"
+#include "serialize.h"
+#include "consensus.h"
 #include <iostream>
 #include <cerrno>
 #include <cstring>
@@ -33,13 +35,16 @@ static bool isLocalAddress(const std::string& ip) {
     return false;
 }
 
+// Extra bytes an encrypted payload may carry (IV, tag).
+constexpr uint32_t ENCRYPTION_OVERHEAD = 256;
+constexpr size_t MAX_BLOCKS_IN_FLIGHT = 16;
+constexpr size_t MAX_HEADERS_PER_MESSAGE = 2000;
+constexpr size_t MAX_LOCATOR_HASHES = 101;
+constexpr uint32_t GETHEADERS_VERSION = 1;
+
 // ------------------------------------------------------------
 // NetMessageHeader
 // ------------------------------------------------------------
-
-NetMessageHeader::NetMessageHeader() : magic(MAINNET_MAGIC), length(0), checksum(0) {
-    memset(command, 0, 12);
-}
 
 std::string NetMessageHeader::typeToCommand(MessageType type) {
     switch (type) {
@@ -62,21 +67,38 @@ std::string NetMessageHeader::typeToCommand(MessageType type) {
 }
 
 MessageType NetMessageHeader::commandToType(const char* cmd) {
-    if (strncmp(cmd, "version", 7) == 0)    return MessageType::VERSION;
-    if (strncmp(cmd, "verack", 6) == 0)     return MessageType::VERACK;
-    if (strncmp(cmd, "inv", 3) == 0)        return MessageType::INV;
-    if (strncmp(cmd, "getdata", 7) == 0)    return MessageType::GETDATA;
-    if (strncmp(cmd, "getheaders", 10) == 0) return MessageType::GETHEADERS;
-    if (strncmp(cmd, "headers", 7) == 0)    return MessageType::HEADERS;
-    if (strncmp(cmd, "block", 5) == 0)      return MessageType::BLOCK;
-    if (strncmp(cmd, "tx", 2) == 0)         return MessageType::TX;
-    if (strncmp(cmd, "ping", 4) == 0)       return MessageType::PING;
-    if (strncmp(cmd, "pong", 4) == 0)       return MessageType::PONG;
-    if (strncmp(cmd, "addr", 4) == 0)       return MessageType::ADDR;
-    if (strncmp(cmd, "getaddr", 7) == 0)    return MessageType::GETADDR;
-    if (strncmp(cmd, "reject", 6) == 0)     return MessageType::REJECT;
-    if (strncmp(cmd, "encinit", 7) == 0)    return MessageType::ENCINIT;
+    // 1..12 characters from [a-z0-9], then only zero bytes.
+    size_t len = 0;
+    while (len < 12 && cmd[len] != 0) {
+        const char c = cmd[len];
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) return MessageType::UNKNOWN;
+        ++len;
+    }
+    if (len == 0) return MessageType::UNKNOWN;
+    for (size_t i = len; i < 12; ++i) {
+        if (cmd[i] != 0) return MessageType::UNKNOWN;
+    }
+    static const MessageType all[] = {
+        MessageType::VERSION, MessageType::VERACK, MessageType::INV, MessageType::GETDATA,
+        MessageType::GETHEADERS, MessageType::HEADERS, MessageType::BLOCK, MessageType::TX,
+        MessageType::PING, MessageType::PONG, MessageType::ADDR, MessageType::GETADDR,
+        MessageType::REJECT, MessageType::ENCINIT};
+    const std::string name(cmd, len);
+    for (MessageType t : all) {
+        if (typeToCommand(t) == name) return t;
+    }
     return MessageType::UNKNOWN;
+}
+
+uint32_t NetMessageHeader::maxPayload(MessageType type) {
+    switch (type) {
+        case MessageType::BLOCK:      return 1'000'000 + ENCRYPTION_OVERHEAD;
+        case MessageType::TX:         return 100'000 + ENCRYPTION_OVERHEAD;
+        case MessageType::HEADERS:    return 168'003 + ENCRYPTION_OVERHEAD;
+        case MessageType::GETHEADERS: return 3'269 + ENCRYPTION_OVERHEAD;
+        case MessageType::ENCINIT:    return 33;
+        default:                      return MAX_MESSAGE_PAYLOAD;
+    }
 }
 
 std::vector<uint8_t> serializeInvs(const std::vector<Inventory>& invs) {
@@ -97,64 +119,107 @@ std::vector<uint8_t> serializeInvs(const std::vector<Inventory>& invs) {
     return data;
 }
 
+// Exactly: u32 count, then count * (u32 type, 32-byte hash).
+static bool parseInvs(const std::vector<uint8_t>& payload, size_t maxCount, std::vector<Inventory>& out) {
+    try {
+        Reader r(payload);
+        const uint32_t count = r.u32();
+        if (count > maxCount) return false;
+        if (uint64_t(count) * 36 != r.remaining()) return false;
+        for (uint32_t i = 0; i < count; ++i) {
+            const uint32_t type = r.u32();
+            Hash256 h = r.hash256();
+            if (type != uint32_t(InvType::TX) && type != uint32_t(InvType::BLOCK)) continue;
+            out.push_back(Inventory{InvType(type), h});
+        }
+        return true;
+    } catch (const ParseError&) {
+        return false;
+    }
+}
+
+// getheaders: u32 version = 1, CompactSize n (1..101), n hashes (newest first), stop hash.
+static std::vector<uint8_t> makeGetHeaders(const std::vector<Hash256>& locator) {
+    Writer w;
+    w.u32(GETHEADERS_VERSION);
+    const size_t n = std::min(locator.size(), MAX_LOCATOR_HASHES);
+    w.compactSize(n);
+    for (size_t i = 0; i < n; ++i) w.hash256(locator[i]);
+    w.hash256(Hash256{});
+    return w.take();
+}
+
+static bool parseGetHeaders(const std::vector<uint8_t>& payload, std::vector<Hash256>& locator, Hash256& stop) {
+    try {
+        Reader r(payload);
+        if (r.u32() != GETHEADERS_VERSION) return false;
+        const uint64_t n = r.compactSize(MAX_LOCATOR_HASHES);
+        if (n == 0 || n * 32 + 32 != r.remaining()) return false;
+        for (uint64_t i = 0; i < n; ++i) locator.push_back(r.hash256());
+        stop = r.hash256();
+        r.requireEnd();
+        return true;
+    } catch (const ParseError&) {
+        return false;
+    }
+}
+
+// headers: CompactSize n (0..2000), n * 84-byte headers, exact length.
+static bool parseHeaders(const std::vector<uint8_t>& payload, std::vector<BlockHeader>& out) {
+    try {
+        Reader r(payload);
+        const uint64_t n = r.compactSize(MAX_HEADERS_PER_MESSAGE);
+        if (n * Consensus::BLOCK_HEADER_SIZE != r.remaining()) return false;
+        for (uint64_t i = 0; i < n; ++i) out.push_back(BlockHeader::parse(r));
+        r.requireEnd();
+        return true;
+    } catch (const ParseError&) {
+        return false;
+    }
+}
+
 // ------------------------------------------------------------
 // NetMessage
 // ------------------------------------------------------------
 
-std::vector<uint8_t> NetMessage::serialize() const {
+std::vector<uint8_t> NetMessage::serialize(const std::array<uint8_t, 4>& magic) const {
     std::vector<uint8_t> data;
     data.reserve(24 + payload.size());
+    data.insert(data.end(), magic.begin(), magic.end());
 
-    // Magic
-    data.push_back(MAINNET_MAGIC & 0xFF);
-    data.push_back((MAINNET_MAGIC >> 8) & 0xFF);
-    data.push_back((MAINNET_MAGIC >> 16) & 0xFF);
-    data.push_back((MAINNET_MAGIC >> 24) & 0xFF);
-
-    // Command
-    std::string cmd = NetMessageHeader::typeToCommand(type);
+    const std::string cmd = NetMessageHeader::typeToCommand(type);
     for (int i = 0; i < 12; ++i) {
         data.push_back(i < static_cast<int>(cmd.size()) ? static_cast<uint8_t>(cmd[i]) : 0);
     }
 
-    // Length
-    uint32_t len = static_cast<uint32_t>(payload.size());
-    data.push_back(len & 0xFF);
-    data.push_back((len >> 8) & 0xFF);
-    data.push_back((len >> 16) & 0xFF);
-    data.push_back((len >> 24) & 0xFF);
+    const uint32_t len = static_cast<uint32_t>(payload.size());
+    for (int i = 0; i < 4; ++i) data.push_back(uint8_t(len >> (8 * i)));
 
-    // Checksum
-    Hash256 hash = doubleSha256(payload);
-    data.push_back(hash[0]);
-    data.push_back(hash[1]);
-    data.push_back(hash[2]);
-    data.push_back(hash[3]);
-
-    // Payload
+    const Hash256 hash = doubleSha256(payload);
+    data.insert(data.end(), hash.begin(), hash.begin() + 4);
     data.insert(data.end(), payload.begin(), payload.end());
-
     return data;
 }
 
-NetMessage NetMessage::deserialize(const std::vector<uint8_t>& data) {
-    if (data.size() < 24) throw std::runtime_error("Header too short");
+NetMessage NetMessage::deserialize(const std::vector<uint8_t>& data, const std::array<uint8_t, 4>& magic) {
+    if (data.size() < 24) throw NetIncomplete("header too short");
+    if (!std::equal(magic.begin(), magic.end(), data.begin())) throw NetMalformed("wrong network magic");
 
-    char cmd[13];
+    char cmd[12];
     memcpy(cmd, data.data() + 4, 12);
-    cmd[12] = 0;
-    
-    uint32_t len = data[16] | (data[17] << 8) | (data[18] << 16) | (data[19] << 24);
-    if (data.size() < 24 + len) throw std::runtime_error("Payload incomplete");
+    const MessageType type = NetMessageHeader::commandToType(cmd);
+    if (type == MessageType::UNKNOWN) throw NetMalformed("unknown command");
 
-    std::vector<uint8_t> payload(data.begin() + 24, data.begin() + 24 + len);
-    
-    Hash256 hash = doubleSha256(payload);
-    if (memcmp(hash.data(), data.data() + 20, 4) != 0) {
-        throw std::runtime_error("Checksum mismatch");
-    }
+    // Lengths are compared as size_t: a 32-bit sum could wrap and read out of bounds.
+    const size_t length = size_t(data[16]) | (size_t(data[17]) << 8) | (size_t(data[18]) << 16) | (size_t(data[19]) << 24);
+    if (length > NetMessageHeader::maxPayload(type)) throw NetMalformed("payload too large for its command");
+    if (data.size() - 24 < length) throw NetIncomplete("payload incomplete");
+    if (data.size() - 24 > length) throw NetMalformed("bytes after the payload");
 
-    return NetMessage(NetMessageHeader::commandToType(cmd), payload);
+    std::vector<uint8_t> payload(data.begin() + 24, data.begin() + 24 + length);
+    const Hash256 hash = doubleSha256(payload);
+    if (memcmp(hash.data(), data.data() + 20, 4) != 0) throw NetMalformed("checksum mismatch");
+    return NetMessage(type, payload);
 }
 
 // ------------------------------------------------------------
@@ -162,12 +227,13 @@ NetMessage NetMessage::deserialize(const std::vector<uint8_t>& data) {
 // ------------------------------------------------------------
 
 Peer::Peer(Network& net, int socket, const std::string& ip, uint16_t port, bool inbound)
-    : network(net), socket_fd(socket), ip(ip), port(port), connected(true), inbound(inbound), 
+    : network(net), socket_fd(socket), ip(ip), port(port), connected(true), inbound(inbound),
       state(PeerState::HANDSHAKE), misbehaviorScore(0), encryptionNegotiated(false) {
-    
+
     connectionTime = std::chrono::steady_clock::now();
     lastBlockRequestTime = connectionTime;
-    
+    lastHeadersRequestTime = connectionTime - std::chrono::seconds(60);
+
     // Initialize session encryption
     encryption = std::make_unique<P2PSessionEncryption>();
 
@@ -178,9 +244,9 @@ Peer::Peer(Network& net, int socket, const std::string& ip, uint16_t port, bool 
 
 void Peer::misbehavior(int penalty) {
     misbehaviorScore += penalty;
-    std::cout << "DEBUG: Peer " << ip << " misbehavior: +" << penalty 
+    std::cout << "DEBUG: Peer " << ip << " misbehavior: +" << penalty
               << " (total: " << misbehaviorScore << ")" << std::endl;
-    
+
     if (misbehaviorScore >= 100) {
         if (isLocalAddress(ip)) {
             std::cout << "WARNING: Peer " << ip << " exceeded misbehavior threshold but is a local/LAN address — skipping ban and disconnect." << std::endl;
@@ -221,19 +287,19 @@ bool Peer::sendMsg(const NetMessage& msg) {
         toSend.payload = encryption->encrypt(msg.payload);
     }
 
-    std::vector<uint8_t> data = toSend.serialize();
+    std::vector<uint8_t> data = toSend.serialize(network.magic());
     std::lock_guard<std::mutex> lock(sendMutex);
-    
+
     int sent = ::send(socket_fd, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()), 0);
     return sent == static_cast<int>(data.size());
 }
 
 void Peer::processBuffer() {
+    const std::array<uint8_t, 4>& magic = network.magic();
     while (receiveBuffer.size() >= 24) {
         bool found = false;
-        for (size_t i = 0; i <= receiveBuffer.size() - 24; ++i) {
-            uint32_t m = receiveBuffer[i] | (receiveBuffer[i+1] << 8) | (receiveBuffer[i+2] << 16) | (receiveBuffer[i+3] << 24);
-            if (m == MAINNET_MAGIC) {
+        for (size_t i = 0; i + 24 <= receiveBuffer.size(); ++i) {
+            if (std::equal(magic.begin(), magic.end(), receiveBuffer.begin() + i)) {
                 if (i > 0) {
                     receiveBuffer.erase(receiveBuffer.begin(), receiveBuffer.begin() + i);
                 }
@@ -249,23 +315,31 @@ void Peer::processBuffer() {
             return;
         }
 
-        uint32_t len = receiveBuffer[16] | (receiveBuffer[17] << 8) | (receiveBuffer[18] << 16) | (receiveBuffer[19] << 24);
-        
-        if (len > MAX_MESSAGE_PAYLOAD) {
-            std::cerr << "DEBUG: Peer " << ip << " sent oversized message (" << len << " bytes). Vicious intent detected. Banning." << std::endl;
+        char cmd[12];
+        memcpy(cmd, receiveBuffer.data() + 4, 12);
+        const MessageType type = NetMessageHeader::commandToType(cmd);
+        const size_t len = size_t(receiveBuffer[16]) | (size_t(receiveBuffer[17]) << 8) |
+                           (size_t(receiveBuffer[18]) << 16) | (size_t(receiveBuffer[19]) << 24);
+
+        if (len > NetMessageHeader::maxPayload(type)) {
+            std::cerr << "DEBUG: Peer " << ip << " sent an oversized " << NetMessageHeader::typeToCommand(type)
+                      << " (" << len << " bytes). Banning." << std::endl;
             network.banIP(ip);
             disconnect();
             return;
         }
 
-        if (receiveBuffer.size() < 24 + len) return;
+        const size_t frame = len + 24;
+        if (receiveBuffer.size() < frame) return;
 
-        std::vector<uint8_t> raw(receiveBuffer.begin(), receiveBuffer.begin() + 24 + len);
-        receiveBuffer.erase(receiveBuffer.begin(), receiveBuffer.begin() + 24 + len);
+        std::vector<uint8_t> raw(receiveBuffer.begin(), receiveBuffer.begin() + frame);
+        receiveBuffer.erase(receiveBuffer.begin(), receiveBuffer.begin() + frame);
 
         try {
-            NetMessage msg = NetMessage::deserialize(raw);
+            NetMessage msg = NetMessage::deserialize(raw, magic);
             handleMessage(msg);
+        } catch (const NetIncomplete&) {
+            return;   // cannot happen: the frame is complete
         } catch (const std::exception& e) {
             std::cerr << "DEBUG: Peer " << ip << " msg error: " << e.what() << std::endl;
             misbehavior(20);
@@ -273,9 +347,42 @@ void Peer::processBuffer() {
     }
 }
 
+void Peer::requestHeaders() {
+    const auto now = std::chrono::steady_clock::now();
+    if (headersInFlight && now - lastHeadersRequestTime < std::chrono::seconds(10)) return;
+    headersInFlight = true;
+    lastHeadersRequestTime = now;
+    sendMsg(NetMessage(MessageType::GETHEADERS, makeGetHeaders(network.getNode().locator())));
+}
+
+void Peer::requestMissingBlocks() {
+    if (requestedBlocks.size() >= MAX_BLOCKS_IN_FLIGHT) return;
+    std::vector<Hash256> missing = network.getNode().missingBlocksOnBestHeaderChain(MAX_BLOCKS_IN_FLIGHT);
+    std::vector<Inventory> wanted;
+    for (const Hash256& h : missing) {
+        if (requestedBlocks.size() + wanted.size() >= MAX_BLOCKS_IN_FLIGHT) break;
+        if (requestedBlocks.count(h)) continue;
+        wanted.push_back(Inventory{InvType::BLOCK, h});
+    }
+    if (wanted.empty()) return;
+    for (const Inventory& i : wanted) requestedBlocks.insert(i.hash);
+    lastBlockRequestTime = std::chrono::steady_clock::now();
+    sendMsg(NetMessage(MessageType::GETDATA, serializeInvs(wanted)));
+}
+
+// Penalties by result category (consensus spec section 7.1).
+static int penaltyFor(ValidationResult r) {
+    switch (r) {
+        case ValidationResult::INVALID:   return 100;
+        case ValidationResult::MALFORMED: return 20;
+        case ValidationResult::MUTATED:   return 20;
+        default:                          return 0;   // missing parent, too new, duplicate, policy, internal
+    }
+}
+
 void Peer::handleMessage(const NetMessage& msg) {
-    Blockchain& chain = network.getChain();
-    
+    Node& node = network.getNode();
+
     NetMessage decrypted = msg;
     if (encryptionNegotiated && msg.type != MessageType::ENCINIT) {
         std::vector<uint8_t> clear;
@@ -296,36 +403,21 @@ void Peer::handleMessage(const NetMessage& msg) {
                  if (encryption->establishSharedSecret(peerPub)) {
                      encryptionNegotiated = true;
                      std::cout << "DEBUG: P2P Encryption established with Peer " << ip << std::endl;
-                     
+
                      // Now send our VERSION message (it will be encrypted)
-                     uint32_t height = chain.height();
-                     std::vector<uint8_t> payload;
-                     payload.push_back(height & 0xFF);
-                     payload.push_back((height >> 8) & 0xFF);
-                     payload.push_back((height >> 16) & 0xFF);
-                     payload.push_back((height >> 24) & 0xFF);
-                     sendMsg(NetMessage(MessageType::VERSION, payload));
+                     Writer w;
+                     w.u32(node.height());
+                     sendMsg(NetMessage(MessageType::VERSION, w.take()));
                  }
             }
             break;
         }
         case MessageType::VERSION: {
             if (decrypted.payload.size() >= 4) {
-                uint32_t peerHeight = decrypted.payload[0] | (decrypted.payload[1] << 8) | (decrypted.payload[2] << 16) | (decrypted.payload[3] << 24);
+                Reader r(decrypted.payload);
+                const uint32_t peerHeight = r.u32();
                 std::cout << "DEBUG: Peer " << ip << " version: height=" << peerHeight << std::endl;
-                
-                if (peerHeight > chain.height()) {
-                    // We are behind, request headers
-                    std::cout << "DEBUG: Requesting headers from Peer " << ip << std::endl;
-                    // Simplify: send GETHEADERS with our height + 1
-                    uint32_t nextHeight = chain.height() + 1;
-                    std::vector<uint8_t> payload;
-                    payload.push_back(nextHeight & 0xFF);
-                    payload.push_back((nextHeight >> 8) & 0xFF);
-                    payload.push_back((nextHeight >> 16) & 0xFF);
-                    payload.push_back((nextHeight >> 24) & 0xFF);
-                    sendMsg(NetMessage(MessageType::GETHEADERS, payload));
-                }
+                if (peerHeight > node.height()) requestHeaders();
             } else {
                 misbehavior(10); // Penalty for invalid VERSION payload
             }
@@ -337,153 +429,149 @@ void Peer::handleMessage(const NetMessage& msg) {
             std::cout << "DEBUG: Peer " << ip << " is now ACTIVE" << std::endl;
             break;
         case MessageType::INV: {
-            if (decrypted.payload.size() < 4) break;
-            uint32_t count = decrypted.payload[0] | (decrypted.payload[1] << 8) | (decrypted.payload[2] << 16) | (decrypted.payload[3] << 24);
-            if (count > 50000) {
-                misbehavior(50); // Severe penalty for INV spam
+            std::vector<Inventory> invs;
+            if (!parseInvs(decrypted.payload, 50000, invs)) {
+                misbehavior(50);   // count above the cap or a length that does not fit
                 break;
             }
-            size_t pos = 4;
-            for (uint32_t i = 0; i < count && pos + 35 < decrypted.payload.size(); ++i) {
-                uint32_t type = decrypted.payload[pos] | (decrypted.payload[pos+1] << 8) | (decrypted.payload[pos+2] << 16) | (decrypted.payload[pos+3] << 24);
-                pos += 4;
-                Hash256 hash;
-                std::copy(decrypted.payload.begin() + pos, decrypted.payload.begin() + pos + 32, hash.begin());
-                pos += 32;
-                
-                if (type == static_cast<uint32_t>(InvType::BLOCK)) {
-                    if (!chain.getBlock(hash) && requestedBlocks.count(hash) == 0) {
-                        std::vector<uint8_t> gdPayload(hash.begin(), hash.end());
-                        requestedBlocks.insert(hash);
-                        lastBlockRequestTime = std::chrono::steady_clock::now();
-                        sendMsg(NetMessage(MessageType::GETDATA, gdPayload));
-                    }
-                } else if (type == static_cast<uint32_t>(InvType::TX)) {
-                    // TX deduplication
-                    std::vector<uint8_t> gdPayload(hash.begin(), hash.end());
-                    sendMsg(NetMessage(MessageType::GETDATA, gdPayload));
+            std::vector<Inventory> wantTx;
+            bool unknownBlock = false;
+            for (const Inventory& inv : invs) {
+                if (inv.type == InvType::BLOCK) {
+                    // A new block is learned through its header; data is requested only for
+                    // headers on the best header chain.
+                    if (!node.knowsHeader(inv.hash)) unknownBlock = true;
+                } else if (!node.mempoolTransaction(inv.hash) && wantTx.size() < 100) {
+                    wantTx.push_back(inv);
                 }
             }
+            if (unknownBlock) requestHeaders();
+            if (!wantTx.empty()) sendMsg(NetMessage(MessageType::GETDATA, serializeInvs(wantTx)));
             break;
         }
         case MessageType::GETHEADERS: {
-            if (decrypted.payload.size() >= 4) {
-                uint32_t startHeight = decrypted.payload[0] | (decrypted.payload[1] << 8) | (decrypted.payload[2] << 16) | (decrypted.payload[3] << 24);
-                std::vector<uint8_t> payload;
-                // Send up to 100 block hashes (inventory-style for HEADERS)
-                uint32_t count = 0;
-                for (uint32_t h = startHeight; h <= chain.height() && count < 100; ++h) {
-                    const Block* b = chain.getBlockByHeight(h);
-                    if (b) {
-                        Hash256 hash = b->getHash();
-                        payload.insert(payload.end(), hash.begin(), hash.end());
-                        count++;
-                    }
-                }
-                if (count > 0) {
-                    sendMsg(NetMessage(MessageType::HEADERS, payload));
-                }
+            std::vector<Hash256> locator;
+            Hash256 stop{};
+            if (!parseGetHeaders(decrypted.payload, locator, stop)) {
+                misbehavior(20);
+                break;
             }
+            const std::vector<BlockHeader> headers = node.headersAfter(locator, stop, MAX_HEADERS_PER_MESSAGE);
+            Writer w;
+            w.compactSize(headers.size());
+            for (const BlockHeader& h : headers) {
+                const std::vector<uint8_t> raw = h.serialize();
+                w.bytes(raw.data(), raw.size());
+            }
+            sendMsg(NetMessage(MessageType::HEADERS, w.take()));
             break;
         }
         case MessageType::HEADERS: {
-            // payload is list of hashes (32 bytes each)
-            if (decrypted.payload.size() > 2000 * 32) {
-                misbehavior(30); // Penalty for excessive headers
+            headersInFlight = false;
+            std::vector<BlockHeader> headers;
+            if (!parseHeaders(decrypted.payload, headers)) {
+                misbehavior(20);
                 break;
             }
-            for (size_t i = 0; i + 31 < decrypted.payload.size(); i += 32) {
-                Hash256 hash;
-                std::copy(decrypted.payload.begin() + i, decrypted.payload.begin() + i + 32, hash.begin());
-                if (!chain.getBlock(hash) && requestedBlocks.count(hash) == 0) {
-                    // Unknown block, request data
-                    std::vector<uint8_t> payload(hash.begin(), hash.end());
-                    requestedBlocks.insert(hash);
-                    lastBlockRequestTime = std::chrono::steady_clock::now();
-                    sendMsg(NetMessage(MessageType::GETDATA, payload));
-                }
+            if (headers.empty()) break;
+            // Headers must connect to each other; the first one's parent must be known.
+            const ValidationState st = node.submitHeaders(headers);
+            if (st.result == ValidationResult::MISSING_PARENT) {
+                requestHeaders();                 // we are on a different branch: ask again from our locator
+            } else if (!st.valid()) {
+                if (st.result != ValidationResult::TIME_TOO_NEW && st.result != ValidationResult::INTERNAL)
+                    misbehavior(penaltyFor(st.result));
+            } else {
+                requestMissingBlocks();
+                if (headers.size() == MAX_HEADERS_PER_MESSAGE) requestHeaders();   // more to come
             }
             break;
         }
         case MessageType::GETDATA: {
-            if (decrypted.payload.size() >= 32) {
-                Hash256 hash;
-                std::copy(decrypted.payload.begin(), decrypted.payload.begin() + 32, hash.begin());
-                const Block* b = chain.getBlock(hash);
-                if (b) {
-                    sendMsg(NetMessage(MessageType::BLOCK, b->serialize()));
+            std::vector<Inventory> invs;
+            if (!parseInvs(decrypted.payload, 1000, invs)) {
+                misbehavior(20);
+                break;
+            }
+            for (const Inventory& inv : invs) {
+                if (inv.type == InvType::BLOCK) {
+                    if (auto b = node.blockByHash(inv.hash)) sendMsg(NetMessage(MessageType::BLOCK, b->serialize()));
+                } else if (auto tx = node.mempoolTransaction(inv.hash)) {
+                    sendMsg(NetMessage(MessageType::TX, tx->serialize()));
                 }
             }
             break;
         }
         case MessageType::BLOCK: {
+            Block b;
             try {
-                Block b = Block::deserialize(decrypted.payload);
-                Hash256 hash = b.getHash();
-                
-                if (requestedBlocks.count(hash) == 0) {
-                    std::cerr << "DEBUG: Received unsolicited block " << b.header.height << " from " << ip << std::endl;
-                    misbehavior(10);
-                    break;
-                }
-                
-                requestedBlocks.erase(hash);
-                std::cout << "DEBUG: Received Block " << b.header.height << " from " << ip << std::endl;
-                
-                if (chain.addBlock(b)) {
-                    std::cout << "DEBUG: Successfully synced block " << b.header.height << std::endl;
-                    // If we just got a block, maybe ask for more headers
-                    if (b.header.height == chain.height()) {
-                         uint32_t nextHeight = chain.height() + 1;
-                         std::vector<uint8_t> payload;
-                         payload.push_back(nextHeight & 0xFF);
-                         payload.push_back((nextHeight >> 8) & 0xFF);
-                         payload.push_back((nextHeight >> 16) & 0xFF);
-                         payload.push_back((nextHeight >> 24) & 0xFF);
-                         sendMsg(NetMessage(MessageType::GETHEADERS, payload));
-                    }
-                } else {
-                    std::cerr << "DEBUG: Block validation failed for block from " << ip << std::endl;
-                    misbehavior(20);
-                }
+                b = Block::deserialize(decrypted.payload);
             } catch (const std::exception& e) {
-                std::cerr << "DEBUG: Failed to process received block: " << e.what() << std::endl;
-                misbehavior(10);
+                std::cerr << "DEBUG: Unparsable block from " << ip << ": " << e.what() << std::endl;
+                misbehavior(20);
+                break;
             }
+            const Hash256 hash = b.getHash();
+            const bool requested = requestedBlocks.erase(hash) > 0;
+            const ValidationState st = node.submitBlock(b, requested);
+            if (st.valid()) {
+                std::cout << "DEBUG: Accepted block " << b.header.height << " from " << ip << std::endl;
+                requestMissingBlocks();
+                if (requestedBlocks.empty()) requestHeaders();
+            } else if (st.result == ValidationResult::MISSING_PARENT) {
+                requestHeaders();                 // no penalty: the parent may simply not have arrived
+            } else {
+                network.recordRejectedBlock(st.result);
+                const int penalty = penaltyFor(st.result);
+                if (penalty) {
+                    std::cerr << "DEBUG: Block from " << ip << " rejected: " << st.code << std::endl;
+                    misbehavior(penalty);
+                }
+            }
+            break;
+        }
+        case MessageType::TX: {
+            Transaction tx;
+            try {
+                tx = Transaction::deserialize(decrypted.payload);
+            } catch (const std::exception&) {
+                misbehavior(20);
+                break;
+            }
+            AcceptOptions options;
+            options.fromPeer = true;
+            options.peerId = uint64_t(socket_fd);
+            const ValidationState st = node.submitTransaction(tx, options);
+            // Relay to the other peers happens through the node's transaction listener.
+            if (st.result == ValidationResult::INVALID) misbehavior(10);
             break;
         }
         case MessageType::PING:
             sendMsg(NetMessage(MessageType::PONG, decrypted.payload));
             break;
         case MessageType::GETADDR: {
-            // Peer is requesting our known peer addresses
+            // Peer is requesting our known peer addresses. This handler already runs under
+            // peersMutex (Network::handleSocketIO), so it must not lock it again.
             std::cout << "DEBUG: Peer " << ip << " requested peer addresses" << std::endl;
-            
-            // Collect known peer addresses from network
+
             std::vector<std::string> addresses;
-            {
-                std::lock_guard<std::mutex> lock(network.peersMutex);
-                for (const auto& [fd, peer] : network.peers) {
-                    if (peer->getState() == PeerState::ACTIVE && peer->getIP() != ip) {
-                        addresses.push_back(peer->getIP() + ":" + std::to_string(network.listenPort));
-                    }
+            for (const auto& [fd, peer] : network.peers) {
+                if (peer->getState() == PeerState::ACTIVE && peer->getIP() != ip) {
+                    addresses.push_back(peer->getIP() + ":" + std::to_string(network.listenPort));
                 }
             }
-            
-            // Add known peers from discovery
             for (const auto& addr : network.knownPeers) {
                 if (addresses.size() >= 100) break;  // Limit to 100 addresses
                 addresses.push_back(addr);
             }
-            
-            // Serialize addresses
+
             std::vector<uint8_t> payload;
             uint32_t count = static_cast<uint32_t>(std::min(addresses.size(), size_t(100)));
             payload.push_back(count & 0xFF);
             payload.push_back((count >> 8) & 0xFF);
             payload.push_back((count >> 16) & 0xFF);
             payload.push_back((count >> 24) & 0xFF);
-            
+
             for (size_t i = 0; i < count; ++i) {
                 const auto& addr = addresses[i];
                 uint16_t addrLen = static_cast<uint16_t>(addr.size());
@@ -491,38 +579,37 @@ void Peer::handleMessage(const NetMessage& msg) {
                 payload.push_back((addrLen >> 8) & 0xFF);
                 payload.insert(payload.end(), addr.begin(), addr.end());
             }
-            
+
             sendMsg(NetMessage(MessageType::ADDR, payload));
             break;
         }
         case MessageType::ADDR: {
-            // Received peer addresses
             if (decrypted.payload.size() < 4) break;
-            
-            uint32_t count = decrypted.payload[0] | (decrypted.payload[1] << 8) | 
+
+            uint32_t count = decrypted.payload[0] | (decrypted.payload[1] << 8) |
                             (decrypted.payload[2] << 16) | (decrypted.payload[3] << 24);
-            
+
             if (count > 1000) {
                 misbehavior(20);  // Penalty for excessive addresses
                 break;
             }
-            
+
             std::vector<std::string> addresses;
             size_t pos = 4;
             for (uint32_t i = 0; i < count && pos + 1 < decrypted.payload.size(); ++i) {
                 uint16_t addrLen = decrypted.payload[pos] | (decrypted.payload[pos+1] << 8);
                 pos += 2;
-                
+
                 if (pos + addrLen > decrypted.payload.size()) break;
-                
-                std::string addr(decrypted.payload.begin() + pos, 
+
+                std::string addr(decrypted.payload.begin() + pos,
                                 decrypted.payload.begin() + pos + addrLen);
                 addresses.push_back(addr);
                 pos += addrLen;
             }
-            
-            // Forward to network for processing
-            network.handleAddrMessage(addresses);
+
+            // Connecting takes peersMutex, which is held here: hand them to the network thread.
+            network.queueAddresses(addresses);
             break;
         }
         default:
@@ -538,7 +625,8 @@ std::string Peer::address() const {
 // Network implementation
 // ------------------------------------------------------------
 
-Network::Network(Blockchain& bc) : chain(bc), running(false), listenPort(0), listenSocket(-1) {
+Network::Network(Node& n)
+    : listenPort(0), node(n), magic_(n.params().netMagic), running(false), listenSocket(-1) {
 #ifdef _WIN32
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -547,9 +635,20 @@ Network::Network(Blockchain& bc) : chain(bc), running(false), listenPort(0), lis
     // Initialize peer discovery
     lastDiscoveryTime = std::chrono::steady_clock::now();
     loadSeedNodes();
+
+    // New tips and accepted transactions are announced to every peer. The listeners only
+    // queue the message: they run on arbitrary threads and the peer lock is not theirs.
+    tipListenerId_ = node.addTipListener([this](const Hash256& hash, uint32_t) {
+        queueBroadcast(NetMessage(MessageType::INV, serializeInvs({Inventory{InvType::BLOCK, hash}})));
+    });
+    txListenerId_ = node.addTxListener([this](const Transaction& tx) {
+        queueBroadcast(NetMessage(MessageType::INV, serializeInvs({Inventory{InvType::TX, tx.txid()}})));
+    });
 }
 
 Network::~Network() {
+    node.removeTipListener(tipListenerId_);
+    node.removeTxListener(txListenerId_);
     stop();
 #ifdef _WIN32
     WSACleanup();
@@ -676,7 +775,45 @@ void Network::run() {
         }
 
         handleSocketIO();
+        flushQueues();
     }
+}
+
+size_t Network::peerCount() const {
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(peersMutex));
+    size_t n = 0;
+    for (const auto& kv : peers)
+        if (kv.second->getState() == PeerState::ACTIVE) ++n;
+    return n;
+}
+
+void Network::queueBroadcast(const NetMessage& msg, int exceptFd) {
+    std::lock_guard<std::mutex> lock(queueMutex);
+    if (relayQueue.size() < 1000) relayQueue.emplace_back(msg, exceptFd);
+}
+
+void Network::queueAddresses(const std::vector<std::string>& addresses) {
+    std::lock_guard<std::mutex> lock(queueMutex);
+    if (addrQueue.size() < 100) addrQueue.push_back(addresses);
+}
+
+void Network::flushQueues() {
+    std::vector<std::pair<NetMessage, int>> relay;
+    std::vector<std::vector<std::string>> addrs;
+    {
+        std::lock_guard<std::mutex> lock(queueMutex);
+        relay.swap(relayQueue);
+        addrs.swap(addrQueue);
+    }
+    if (!relay.empty()) {
+        std::lock_guard<std::mutex> lock(peersMutex);
+        for (const auto& [msg, except] : relay) {
+            for (auto const& [fd, peer] : peers) {
+                if (fd != except && peer->getState() == PeerState::ACTIVE) peer->sendMsg(msg);
+            }
+        }
+    }
+    for (const auto& list : addrs) handleAddrMessage(list);   // takes peersMutex itself
 }
 
 void Network::acceptNewConnection() {
@@ -806,7 +943,13 @@ void Network::handleSocketIO() {
         int fd = it->first;
         Peer* peer = it->second.get();
 
+        // Never block here: this loop holds peersMutex and visits every peer, so one idle
+        // connection would stall the whole network thread (and Network::stop()).
+#ifdef _WIN32
         int n = recv(fd, buffer, sizeof(buffer), 0);
+#else
+        int n = recv(fd, buffer, sizeof(buffer), MSG_DONTWAIT);
+#endif
         if (n > 0) {
             auto& peerBuffer = peer->getReceiveBuffer();
             if (peerBuffer.size() + n > MAX_PEER_BUFFER) {

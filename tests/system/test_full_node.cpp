@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include "server.h"
-#include "blockchain.h"
+#include "node_harness.h"
 #include <filesystem>
 #include <thread>
 #include <chrono>
@@ -24,8 +24,10 @@ protected:
 };
 
 TEST_F(FullNodeSystemTest, StartupAndMineBlock) {
-    // 1. Initialize Blockchain
-    Bucks::Blockchain chain(testDir + "/utxo.db", testDir + "/blocks.db");
+    // 1. Open a regtest node
+    Bucks::TestUtil::NodeHarness harness;
+    ASSERT_TRUE(harness.node) << harness.error;
+    Bucks::Node& chain = *harness.node;
 
     // 2. Configure Server (Full Node mode)
     Bucks::ServerConfig config;

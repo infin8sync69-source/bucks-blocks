@@ -27,6 +27,14 @@ struct Classification {
 struct GoldState {
     friend bool operator==(const GoldState&, const GoldState&) { return true; }
     friend bool operator!=(const GoldState& a, const GoldState& b) { return !(a == b); }
+
+    // Stored with the coins (1 .. 1,024 bytes). The stub is a single version
+    // byte; the gold spec defines the real layout.
+    std::vector<uint8_t> serialize() const { return {1}; }
+    static bool deserialize(const std::vector<uint8_t>& bytes, GoldState& out) {
+        out = GoldState{};
+        return bytes.size() == 1 && bytes[0] == 1;
+    }
 };
 
 // Context-free classification of a NULL_DATA payload. Used by the sigop
@@ -50,6 +58,11 @@ GoldUndoBuilder beginBlock(const GoldState& stateBeforeBlock);
 // payloads, so it returns true without changing the state.
 bool connectOutput(const Transaction& tx, uint32_t txIndex, uint32_t vout, const Hash256& txid,
                    uint32_t height, GoldState& state, GoldUndoBuilder& undo, ValidationState& st);
+
+// Mempool-time check of a transaction against the committed gold state
+// (spec section 9.2, check 14). The stub accepts everything.
+bool checkForMempool(const Transaction& tx, const GoldState& state, uint32_t height,
+                     ValidationState& st);
 
 // Exact inverse of the undo bytes. The stub accepts only an empty record.
 bool disconnectBlock(GoldState& state, const std::vector<uint8_t>& goldUndo);

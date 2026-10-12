@@ -9,11 +9,13 @@
 #include "crypto.h"
 #include "transaction.h"
 #include "sighash.h"
-#include "blockchain.h"
+#include "chainparams.h"
 #include "utxo.h"
 #include "hd_8192.h"
 
 namespace Bucks {
+
+class Node;
 
 class Wallet {
 public:
@@ -57,21 +59,28 @@ public:
     const PublicKey& getPublicKey() const;
     std::string getAddress() const;
 
+    // Base58Check version byte of this wallet's addresses: the network's
+    // ChainParams::p2pkhAddressVersion. The default is regtest's; whoever
+    // creates or loads a wallet for a node sets the node's value.
+    void setAddressVersion(uint8_t version) { addressVersion_ = version; }
+    uint8_t addressVersion() const { return addressVersion_; }
+
     std::string getPrivateKeyHex() const;
     std::string getPublicKeyHex() const;
 
     // Get P2PKH script for this wallet's pubkey
     std::vector<uint8_t> getP2PKHScript() const;
 
-    // Create P2PKH script from address
-    static std::vector<uint8_t> addressToP2PKHScript(const std::string& address);
+    // Create P2PKH script from an address of the network with this version byte.
+    // Throws on a bad checksum or an address of another network.
+    static std::vector<uint8_t> addressToP2PKHScript(const std::string& address, uint8_t version);
 
     // Get total balance from UTXOs owned by this wallet
-    uint64_t getBalance(Blockchain& chain) const;
+    uint64_t getBalance(Node& node) const;
 
-    // Build a transaction sending `amount` to `to` using UTXOs from `chain`.
-    // Throws on insufficient funds.
-    Transaction createTransaction(const std::string& to, uint64_t amount, Blockchain& chain) const;
+    // Build a transaction sending `amount` to `to` using mature, unspent coins
+    // of this wallet from `node`. Throws on insufficient funds.
+    Transaction createTransaction(const std::string& to, uint64_t amount, Node& node) const;
 
     // Sign all inputs of a transaction. `spent[i]` is the output spent by
     // input i; the signature commits to all of them and to the genesis hash
@@ -94,6 +103,7 @@ private:
     PrivateKey privKey{};
     PublicKey pubKey;
     std::string address;
+    uint8_t addressVersion_ = chainParams(NetworkId::REGTEST).p2pkhAddressVersion;
     std::string mnemonic; // canonical phrase if generated/restored from one
 
     ExtendedKey masterKey;

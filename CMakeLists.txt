@@ -81,16 +81,15 @@ add_library(bucks_core STATIC
     src/chainparams.cpp
     src/sighash.cpp
     src/chain.cpp
+    src/policy.cpp
+    src/chaindb.cpp
+    src/node.cpp
+    src/miner.cpp
     src/coins.cpp
     src/undo.cpp
     src/merkle.cpp
-    src/utxo.cpp
-    src/utxodb.cpp
-    src/blockdb.cpp
     src/transaction.cpp
     src/block.cpp
-    src/blockchain.cpp
-    src/validation.cpp
     src/wallet.cpp
     src/hd_8192.cpp
     src/server.cpp

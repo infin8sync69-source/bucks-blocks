@@ -37,6 +37,7 @@ mkdir -p "${PILOT_DIR}/node3"
     echo "[node1] Starting (miner, p2p=8333, rest=8080)..."
     "${OLDPWD}/${BINARY}" \
         --network=regtest \
+        --datadir "${PILOT_DIR}/node1/data" \
         --server \
         --port 8080 \
         --p2p-port 8333 \
@@ -55,6 +56,7 @@ sleep 4   # give node 1 time to mine genesis before peers connect
     echo "[node2] Starting (p2p=8334, rest=8081)..."
     "${OLDPWD}/${BINARY}" \
         --network=regtest \
+        --datadir "${PILOT_DIR}/node2/data" \
         --server \
         --port 8081 \
         --p2p-port 8334 \
@@ -70,6 +72,7 @@ echo "Node 2 started (PID $PID2)"
     echo "[node3] Starting (p2p=8335, rest=8082)..."
     "${OLDPWD}/${BINARY}" \
         --network=regtest \
+        --datadir "${PILOT_DIR}/node3/data" \
         --server \
         --port 8082 \
         --p2p-port 8335 \

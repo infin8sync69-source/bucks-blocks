@@ -71,6 +71,11 @@ public:
     const BlockIndex* find(const Hash256& hash) const;
     size_t size() const { return map_.size(); }
 
+    template <class F>
+    void forEach(F&& f) const {
+        for (const auto& kv : map_) f(*kv.second);
+    }
+
     // Visits every entry in unspecified order (candidate and descendant scans).
     template <class F>
     void forEach(F&& f) {

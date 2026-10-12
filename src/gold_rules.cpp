@@ -22,6 +22,10 @@ bool connectOutput(const Transaction&, uint32_t, uint32_t, const Hash256&, uint3
     return true;
 }
 
+bool checkForMempool(const Transaction&, const GoldState&, uint32_t, ValidationState&) {
+    return true;
+}
+
 bool disconnectBlock(GoldState&, const std::vector<uint8_t>& goldUndo) {
     return goldUndo.empty();
 }
