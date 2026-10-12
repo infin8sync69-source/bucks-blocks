@@ -8,6 +8,9 @@ add_executable(unit_tests
     test_script_templates.cpp
     test_sighash.cpp
     test_chain_index.cpp
+    test_tx_rules.cpp
+    test_header_rules.cpp
+    test_connect_block.cpp
     test_coins.cpp
     test_undo.cpp
     test_crypto.cpp

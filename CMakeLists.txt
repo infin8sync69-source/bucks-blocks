@@ -98,6 +98,9 @@ add_library(bucks_core STATIC
     src/bip_8192.cpp
     src/protocol_enc.cpp
     src/genesis.cpp
+    src/validation_rules.cpp
+    src/gold_rules.cpp
+    src/connect_block.cpp
     src/pow.cpp
     src/mempool.cpp
     src/script.cpp
