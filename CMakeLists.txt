@@ -101,6 +101,7 @@ add_library(bucks_core STATIC
     src/validation_rules.cpp
     src/gold_rules.cpp
     src/connect_block.cpp
+    src/chainstate.cpp
     src/pow.cpp
     src/mempool.cpp
     src/script.cpp

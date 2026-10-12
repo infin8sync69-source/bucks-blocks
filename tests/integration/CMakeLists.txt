@@ -4,9 +4,10 @@ add_executable(integration_tests
     test_wallet_db.cpp
     test_chain_spend.cpp
     test_network_guard.cpp
+    test_chainstate.cpp
 )
 
-target_include_directories(integration_tests PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(integration_tests PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/tests/util)
 target_link_libraries(integration_tests PRIVATE GTest::gtest_main bucks_core)
 
 add_test(NAME integration_tests COMMAND integration_tests)

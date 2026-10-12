@@ -63,7 +63,7 @@ cc "${OPT_FLAGS[@]}" "${HARDEN_FLAGS[@]}" \
 echo "Compiling source files..."
 CPP_SOURCES=(
     crypto serialize u256 chainparams sighash chain coins undo merkle utxo utxodb blockdb transaction block blockchain validation
-    wallet hd_8192 server network bip_8192 protocol_enc genesis validation_rules gold_rules connect_block pow mempool
+    wallet hd_8192 server network bip_8192 protocol_enc genesis validation_rules gold_rules connect_block chainstate pow mempool
     script
     main
 )

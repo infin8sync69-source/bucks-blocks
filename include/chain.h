@@ -71,6 +71,12 @@ public:
     const BlockIndex* find(const Hash256& hash) const;
     size_t size() const { return map_.size(); }
 
+    // Visits every entry in unspecified order (candidate and descendant scans).
+    template <class F>
+    void forEach(F&& f) {
+        for (auto& kv : map_) f(*kv.second);
+    }
+
 private:
     std::unordered_map<Hash256, std::unique_ptr<BlockIndex>, Hash256Hasher> map_;
 };
