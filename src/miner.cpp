@@ -1,4 +1,5 @@
 #include "miner.h"
+#include "log.h"
 
 #include <algorithm>
 #include <ctime>
@@ -188,7 +189,7 @@ bool BlockAssembler::createNewBlock(const Script& minerScript, const AssemblerOp
         ValidationState st;
         if (testBlockValidity(out.block, st)) return true;
 
-        std::cerr << "BUG: template invalid: " << st.code << " " << st.detail << "\n";
+        Bucks::logErr() << "BUG: template invalid: " << st.code << " " << st.detail << "\n";
         err = "template invalid: " + st.code;
         if (attempt == 1 || out.block.transactions.size() < 2) return false;
 
@@ -218,7 +219,7 @@ bool BlockAssembler::createNewBlock(const Script& minerScript, const AssemblerOp
             if (prefixValid(mid)) lo = mid; else hi = mid;
         }
         const Hash256 bad = all[hi].txid();   // all[0] is the coinbase, so all[hi] is selected tx hi
-        std::cerr << "BUG: removing transaction " << hexStr(std::vector<uint8_t>(bad.begin(), bad.end()))
+        Bucks::logErr() << "BUG: removing transaction " << hexStr(std::vector<uint8_t>(bad.begin(), bad.end()))
                   << " from the mempool\n";
         mempool_.remove(bad);
         skip.push_back(bad);

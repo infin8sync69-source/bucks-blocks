@@ -1,4 +1,5 @@
 #include "network.h"
+#include "log.h"
 #include "node.h"
 #include "serialize.h"
 #include "consensus.h"
@@ -244,15 +245,15 @@ Peer::Peer(Network& net, int socket, const std::string& ip, uint16_t port, bool 
 
 void Peer::misbehavior(int penalty) {
     misbehaviorScore += penalty;
-    std::cout << "DEBUG: Peer " << ip << " misbehavior: +" << penalty
+    Bucks::logOut() << "DEBUG: Peer " << ip << " misbehavior: +" << penalty
               << " (total: " << misbehaviorScore << ")" << std::endl;
 
     if (misbehaviorScore >= 100) {
         if (isLocalAddress(ip)) {
-            std::cout << "WARNING: Peer " << ip << " exceeded misbehavior threshold but is a local/LAN address — skipping ban and disconnect." << std::endl;
+            Bucks::logOut() << "WARNING: Peer " << ip << " exceeded misbehavior threshold but is a local/LAN address — skipping ban and disconnect." << std::endl;
             return;
         }
-        std::cout << "DEBUG: Peer " << ip << " exceeded misbehavior threshold. Banning IP." << std::endl;
+        Bucks::logOut() << "DEBUG: Peer " << ip << " exceeded misbehavior threshold. Banning IP." << std::endl;
         network.banIP(ip);
         disconnect();
     }
@@ -322,7 +323,7 @@ void Peer::processBuffer() {
                            (size_t(receiveBuffer[18]) << 16) | (size_t(receiveBuffer[19]) << 24);
 
         if (len > NetMessageHeader::maxPayload(type)) {
-            std::cerr << "DEBUG: Peer " << ip << " sent an oversized " << NetMessageHeader::typeToCommand(type)
+            Bucks::logErr() << "DEBUG: Peer " << ip << " sent an oversized " << NetMessageHeader::typeToCommand(type)
                       << " (" << len << " bytes). Banning." << std::endl;
             network.banIP(ip);
             disconnect();
@@ -341,7 +342,7 @@ void Peer::processBuffer() {
         } catch (const NetIncomplete&) {
             return;   // cannot happen: the frame is complete
         } catch (const std::exception& e) {
-            std::cerr << "DEBUG: Peer " << ip << " msg error: " << e.what() << std::endl;
+            Bucks::logErr() << "DEBUG: Peer " << ip << " msg error: " << e.what() << std::endl;
             misbehavior(20);
         }
     }
@@ -387,14 +388,14 @@ void Peer::handleMessage(const NetMessage& msg) {
     if (encryptionNegotiated && msg.type != MessageType::ENCINIT) {
         std::vector<uint8_t> clear;
         if (!encryption->decrypt(msg.payload, clear)) {
-            std::cerr << "DEBUG: Decryption failed for message from " << ip << std::endl;
+            Bucks::logErr() << "DEBUG: Decryption failed for message from " << ip << std::endl;
             misbehavior(10);
             return;
         }
         decrypted.payload = clear;
     }
 
-    std::cout << "DEBUG: Peer " << ip << " msg: '" << NetMessageHeader::typeToCommand(decrypted.type) << "'" << (encryptionNegotiated ? " [ENCRYPTED]" : "") << std::endl;
+    Bucks::logOut() << "DEBUG: Peer " << ip << " msg: '" << NetMessageHeader::typeToCommand(decrypted.type) << "'" << (encryptionNegotiated ? " [ENCRYPTED]" : "") << std::endl;
 
     switch (decrypted.type) {
         case MessageType::ENCINIT: {
@@ -402,7 +403,7 @@ void Peer::handleMessage(const NetMessage& msg) {
                  PublicKey peerPub(decrypted.payload.begin(), decrypted.payload.begin() + 33);
                  if (encryption->establishSharedSecret(peerPub)) {
                      encryptionNegotiated = true;
-                     std::cout << "DEBUG: P2P Encryption established with Peer " << ip << std::endl;
+                     Bucks::logOut() << "DEBUG: P2P Encryption established with Peer " << ip << std::endl;
 
                      // Now send our VERSION message (it will be encrypted)
                      Writer w;
@@ -416,7 +417,7 @@ void Peer::handleMessage(const NetMessage& msg) {
             if (decrypted.payload.size() >= 4) {
                 Reader r(decrypted.payload);
                 const uint32_t peerHeight = r.u32();
-                std::cout << "DEBUG: Peer " << ip << " version: height=" << peerHeight << std::endl;
+                Bucks::logOut() << "DEBUG: Peer " << ip << " version: height=" << peerHeight << std::endl;
                 if (peerHeight > node.height()) requestHeaders();
             } else {
                 misbehavior(10); // Penalty for invalid VERSION payload
@@ -426,7 +427,7 @@ void Peer::handleMessage(const NetMessage& msg) {
         }
         case MessageType::VERACK:
             state = PeerState::ACTIVE;
-            std::cout << "DEBUG: Peer " << ip << " is now ACTIVE" << std::endl;
+            Bucks::logOut() << "DEBUG: Peer " << ip << " is now ACTIVE" << std::endl;
             break;
         case MessageType::INV: {
             std::vector<Inventory> invs;
@@ -507,7 +508,7 @@ void Peer::handleMessage(const NetMessage& msg) {
             try {
                 b = Block::deserialize(decrypted.payload);
             } catch (const std::exception& e) {
-                std::cerr << "DEBUG: Unparsable block from " << ip << ": " << e.what() << std::endl;
+                Bucks::logErr() << "DEBUG: Unparsable block from " << ip << ": " << e.what() << std::endl;
                 misbehavior(20);
                 break;
             }
@@ -515,7 +516,7 @@ void Peer::handleMessage(const NetMessage& msg) {
             const bool requested = requestedBlocks.erase(hash) > 0;
             const ValidationState st = node.submitBlock(b, requested);
             if (st.valid()) {
-                std::cout << "DEBUG: Accepted block " << b.header.height << " from " << ip << std::endl;
+                Bucks::logOut() << "DEBUG: Accepted block " << b.header.height << " from " << ip << std::endl;
                 requestMissingBlocks();
                 if (requestedBlocks.empty()) requestHeaders();
             } else if (st.result == ValidationResult::MISSING_PARENT) {
@@ -524,7 +525,7 @@ void Peer::handleMessage(const NetMessage& msg) {
                 network.recordRejectedBlock(st.result);
                 const int penalty = penaltyFor(st.result);
                 if (penalty) {
-                    std::cerr << "DEBUG: Block from " << ip << " rejected: " << st.code << std::endl;
+                    Bucks::logErr() << "DEBUG: Block from " << ip << " rejected: " << st.code << std::endl;
                     misbehavior(penalty);
                 }
             }
@@ -552,7 +553,7 @@ void Peer::handleMessage(const NetMessage& msg) {
         case MessageType::GETADDR: {
             // Peer is requesting our known peer addresses. This handler already runs under
             // peersMutex (Network::handleSocketIO), so it must not lock it again.
-            std::cout << "DEBUG: Peer " << ip << " requested peer addresses" << std::endl;
+            Bucks::logOut() << "DEBUG: Peer " << ip << " requested peer addresses" << std::endl;
 
             std::vector<std::string> addresses;
             for (const auto& [fd, peer] : network.peers) {
@@ -688,7 +689,7 @@ void Network::setupListenSocket() {
 
     int opt = 1;
     if (setsockopt(listenSocket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt)) < 0) {
-        std::cerr << "WARNING: setsockopt SO_REUSEADDR failed: " << strerror(errno) << "\n";
+        Bucks::logErr() << "WARNING: setsockopt SO_REUSEADDR failed: " << strerror(errno) << "\n";
     }
 
 #ifdef _WIN32
@@ -708,7 +709,7 @@ void Network::setupListenSocket() {
     }
 
     listen(listenSocket, 10);
-    std::cout << "DEBUG: Network listening on port " << listenPort << std::endl;
+    Bucks::logOut() << "DEBUG: Network listening on port " << listenPort << std::endl;
 }
 
 bool Network::connectToPeer(const std::string& ip, uint16_t port) {
@@ -828,7 +829,7 @@ void Network::acceptNewConnection() {
     {
         std::lock_guard<std::mutex> lock(securityMutex);
         if (bannedIPs.count(ip) > 0) {
-            std::cout << "DEBUG: Dropping connection from banned IP " << ip << std::endl;
+            Bucks::logOut() << "DEBUG: Dropping connection from banned IP " << ip << std::endl;
 #ifdef _WIN32
             closesocket(s);
 #else
@@ -841,7 +842,7 @@ void Network::acceptNewConnection() {
         if (lastConnectionTimes.count(ip) > 0) {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastConnectionTimes[ip]).count();
             if (elapsed < 5) {
-                std::cout << "DEBUG: Throttling connection attempt from " << ip << " (too fast)" << std::endl;
+                Bucks::logOut() << "DEBUG: Throttling connection attempt from " << ip << " (too fast)" << std::endl;
 #ifdef _WIN32
                 closesocket(s);
 #else
@@ -853,7 +854,7 @@ void Network::acceptNewConnection() {
         lastConnectionTimes[ip] = now;
     }
 
-    std::cout << "DEBUG: Accepted connection from " << ip << std::endl;
+    Bucks::logOut() << "DEBUG: Accepted connection from " << ip << std::endl;
 
     std::lock_guard<std::mutex> lock(peersMutex);
     
@@ -866,7 +867,7 @@ void Network::acceptNewConnection() {
     }
 
     if (ipCount >= MAX_PEERS_PER_IP) {
-        std::cout << "DEBUG: Sybil Guard: Too many connections from " << ip << " (" << ipCount << "). Dropping." << std::endl;
+        Bucks::logOut() << "DEBUG: Sybil Guard: Too many connections from " << ip << " (" << ipCount << "). Dropping." << std::endl;
 #ifdef _WIN32
         closesocket(s);
 #else
@@ -876,7 +877,7 @@ void Network::acceptNewConnection() {
     }
 
     if (peers.size() >= MAX_PEERS) {
-        std::cout << "DEBUG: Max peers reached (" << MAX_PEERS << "). Dropping connection from " << ip << std::endl;
+        Bucks::logOut() << "DEBUG: Max peers reached (" << MAX_PEERS << "). Dropping connection from " << ip << std::endl;
 #ifdef _WIN32
         closesocket(s);
 #else
@@ -897,7 +898,7 @@ void Network::pruneZombiePeers() {
         if (peer->getState() == PeerState::HANDSHAKE) {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - peer->getConnectionTime()).count();
             if (elapsed > 30) {
-                std::cout << "DEBUG: Pruning zombie peer " << peer->address() << " (handshake timeout)" << std::endl;
+                Bucks::logOut() << "DEBUG: Pruning zombie peer " << peer->address() << " (handshake timeout)" << std::endl;
                 it = peers.erase(it);
                 continue;
             }
@@ -907,7 +908,7 @@ void Network::pruneZombiePeers() {
         if (!peer->requestedBlocks.empty()) {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - peer->lastBlockRequestTime).count();
             if (elapsed > 60) {
-                std::cout << "DEBUG: Pruning stalling peer " << peer->address() << " (sync timeout)" << std::endl;
+                Bucks::logOut() << "DEBUG: Pruning stalling peer " << peer->address() << " (sync timeout)" << std::endl;
                 it = peers.erase(it);
                 continue;
             }
@@ -921,13 +922,13 @@ void Network::banIP(const std::string& ip) {
     // All three pilot nodes share 127.0.0.1; banning that address
     // would cut off the entire local network.
     if (isLocalAddress(ip)) {
-        std::cout << "WARNING: Refusing to ban local/LAN address " << ip
+        Bucks::logOut() << "WARNING: Refusing to ban local/LAN address " << ip
                   << " — local peers are whitelisted from the ban list." << std::endl;
         return;
     }
     std::lock_guard<std::mutex> lock(securityMutex);
     bannedIPs.insert(ip);
-    std::cout << "DEBUG: IP " << ip << " added to ban list." << std::endl;
+    Bucks::logOut() << "DEBUG: IP " << ip << " added to ban list." << std::endl;
 }
 
 bool Network::isIPBanned(const std::string& ip) const {
@@ -953,7 +954,7 @@ void Network::handleSocketIO() {
         if (n > 0) {
             auto& peerBuffer = peer->getReceiveBuffer();
             if (peerBuffer.size() + n > MAX_PEER_BUFFER) {
-                std::cerr << "DEBUG: Peer " << peer->address() << " buffer overflow. Banning." << std::endl;
+                Bucks::logErr() << "DEBUG: Peer " << peer->address() << " buffer overflow. Banning." << std::endl;
                 banIP(peer->getIP());
                 peer->disconnect();
                 it = peers.erase(it);
@@ -963,7 +964,7 @@ void Network::handleSocketIO() {
             peer->processBuffer();
             ++it;
         } else if (n == 0) {
-            std::cout << "DEBUG: Peer " << peer->address() << " disconnected" << std::endl;
+            Bucks::logOut() << "DEBUG: Peer " << peer->address() << " disconnected" << std::endl;
             it = peers.erase(it);
         } else {
 #ifdef _WIN32
@@ -1011,7 +1012,7 @@ void Network::loadSeedNodes() {
         "sg.bucks.network:8333"
     };
 
-    std::cout << "DEBUG: Loaded " << seedNodes.size() << " seed nodes" << std::endl;
+    Bucks::logOut() << "DEBUG: Loaded " << seedNodes.size() << " seed nodes" << std::endl;
 }
 
 void Network::discoverPeers() {
@@ -1022,7 +1023,7 @@ void Network::discoverPeers() {
     if (elapsed < 30) return;
     
     lastDiscoveryTime = now;
-    std::cout << "DEBUG: Running peer discovery..." << std::endl;
+    Bucks::logOut() << "DEBUG: Running peer discovery..." << std::endl;
     
     // FIX: Same deadlock fix as handleAddrMessage — Bucks v1 security patch
     // Collect seed peers to connect under the lock, then connect outside the lock.
@@ -1047,7 +1048,7 @@ void Network::discoverPeers() {
     }  // peersMutex released
 
     for (auto& [ip, port] : seedsToConnect) {
-        std::cout << "DEBUG: Connecting to seed node " << ip << ":" << port << std::endl;
+        Bucks::logOut() << "DEBUG: Connecting to seed node " << ip << ":" << port << std::endl;
         connectToPeer(ip, port);
     }
 
@@ -1055,7 +1056,7 @@ void Network::discoverPeers() {
     {
         std::lock_guard<std::mutex> lock(peersMutex);
         if (!seedsToConnect.empty() && peers.empty()) {
-            std::cerr << "Cannot connect to Bucks network. "
+            Bucks::logErr() << "Cannot connect to Bucks network. "
                       << "Check your internet connection or run a local node." << std::endl;
         }
     }
@@ -1065,7 +1066,7 @@ void Network::discoverPeers() {
         std::lock_guard<std::mutex> lock(peersMutex);
         for (auto& [fd, peer] : peers) {
             if (peer->getState() == PeerState::ACTIVE) {
-                std::cout << "DEBUG: Sending GETADDR to " << peer->getIP() << std::endl;
+                Bucks::logOut() << "DEBUG: Sending GETADDR to " << peer->getIP() << std::endl;
                 peer->sendMsg(NetMessage(MessageType::GETADDR, {}));
             }
         }
@@ -1078,7 +1079,7 @@ void Network::handleAddrMessage(const std::vector<std::string>& addresses) {
     // connectToPeer() also acquires peersMutex → deadlock → node hangs.
     // Fix: collect the (ip, port) pairs to connect inside the mutex, release the
     // lock, then call connectToPeer() for each pair outside the critical section.
-    std::cout << "DEBUG: Received " << addresses.size() << " peer addresses" << std::endl;
+    Bucks::logOut() << "DEBUG: Received " << addresses.size() << " peer addresses" << std::endl;
 
     for (const auto& addr : addresses)
         knownPeers.insert(addr);
@@ -1106,7 +1107,7 @@ void Network::handleAddrMessage(const std::vector<std::string>& addresses) {
     }  // peersMutex released before any connectToPeer() call
 
     for (auto& [ip, port] : toConnect) {
-        std::cout << "DEBUG: Connecting to discovered peer " << ip << ":" << port << std::endl;
+        Bucks::logOut() << "DEBUG: Connecting to discovered peer " << ip << ":" << port << std::endl;
         connectToPeer(ip, port);
     }
 }

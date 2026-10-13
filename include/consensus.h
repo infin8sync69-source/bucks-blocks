@@ -65,11 +65,6 @@ constexpr uint64_t COIN = 100'000'000;
 constexpr uint64_t INITIAL_SUBSIDY = 50 * COIN;
 
 /**
- * Reward halving interval (in blocks).
- */
-constexpr uint32_t HALVING_INTERVAL = 210'000;
-
-/**
  * Maximum number of coins that can ever exist.
  * (Bitcoin-style cap)
  */
@@ -93,13 +88,6 @@ constexpr uint32_t RETARGET_INTERVAL = DIFFICULTY_ADJUSTMENT_INTERVAL;
 /** T: expected seconds per retarget period (1,209,600). */
 constexpr int64_t TARGET_TIMESPAN =
     static_cast<int64_t>(RETARGET_INTERVAL) * TARGET_SPACING;
-
-/**
- * LEGACY (old chain code only): the real per-network limit lives in
- * ChainParams::powLimitBits (0x1d00ffff on main/test). 0x1f00ffff overflows
- * the 256-bit retarget math; removed with the old chain code (plan step 16).
- */
-constexpr uint32_t POW_LIMIT_BITS = 0x1f00ffff;
 
 
 /* ---------------- Transactions ---------------- */
@@ -200,21 +188,6 @@ inline const char* VAULT_AUTHORITY_PUBKEYS[5] = {
     "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04", // Keyholder 4: Standards Board
     "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa05", // Keyholder 5: Geographic Reserve
 };
-
-/* ---------------- Governance OP_RETURN Markers ---------------- */
-
-/**
- * 4-byte prefix for governance events in OP_RETURN outputs.
- * "BKGV" in ASCII = 0x424B4756 (little-endian on-wire: 56 47 4B 42)
- */
-constexpr uint32_t GOV_PREFIX = 0x424B4756;
-
-/** Governance event type bytes */
-constexpr uint8_t GOV_VOTE   = 0x01; // Cast a vote on a proposal
-constexpr uint8_t GOV_PROP   = 0x02; // Submit a governance proposal
-constexpr uint8_t GOV_ELECT  = 0x03; // Election result record
-constexpr uint8_t GOV_CAND   = 0x04; // Candidate registration
-constexpr uint8_t GOV_VETO   = 0x05; // Veto a proposal
 
 } // namespace Consensus
 } // namespace Bucks

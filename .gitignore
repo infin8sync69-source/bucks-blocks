@@ -39,3 +39,4 @@ frontend/dist/
 .DS_Store
 *.log
 Thumbs.db
+build-ci-*/

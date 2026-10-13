@@ -1,4 +1,5 @@
 #include "server.h"
+#include "log.h"
 #include "node.h"
 #include "pow.h"
 #include "block.h"
@@ -388,7 +389,7 @@ Server::Server(Node& n, Network*, const ServerConfig& cfg)
     if (!ensurePrivateDir(dataDirPath, &err)) {
         startupError = "cannot create data directory " + dataDirPath + ": " + err;
         walletErr = startupError;
-        std::cerr << "✗ " << startupError << "\n";
+        Bucks::logErr() << "✗ " << startupError << "\n";
     } else {
         loadWallets();
     }
@@ -428,13 +429,13 @@ bool Server::resolveApiToken() {
         std::string t;
         if (!readTextFile(config.apiTokenFile, t)) {
             startupError = "cannot read API token file " + config.apiTokenFile;
-            std::cerr << "✗ " << startupError << "\n";
+            Bucks::logErr() << "✗ " << startupError << "\n";
             return false;
         }
         apiToken = trimWs(t);
         if (apiToken.empty()) {
             startupError = "API token file " + config.apiTokenFile + " is empty";
-            std::cerr << "✗ " << startupError << "\n";
+            Bucks::logErr() << "✗ " << startupError << "\n";
             return false;
         }
         return true;
@@ -448,7 +449,7 @@ bool Server::resolveApiToken() {
         apiToken = randomHex(32);
     } catch (const std::exception& e) {
         startupError = e.what();
-        std::cerr << "✗ " << startupError << "\n";
+        Bucks::logErr() << "✗ " << startupError << "\n";
         return false;
     }
     tokenGenerated = true;
@@ -462,14 +463,14 @@ bool Server::start() {
 bool Server::start(int port) {
     if (isRunning) return false;
     if (!startupError.empty()) {
-        std::cerr << "✗ Cannot start API server: " << startupError << "\n";
+        Bucks::logErr() << "✗ Cannot start API server: " << startupError << "\n";
         return false;
     }
 
     try {
         setupRoutes();
     } catch (const std::exception& e) {
-        std::cerr << "Error setting up routes: " << e.what() << std::endl;
+        Bucks::logErr() << "Error setting up routes: " << e.what() << std::endl;
         return false;
     }
 
@@ -477,7 +478,7 @@ bool Server::start(int port) {
 
     // Serve static files
     if (!s->set_base_dir(config.webRoot.c_str()) && config.enableLogging) {
-        std::cerr << "⚠ Web root " << config.webRoot << " not found; only the API is served\n";
+        Bucks::logErr() << "⚠ Web root " << config.webRoot << " not found; only the API is served\n";
     }
 
     // httplib's default is SO_REUSEPORT, which lets a second process (or a
@@ -507,9 +508,9 @@ bool Server::start(int port) {
         try {
             if (ep) std::rethrow_exception(ep);
         } catch (const std::exception& e) {
-            std::cerr << "✗ Unhandled exception in " << req.method << " " << req.path << ": " << e.what() << "\n";
+            Bucks::logErr() << "✗ Unhandled exception in " << req.method << " " << req.path << ": " << e.what() << "\n";
         } catch (...) {
-            std::cerr << "✗ Unhandled exception in " << req.method << " " << req.path << "\n";
+            Bucks::logErr() << "✗ Unhandled exception in " << req.method << " " << req.path << "\n";
         }
         reply(res, 500, errorJson("Internal server error"));
     });
@@ -614,7 +615,7 @@ bool Server::start(int port) {
         cookieFilePath = (fs::path(dataDirPath) / ".cookie").string();
         std::string err;
         if (!writePrivateFileAtomic(cookieFilePath, apiToken + "\n", &err)) {
-            std::cerr << "✗ Cannot write API token cookie " << cookieFilePath << ": " << err << "\n";
+            Bucks::logErr() << "✗ Cannot write API token cookie " << cookieFilePath << ": " << err << "\n";
             cookieFilePath.clear();
             return false;
         }
@@ -629,7 +630,7 @@ bool Server::start(int port) {
         bound = port;
     }
     if (bound <= 0) {
-        std::cerr << "✗ Cannot bind API server to " << config.bindAddress << ":" << port << "\n";
+        Bucks::logErr() << "✗ Cannot bind API server to " << config.bindAddress << ":" << port << "\n";
         if (!cookieFilePath.empty()) {
             std::error_code ec;
             fs::remove(cookieFilePath, ec);
@@ -650,13 +651,13 @@ bool Server::start(int port) {
     }
 
     if (config.enableLogging) {
-        std::cout << "✓ HTTP Server started on port " << boundPort << "\n";
-        std::cout << "✓ Web UI available at http://" << config.bindAddress << ":" << boundPort << "\n";
+        Bucks::logOut() << "✓ HTTP Server started on port " << boundPort << "\n";
+        Bucks::logOut() << "✓ Web UI available at http://" << config.bindAddress << ":" << boundPort << "\n";
         if (!cookieFilePath.empty()) {
-            std::cout << "✓ API token written to " << cookieFilePath << " (paste it into the UI login screen)\n";
+            Bucks::logOut() << "✓ API token written to " << cookieFilePath << " (paste it into the UI login screen)\n";
         }
         if (!walletOk) {
-            std::cout << "⚠ Wallet subsystem disabled: " << walletErr << "\n";
+            Bucks::logOut() << "⚠ Wallet subsystem disabled: " << walletErr << "\n";
         }
     }
     return true;
@@ -1608,7 +1609,7 @@ void Server::startAutoMine() {
         std::lock_guard<std::mutex> lock(walletMutex);
         if (wallets.empty()) {
             autoMining.store(false);
-            std::cout << "[miner] FAILED to start auto-mining: No wallets available. Please create or restore a wallet first.\n";
+            Bucks::logOut() << "[miner] FAILED to start auto-mining: No wallets available. Please create or restore a wallet first.\n";
             return;
         }
         minerAddress = wallets[0].getAddress();
@@ -1617,14 +1618,14 @@ void Server::startAutoMine() {
     // A previous loop may have exited after stopAutoMine(); reap it first.
     if (autoMinerThread.joinable()) autoMinerThread.join();
 
-    std::cout << "[miner] Auto-mining started -> " << minerAddress << std::endl;
+    Bucks::logOut() << "[miner] Auto-mining started -> " << minerAddress << std::endl;
     autoMinerThread = std::thread(&Server::autoMineLoop, this);
 }
 
 void Server::stopAutoMine() {
     autoMineStop.store(true);
     autoMining.store(false);
-    std::cout << "[miner] Auto-mining stopped." << std::endl;
+    Bucks::logOut() << "[miner] Auto-mining stopped." << std::endl;
 }
 
 void Server::autoMineLoop() {
@@ -1650,16 +1651,16 @@ void Server::autoMineLoop() {
 
         if (r == MineResult::FOUND) {
             ++blocksFound;
-            std::cout << "[miner] *** Block found! hash=" << hash256ToHex(found)
+            Bucks::logOut() << "[miner] *** Block found! hash=" << hash256ToHex(found)
                       << " total=" << blocksFound.load() << " ***" << std::endl;
         } else if (r == MineResult::FAILED) {
             // For example "node is syncing": wait and try again.
-            std::cout << "[miner] " << err << ", retrying..." << std::endl;
+            Bucks::logOut() << "[miner] " << err << ", retrying..." << std::endl;
             for (int i = 0; i < 10 && autoMining.load() && !autoMineStop.load(); ++i)
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
-    std::cout << "[miner] Auto-mine loop exited." << std::endl;
+    Bucks::logOut() << "[miner] Auto-mine loop exited." << std::endl;
 }
 
 // ============================================================================
@@ -1675,7 +1676,7 @@ void Server::autoMineLoop() {
 
 bool Server::saveWalletsLocked() {
     if (!walletOk) {
-        std::cerr << "✗ Not saving wallets: " << walletErr << "\n";
+        Bucks::logErr() << "✗ Not saving wallets: " << walletErr << "\n";
         return false;
     }
 
@@ -1684,7 +1685,7 @@ bool Server::saveWalletsLocked() {
         std::string old, err;
         if (!readTextFile(walletFilePath, old) ||
             !writePrivateFileAtomic(walletFilePath + ".bak", old, &err)) {
-            std::cerr << "✗ Cannot back up " << walletFilePath << " (" << err << "); not rewriting it\n";
+            Bucks::logErr() << "✗ Cannot back up " << walletFilePath << " (" << err << "); not rewriting it\n";
             return false;
         }
         walletBackupDone = true;
@@ -1731,7 +1732,7 @@ bool Server::saveWalletsLocked() {
     bool ok = writePrivateFileAtomic(walletFilePath, text, &err);
     OPENSSL_cleanse(&text[0], text.size());
     if (!ok) {
-        std::cerr << "✗ Cannot write " << walletFilePath << ": " << err << "\n";
+        Bucks::logErr() << "✗ Cannot write " << walletFilePath << ": " << err << "\n";
         return false;
     }
     walletDoc = out;
@@ -1742,7 +1743,7 @@ bool Server::loadWalletDocument(const std::string& path, bool legacy) {
     std::string text;
     if (!readTextFile(path, text)) {
         walletErr = "cannot read " + path;
-        std::cerr << "✗ Wallet subsystem disabled: " << walletErr << "\n";
+        Bucks::logErr() << "✗ Wallet subsystem disabled: " << walletErr << "\n";
         return false;
     }
     json doc;
@@ -1750,7 +1751,7 @@ bool Server::loadWalletDocument(const std::string& path, bool legacy) {
         doc = json::parse(text);
     } catch (const std::exception&) {
         walletErr = path + " is not valid JSON; it is left untouched (restore it from wallets.json.bak or fix it by hand)";
-        std::cerr << "✗ Wallet subsystem disabled: " << walletErr << "\n";
+        Bucks::logErr() << "✗ Wallet subsystem disabled: " << walletErr << "\n";
         return false;
     }
     OPENSSL_cleanse(&text[0], text.size());
@@ -1763,7 +1764,7 @@ bool Server::loadWalletDocument(const std::string& path, bool legacy) {
         entries = doc["wallets"];
     } else {
         walletErr = path + " has an unknown layout; it is left untouched";
-        std::cerr << "✗ Wallet subsystem disabled: " << walletErr << "\n";
+        Bucks::logErr() << "✗ Wallet subsystem disabled: " << walletErr << "\n";
         return false;
     }
 
@@ -1785,13 +1786,13 @@ bool Server::loadWalletDocument(const std::string& path, bool legacy) {
             wallets.back().setAddressVersion(node.params().p2pkhAddressVersion);
         } catch (const std::exception& e) {
             ++skipped;
-            std::cerr << "⚠ Wallet entry " << n << " in " << path << " skipped: " << e.what() << "\n";
+            Bucks::logErr() << "⚠ Wallet entry " << n << " in " << path << " skipped: " << e.what() << "\n";
         }
         OPENSSL_cleanse(&privKey[0], privKey.size());
     }
     walletDoc = doc;
     if (skipped && config.enableLogging) {
-        std::cerr << "⚠ " << skipped << " wallet entr" << (skipped == 1 ? "y" : "ies") << " in " << path
+        Bucks::logErr() << "⚠ " << skipped << " wallet entr" << (skipped == 1 ? "y" : "ies") << " in " << path
                   << " could not be loaded; " << (legacy ? "" : "they are kept as-is in the file") << "\n";
     }
     return true;
@@ -1815,7 +1816,7 @@ void Server::loadWallets() {
             std::lock_guard<std::mutex> lock(walletMutex);
             count = wallets.size();
         }
-        std::cerr << "⚠ Loaded " << count << " wallet(s) from legacy " << fs::absolute(config.legacyWalletFile, ec).string()
+        Bucks::logErr() << "⚠ Loaded " << count << " wallet(s) from legacy " << fs::absolute(config.legacyWalletFile, ec).string()
                   << " (read-only). Move that file to " << walletFilePath
                   << " and delete the original; new wallets are saved to the data directory only.\n";
     }

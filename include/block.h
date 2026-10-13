@@ -37,12 +37,6 @@ public:
     Hash256 computeMerkleRoot(bool* mutated = nullptr) const;
 
     // ---- Accessors ----
-    uint32_t getHeight() const { return header.height; }
-    const Hash256& getPrevHash() const { return header.prevBlockHash; }
-    uint32_t getNonce() const { return header.nonce; }
-    uint32_t getTimestamp() const { return header.timestamp; }
-    uint32_t getBits() const { return header.bits; }
-    size_t getTxCount() const { return transactions.size(); }
 
     // ---- Serialization ----
     /**

@@ -66,7 +66,7 @@ endforeach()
 
 # --- deleted symbols must not come back (spec section 12) ---
 file(GLOB_RECURSE guarded_files "${BUCKS_ROOT}/src/*.cpp" "${BUCKS_ROOT}/include/*.h")
-foreach(symbol ScriptInterpreter legacySignatureHash wtxid signInput verifyInput MerkleTree findGenesisNonce makeGenesisBlock createGenesisBlock UTXODB BlockDB saveGoldReserve checkTransactionBasic checkTransactionInputs workForBits accumWork isValidBlock)
+foreach(symbol ScriptInterpreter legacySignatureHash wtxid signInput verifyInput MerkleTree findGenesisNonce makeGenesisBlock createGenesisBlock UTXODB BlockDB saveGoldReserve checkTransactionBasic checkTransactionInputs workForBits accumWork isValidBlock POW_LIMIT_BITS GOV_PREFIX GOV_VOTE GOV_PROP GOV_ELECT GOV_CAND GOV_VETO)
     foreach(f IN LISTS guarded_files)
         if(f MATCHES "/(sqlite3|httplib)\\.")
             continue()
@@ -76,6 +76,26 @@ foreach(symbol ScriptInterpreter legacySignatureHash wtxid signInput verifyInput
             list(APPEND errors "deleted symbol ${symbol} found in ${f}")
         endif()
     endforeach()
+endforeach()
+
+# --- no unsynchronized console output: use Bucks::logOut()/logErr() (include/log.h) ---
+file(GLOB_RECURSE src_files "${BUCKS_ROOT}/src/*.cpp")
+foreach(f IN LISTS src_files)
+    if(f MATCHES "/sqlite3\\.")
+        continue()
+    endif()
+    file(STRINGS "${f}" raw_stream REGEX "std::(cout|cerr) *<<")
+    if(raw_stream)
+        list(APPEND errors "std::cout/std::cerr used in ${f}; use Bucks::logOut()/logErr() (thread-safe)")
+    endif()
+endforeach()
+
+# --- every fuzz target ships a seed corpus (tests/fuzz, regenerate with tools/make_fuzz_corpus.py) ---
+foreach(target transaction block header undo netmessage compactsize)
+    file(GLOB seeds "${BUCKS_ROOT}/tests/fuzz/corpus/${target}/*")
+    if(NOT seeds)
+        list(APPEND errors "tests/fuzz/corpus/${target} has no seed files")
+    endif()
 endforeach()
 
 if(errors)

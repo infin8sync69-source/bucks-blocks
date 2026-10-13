@@ -88,7 +88,6 @@ public:
     // How often (in nonces) the loop looks at the tip and the clock; default 65,536.
     void setCheckInterval(uint64_t nonces) { checkInterval_ = nonces ? nonces : 1; }
     // Seconds after which a template is rebuilt for new mempool transactions; default 60.
-    void setRefreshSeconds(int64_t s) { refreshSeconds_ = s; }
     // Test hooks.
     void setNonceSpaceForTesting(uint64_t n) { nonceSpace_ = n; }
     void setBatchHookForTesting(std::function<void()> f) { batchHook_ = std::move(f); }

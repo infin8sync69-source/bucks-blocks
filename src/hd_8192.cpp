@@ -1,4 +1,5 @@
 #include "hd_8192.h"
+#include "log.h"
 #include <openssl/crypto.h>
 #include <cstring>
 #include <iostream>
@@ -75,7 +76,7 @@ ExtendedKey HD8192::deriveChild(const ExtendedKey& parent, uint32_t childIndex) 
         }
     } else {
         if (hardened) {
-            std::cerr << "ERROR: Hardened derivation from public parent is impossible" << std::endl;
+            Bucks::logErr() << "ERROR: Hardened derivation from public parent is impossible" << std::endl;
             return {};
         }
         data.insert(data.end(), parent.key.begin(), parent.key.end());

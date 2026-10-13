@@ -1,4 +1,5 @@
 #include "protocol_enc.h"
+#include "log.h"
 #include <openssl/rand.h>
 #include <openssl/evp.h>
 #include <cstring>
@@ -93,7 +94,7 @@ bool P2PSessionEncryption::decrypt(const std::vector<uint8_t>& cipher, std::vect
     EVP_CIPHER_CTX_free(ctx);
 
     if (finalRet <= 0) {
-        std::cerr << "DEBUG: AES-GCM authentication failed — message dropped" << std::endl;
+        Bucks::logErr() << "DEBUG: AES-GCM authentication failed — message dropped" << std::endl;
         return false;  // Authentication failed: drop the message
     }
 

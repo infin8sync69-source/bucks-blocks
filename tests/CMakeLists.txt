@@ -17,6 +17,9 @@ add_subdirectory(unit)
 add_subdirectory(integration)
 add_subdirectory(system)
 add_subdirectory(perf_security)
+if(BUCKS_FUZZ)
+    add_subdirectory(fuzz)
+endif()
 
 add_custom_target(tests ALL
     DEPENDS unit_tests integration_tests system_tests perf_security_tests

@@ -126,19 +126,15 @@ public:
     ~Peer();
 
     void disconnect();
-    bool isConnected() const { return connected; }
     PeerState getState() const { return state; }
-    void setState(PeerState s) { state = s; }
 
     bool sendMsg(const NetMessage& msg);
     
     std::string address() const;
-    bool isInbound() const { return inbound; }
     const std::string& getIP() const { return ip; }
 
     // Misbehavior tracking
     void misbehavior(int penalty);
-    int getMisbehaviorScore() const { return misbehaviorScore; }
     bool isBanned() const;
     std::chrono::steady_clock::time_point getConnectionTime() const { return connectionTime; }
 

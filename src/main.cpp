@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "node.h"
+#include "log.h"
 #include "chainparams.h"
 #include "genesis.h"
 #include "network.h"
@@ -22,7 +23,7 @@ void handleSignal(int) {
 }
 
 static void printUsage() {
-    std::cout <<
+    Bucks::logOut() <<
         "Usage: bucks [options]\n"
         "  --network <name>          main (default), test or regtest; sets magic, ports and genesis\n"
         "  --server                  start the REST API / web UI\n"
@@ -47,7 +48,7 @@ static void printUsage() {
 }
 
 int main(int argc, char* argv[]) {
-    std::cout << "=== Bucks Node (PATH-B) ===\n";
+    Bucks::logOut() << "=== Bucks Node (PATH-B) ===\n";
 
     // Handle shutdown signals
     std::signal(SIGINT, handleSignal);
@@ -82,7 +83,7 @@ int main(int argc, char* argv[]) {
         }
         if (!networkName.empty()) {
             if (!parseNetworkName(networkName, networkId)) {
-                std::cerr << "✗ Unknown network: " << networkName << " (use main, test or regtest)\n";
+                Bucks::logErr() << "✗ Unknown network: " << networkName << " (use main, test or regtest)\n";
                 return 2;
             }
         } else if (arg == "--server") {
@@ -107,7 +108,7 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--api-token" && i + 1 < argc) {
              apiToken = argv[++i];
              // The token stays visible in `ps` for every local user (API-13).
-             std::cerr << "⚠ --api-token puts the secret on the command line, where other users can read it; "
+             Bucks::logErr() << "⚠ --api-token puts the secret on the command line, where other users can read it; "
                           "prefer --api-token-file or the generated <datadir>/.cookie\n";
         } else if (arg == "--api-token-file" && i + 1 < argc) {
              apiTokenFile = argv[++i];
@@ -133,7 +134,7 @@ int main(int argc, char* argv[]) {
              printUsage();
              return 0;
         } else {
-             std::cerr << "✗ Unknown or incomplete option: " << arg << "\n";
+             Bucks::logErr() << "✗ Unknown or incomplete option: " << arg << "\n";
              printUsage();
              return 2;
         }
@@ -144,13 +145,13 @@ int main(int argc, char* argv[]) {
     const ChainParams& params = chainParams(networkId);
     if (port == 0) port = params.defaultApiPort;
     if (p2pPort == 0) p2pPort = params.defaultP2PPort;
-    std::cout << "✓ Network: " << params.name << "\n";
+    Bucks::logOut() << "✓ Network: " << params.name << "\n";
     {
         std::string err;
         if (!checkChainParams(params, err) || !Genesis::check(params, err)) {
-            std::cerr << "FATAL: " << err << "\n";
+            Bucks::logErr() << "FATAL: " << err << "\n";
             if (networkId == NetworkId::MAIN)
-                std::cerr << "       (use --network=test or --network=regtest until mainnet launches)\n";
+                Bucks::logErr() << "       (use --network=test or --network=regtest until mainnet launches)\n";
             return 3;
         }
     }
@@ -163,17 +164,17 @@ int main(int argc, char* argv[]) {
     int openCode = 0;
     std::unique_ptr<Node> nodePtr = Node::open(networkDir, params, loadOptions, openError, openCode);
     if (!nodePtr) {
-        std::cerr << "FATAL: " << openError << "\n";
+        Bucks::logErr() << "FATAL: " << openError << "\n";
         return openCode ? openCode : 4;
     }
     Node& node = *nodePtr;
-    std::cout << "✓ Chain opened at " << networkDir << "\n";
-    std::cout << "✓ Current height: " << node.height() << "\n";
+    Bucks::logOut() << "✓ Chain opened at " << networkDir << "\n";
+    Bucks::logOut() << "✓ Current height: " << node.height() << "\n";
 
     // Start P2P network
     Network network(node);
     network.start(p2pPort);
-    std::cout << "✓ P2P network started on port " << p2pPort << "\n";
+    Bucks::logOut() << "✓ P2P network started on port " << p2pPort << "\n";
 
     if (!connectPeer.empty()) {
         size_t colon = connectPeer.find(':');
@@ -181,7 +182,7 @@ int main(int argc, char* argv[]) {
             std::string ip = connectPeer.substr(0, colon);
             uint16_t p = static_cast<uint16_t>(std::stoi(connectPeer.substr(colon + 1)));
             if (network.connectToPeer(ip, p)) {
-                std::cout << "✓ Connecting to peer " << connectPeer << "...\n";
+                Bucks::logOut() << "✓ Connecting to peer " << connectPeer << "...\n";
             }
         }
     }
@@ -202,22 +203,22 @@ int main(int argc, char* argv[]) {
         serverConfig.trustProxy = trustProxy;
         server = new Server(node, &network, serverConfig);
         if (!server->start(port)) {
-            std::cerr << "✗ Failed to start server\n";
+            Bucks::logErr() << "✗ Failed to start server\n";
             delete server;
             network.stop();
             return 1;
         }
-        std::cout << "✓ API server started on port " << server->port() << "\n";
-        std::cout << "✓ Data directory: " << server->dataDir() << "\n";
+        Bucks::logOut() << "✓ API server started on port " << server->port() << "\n";
+        Bucks::logOut() << "✓ Data directory: " << server->dataDir() << "\n";
         if (!server->cookieFile().empty()) {
-            std::cout << "✓ API token file: " << server->cookieFile() << "\n";
+            Bucks::logOut() << "✓ API token file: " << server->cookieFile() << "\n";
         }
         if (!server->walletsEnabled()) {
-            std::cerr << "⚠ Wallet subsystem disabled: " << server->walletError() << "\n";
+            Bucks::logErr() << "⚠ Wallet subsystem disabled: " << server->walletError() << "\n";
         }
 
         if (autoMine) {
-            std::cout << "✓ Node configured for mining (rewards → primary wallet)\n";
+            Bucks::logOut() << "✓ Node configured for mining (rewards → primary wallet)\n";
             server->startAutoMine();
         }
     }
@@ -227,7 +228,7 @@ int main(int argc, char* argv[]) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
-    std::cout << "\nShutting down...\n";
+    Bucks::logOut() << "\nShutting down...\n";
     if (server) {
         server->stop();
         delete server;
@@ -235,6 +236,6 @@ int main(int argc, char* argv[]) {
     network.stop();
     node.shutdown();
 
-    std::cout << "✓ Node stopped cleanly\n";
+    Bucks::logOut() << "✓ Node stopped cleanly\n";
     return 0;
 }

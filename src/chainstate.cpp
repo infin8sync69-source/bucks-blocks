@@ -1,4 +1,5 @@
 #include "chainstate.h"
+#include "log.h"
 
 #include <algorithm>
 #include <ctime>
@@ -703,7 +704,7 @@ bool ChainState::reindexFromBlocks(std::string& err) {
             persistStatus(e);
             propagateHaveChainData(e);
         } else {
-            std::cerr << "reindex: dropping unusable block " << hexStr(std::vector<uint8_t>(hash.begin(), hash.end())) << "\n";
+            Bucks::logErr() << "reindex: dropping unusable block " << hexStr(std::vector<uint8_t>(hash.begin(), hash.end())) << "\n";
             store_.deleteBlockData(hash);
         }
         if (storeFailed_) {

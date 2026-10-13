@@ -90,7 +90,6 @@ public:
 
     // HD Support (only for wallets that came from a mnemonic)
     void deriveAddress(const std::string& path);
-    const ExtendedKey& getMasterKey() const { return masterKey; }
     std::string getMnemonic() const { return mnemonic; }
     void setMnemonic(const std::string& m) { mnemonic = m; }
 

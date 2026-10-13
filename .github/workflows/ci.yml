@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, 'chain-v2-*']
+  pull_request:
+  schedule:
+    - cron: '17 3 * * *'      # nightly: longer fuzzing
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev
+      - name: Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install openssl@3 cmake
+      - run: tools/ci.sh build
+
+  asan:
+    name: AddressSanitizer + UBSan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev
+      - run: tools/ci.sh asan
+
+  tsan:
+    name: ThreadSanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev
+      # Older TSan runtimes abort at start with high ASLR entropy.
+      - run: sudo sysctl vm.mmap_rnd_bits=28
+      - run: tools/ci.sh tsan
+
+  fuzz:
+    name: fuzz (${{ github.event_name == 'schedule' && '10 min' || '1 min' }} per target)
+    runs-on: ubuntu-latest
+    env:
+      CC: clang
+      CXX: clang++
+      BUCKS_FUZZ_SECONDS: ${{ github.event_name == 'schedule' && '600' || '60' }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev clang
+      - run: tools/ci.sh fuzz
+      - name: Keep reproducers of findings
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: build-ci-fuzz/fuzz-work/*/crashes/

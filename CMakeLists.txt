@@ -41,6 +41,25 @@ if(NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     endif()
 endif()
 
+# Fuzz targets (tests/fuzz). With a clang that has the libFuzzer runtime the whole library is
+# instrumented for coverage (fuzzer-no-link) and sanitized; otherwise the targets only replay
+# their corpus. Apple's clang has no libFuzzer; Homebrew LLVM and Linux clang do.
+option(BUCKS_FUZZ "Build the fuzz targets in tests/fuzz" OFF)
+if(BUCKS_FUZZ)
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer")
+    check_cxx_source_compiles(
+        "extern \"C\" int LLVMFuzzerTestOneInput(const unsigned char*, unsigned long) { return 0; }"
+        BUCKS_HAVE_LIBFUZZER)
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(BUCKS_HAVE_LIBFUZZER)
+        if(NOT BUCKS_SANITIZE)
+            set(BUCKS_SANITIZE "address,undefined" CACHE STRING "" FORCE)
+        endif()
+        add_compile_options(-fsanitize=fuzzer-no-link)
+    endif()
+endif()
+
 # Sanitizers apply to every target so googletest and sqlite3 are instrumented
 # too. Findings abort the process, so ctest fails instead of just logging.
 if(BUCKS_SANITIZE)
