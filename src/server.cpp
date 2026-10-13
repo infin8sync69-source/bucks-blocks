@@ -51,6 +51,16 @@ using json = nlohmann::json;
 
 namespace Bucks {
 
+// The Arabic list shown as "the actual Arabic words": the first non-placeholder Arabic list (release or
+// draft), else the default list.
+static std::string canonicalMnemonicLanguage() {
+    for (const auto& lang : mnemonicLanguages()) {
+        auto wl = findWordlist(lang);
+        if (wl && wl->normalizer == "arabic" && wl->status != "dev" && wl->status != "test") return lang;
+    }
+    return defaultMnemonicLanguage();
+}
+
 constexpr const char* BUCKS_NODE_VERSION = "0.2.0-testnet";
 
 namespace fs = std::filesystem;
@@ -1076,8 +1086,21 @@ void Server::setupRoutes() {
                 {"warning", "Write these words down now. They are shown only once and the node does not store them."}
             };
             if (!persisted) out["error"] = "Wallet could not be saved to " + walletFilePath + "; it exists in memory only";
+            // Opt-in: the same phrase in the canonical (Arabic) list, for users who write it in
+            // their own language but want to see the words the network side uses.
+            std::string canonical;
+            if (body.value("includeCanonical", false) && usedLang != canonicalMnemonicLanguage()) {
+                MnemonicError cerr = MnemonicError::OK;
+                canonical = convertMnemonic(mnemonic, canonicalMnemonicLanguage(), &cerr);
+                if (cerr == MnemonicError::OK) {
+                    out["canonicalMnemonic"] = canonical;
+                    out["canonicalLanguage"] = canonicalMnemonicLanguage();
+                    out["canonicalDirection"] = "rtl";
+                }
+            }
             reply(res, 200, out);
             OPENSSL_cleanse(&mnemonic[0], mnemonic.size());
+            if (!canonical.empty()) OPENSSL_cleanse(&canonical[0], canonical.size());
         } catch (const std::exception& e) {
             reply(res, 500, errorJson(e.what()));
         }
@@ -1099,18 +1122,40 @@ void Server::setupRoutes() {
             Wallet w = Wallet::fromMnemonic(restoreMnemonic, pass);
             w.setAddressVersion(node.params().p2pkhAddressVersion);
             w.setMnemonic("");
+            // Which list the phrase was written in, and (opt-in) the same phrase in the canonical list.
+            json echo = json::object();
+            {
+                std::string detected;
+                if (validateMnemonic(restoreMnemonic, &detected) == MnemonicError::OK) {
+                    echo["detectedLanguage"] = detected;
+                    const std::string canonLang = canonicalMnemonicLanguage();
+                    if (body.value("includeCanonical", false)) {
+                        MnemonicError cerr = MnemonicError::OK;
+                        std::string canon = convertMnemonic(restoreMnemonic, canonLang, &cerr);
+                        if (cerr == MnemonicError::OK) {
+                            echo["canonicalMnemonic"] = canon;
+                            echo["canonicalLanguage"] = canonLang;
+                            echo["canonicalDirection"] = "rtl";
+                        }
+                        OPENSSL_cleanse(&canon[0], canon.size());
+                    }
+                }
+            }
             const std::string address = w.getAddress();
             {
                 std::lock_guard<std::mutex> lock(walletMutex);
                 for (const auto& existing : wallets) {
                     if (existing.getAddress() == address) {
-                        reply(res, 200, json{{"success", true}, {"wallet", walletJson(existing)}, {"existing", true}});
+                        json out = {{"success", true}, {"wallet", walletJson(existing)}, {"existing", true}};
+                        out.update(echo);
+                        reply(res, 200, out);
                         return;
                     }
                 }
             }
             bool persisted = addWallet(w);
             json out = {{"success", true}, {"wallet", walletJson(w)}, {"existing", false}, {"persisted", persisted}};
+            out.update(echo);
             if (!persisted) out["error"] = "Wallet could not be saved to " + walletFilePath + "; it exists in memory only";
             reply(res, 200, out);
         } catch (const std::exception& e) {

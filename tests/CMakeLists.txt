@@ -22,8 +22,12 @@ if(BUCKS_FUZZ)
 endif()
 
 add_custom_target(tests ALL
-    DEPENDS unit_tests integration_tests system_tests perf_security_tests
+    DEPENDS unit_tests integration_tests system_tests perf_security_tests bucks-check-wordlists
 )
+
+# Every shipped word list is valid and the set has no ambiguous spellings.
+add_test(NAME wordlists
+    COMMAND bucks-check-wordlists ${CMAKE_SOURCE_DIR}/wordlists)
 
 # Checks that build.sh mirrors CMakeLists.txt and .gitignore covers secrets.
 add_test(NAME build_hygiene

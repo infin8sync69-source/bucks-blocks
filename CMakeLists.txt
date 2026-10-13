@@ -157,6 +157,9 @@ target_link_libraries(bucks bucks_core Threads::Threads)
 add_executable(bucks-mine-genesis tools/mine_genesis.cpp)
 target_link_libraries(bucks-mine-genesis bucks_core Threads::Threads)
 
+add_executable(bucks-check-wordlists tools/check_wordlists.cpp)
+target_link_libraries(bucks-check-wordlists bucks_core)
+
 # Testing
 enable_testing()
 add_subdirectory(tests)

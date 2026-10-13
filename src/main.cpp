@@ -184,7 +184,13 @@ int main(int argc, char* argv[]) {
 
     // Start P2P network
     Network network(node);
-    network.start(p2pPort);
+    try {
+        network.start(p2pPort);
+    } catch (const std::exception& e) {
+        Bucks::logErr() << "FATAL: " << e.what() << "\n";
+        node.shutdown();
+        return 5;
+    }
     Bucks::logOut() << "✓ P2P network started on port " << p2pPort << "\n";
 
     auto splitHostPort = [](const std::string& hp, std::string& host, uint16_t& port) {

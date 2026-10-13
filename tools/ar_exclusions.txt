@@ -1,0 +1,31 @@
+# Words that must never enter the Arabic list. First column = category from
+# research_notes/*/religious_considerations.md, "Exclusion categories":
+#  a divine names and attributes, shared and exclusive   b prophets, angels, named persons, peoples, places
+#  c unseen and last-day terms                           d acts of worship and ritual
+#  e revelation and scripture                            f punishment, curse, disbelief, obscene-adjacent
+#  g verbs of exclusively divine acts                    h Quranic formulae and imperatives
+#  p particles, pronouns, demonstratives (not content words)
+# Matching is on the folded spelling (no diacritics; أإآ=ا, ة=ه, ى=ي, ؤ=و, ئ=ي).
+a الله اله رب رحمن رحيم عزيز حكيم عليم حليم كريم ملك سلام حق نور غفور ودود قدير خبير سميع بصير شكور حميد مجيد وهاب رزاق خالق بارئ مصور قهار جبار متكبر مومن مهيمن قدوس صمد احد واحد وكيل حفيظ رقيب مجيب واسع حسيب شهيد قوي متين ولي هادي بديع باقي وارث رشيد صبور تواب عفو رووف مالك قريب لطيف غني فتاح قابض باسط رافع معز مذل عدل حي قيوم اول اخر ظاهر باطن متعال كبير علي عظيم مولي نصير ملك مليك
+b ادم نوح ابراهيم اسماعيل اسحاق يعقوب يوسف موسي هارون عيسي مريم محمد احمد داود سليمان ايوب يونس زكريا يحيي الياس اليسع لوط صالح هود شعيب ادريس لقمان عزير جبريل ميكال فرعون هامان قارون طالوت جالوت ياجوج ماجوج مكه بكه مدين سبا مصر بابل هاروت ماروت عمران ابليس كعبه بدر حنين قريش ثمود عاد اسراءيل يهود نصاري صابيين مجوس اصحاب ملايكه ملك ملائكه قوم رسول نبي
+c جنه نار جهنم قيامه ساعه عرش كرسي روح وحي ملائكه شيطان جن سقر حميم جحيم هاويه سعير لظي حطمه فردوس عدن نعيم حشر نشور صراط ميزان بعث قيام اخره دنيا غيب جنات انس
+d صلاه زكاه صوم صيام حج عمره سجد ركع وضوء طواف قبله مسجد صلي سجود ركوع تيمم قنت تسبيح سبح اذان دعاء زكي نسك قربان هدي حرم احرام
+e قران كتاب ايه سوره مصحف تنزيل نبوه رساله انجيل توراه زبور صحف حكمه قرا تلا بينه برهان ذكر تذكره
+f لعنه كفر شرك عذاب منافق نفاق زنا لعن عقاب نكال عقوبه فاحشه فسق كفار مشرك كافر ظالم فاسق ملعون شقاء ويل خزي سوء فجور جريمه مجرم
+g خلق برا احيا اموت رزق غفر انزل ابعث امات
+h قل بسم سبحان تبارك ان انا انك لعل ياايها
+p هذا هذه ذلك تلك الذي التي الذين اللاتي هو هي هم هن هما انت انا نحن انتم اي ايان ما من الي علي عن في مع عند بين حتي اذا لما لو ثم او بل قد لقد لن لم لا نعم كلا الا اما اذ اذا ان بعض كل جميع شيء ذا ذي هنا هناك هنالك حيث متي اين كيف لماذا ليس كان
+# Root-level exclusions (QAC root, folded): every lemma of these roots is dropped.
+#  f disbelief/punishment/obscene-adjacent: كفر شرك زني فحش فسق ظلم عذب لعن نفق (nifaq family)
+#  a/g divine acts and names: غفر رزق ربب أله
+#  d worship: صلو سجد ركع صوم زكو حجج جهد (hajj, jihad)
+#  e/b messengers and revelation: رسل بعث وحي
+root كفر شرك زني فحش فسق ظلم عذب لعن نفق غفر رزق ربب أله صلو سجد ركع صوم زكو حجج جهد رسل بعث وحي
+# Further exact words found in review of the first draft
+c ملكوت وعيد تنزلت
+a مسلمه اسلم مسلم تسليم ايمان مومنه مومن اسلام
+# Second review pass (whole list read once): eschatological, ritual and scripture terms, holy-place words,
+# hell/paradise vocabulary
+c طاغوت فرقان تأويل رهبان قسيس كاهن كوثر طوبى سجيل غساق غسلين ثبور كورت قارعة صاخة راجفة رادفة ساهرة جاثية خافية تسنيم سدرة حاقة واقعة ناقور ناصبة
+d تلاوت شعائر حنيف توبة تائب تائبة تبتل تهجد ماعون مقدس مقدسة مؤذن ناسكو نافلة نصوح
+f مغضوب

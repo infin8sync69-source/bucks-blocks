@@ -165,8 +165,8 @@ TEST_F(MnemonicDir, DefaultResolutionFindsRepoManifest) {
     EXPECT_TRUE(loadWordlists(&err)) << err;
     EXPECT_EQ(defaultMnemonicLanguage(), "ar-dev");
     auto langs = mnemonicLanguages();
-    ASSERT_EQ(langs.size(), 1u);
-    EXPECT_EQ(langs[0], "ar-dev");
+    ASSERT_GE(langs.size(), 1u);
+    EXPECT_EQ(langs[0], "ar-dev");   // the placeholder stays first, so it stays the default
 }
 
 TEST_F(MnemonicDir, EmptyEnvDirFailsClosed) {
@@ -542,4 +542,84 @@ TEST_F(MnemonicDir, AmbiguousLanguageIsAnError) {
 TEST(MnemonicErrors, StringsNeverEmpty) {
     for (int i = 0; i <= static_cast<int>(MnemonicError::SEED_DERIVATION_FAILED); ++i)
         EXPECT_GT(std::string(mnemonicErrorString(static_cast<MnemonicError>(i))).size(), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// (g) checkWordlistSet: rules that need more than one list
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// 2048 distinct a-z words (base-26, 4 letters), optionally with two entries swapped.
+std::string letterList(size_t swapA = 0, size_t swapB = 0) {
+    std::vector<std::string> w;
+    for (size_t i = 0; i < 2048; ++i) {
+        std::string s = "qqqq";
+        size_t v = i;
+        for (int k = 3; k >= 0; --k) { s[k] = char('a' + v % 26); v /= 26; }
+        w.push_back(s);
+    }
+    if (swapA != swapB) std::swap(w[swapA], w[swapB]);
+    std::string out;
+    for (auto& s : w) out += s + "\n";
+    return out;
+}
+
+} // namespace
+
+TEST_F(MnemonicDir, SetCheckAcceptsIdenticalIndexingAndRejectsSwaps) {
+    auto manifest = [](const char* statusB) {
+        // "dd" is the placeholder default (a loaded set needs one); aa and bb are what is compared.
+        return std::string("{\"version\":2,\"lists\":["
+            "{\"lang\":\"dd\",\"file\":\"d.txt\",\"normalizer\":\"latin\",\"status\":\"dev\"},"
+            "{\"lang\":\"aa\",\"file\":\"a.txt\",\"normalizer\":\"latin\",\"status\":\"draft\"},"
+            "{\"lang\":\"bb\",\"file\":\"b.txt\",\"normalizer\":\"latin\",\"status\":\"") + statusB + "\"}]}";
+    };
+    // Same words at the same indices: harmless (a shared word encodes the same value).
+    {
+        TempDir d;
+        d.write("d.txt", syntheticLatinList());
+        d.write("a.txt", letterList());
+        d.write("b.txt", letterList());
+        d.write("manifest.json", manifest("draft"));
+        setWordlistDir(d.str());
+        auto r = checkWordlistSet();
+        EXPECT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    }
+    // Two words swapped in one list: same spelling, different index. A phrase could decode to
+    // the wrong wallet, so this must be an error.
+    {
+        TempDir d;
+        d.write("d.txt", syntheticLatinList());
+        d.write("a.txt", letterList());
+        d.write("b.txt", letterList(3, 7));
+        d.write("manifest.json", manifest("draft"));
+        setWordlistDir(d.str());
+        auto r = checkWordlistSet();
+        ASSERT_FALSE(r.ok());
+        EXPECT_NE(r.errors[0].find("different index"), std::string::npos) << r.errors[0];
+    }
+    // Lists with status "test" are exempt (the synthetic lists use digits).
+    {
+        TempDir d;
+        d.write("d.txt", syntheticLatinList());
+        d.write("a.txt", letterList());
+        d.write("b.txt", syntheticLatinList());
+        d.write("manifest.json", manifest("test"));
+        setWordlistDir(d.str());
+        EXPECT_TRUE(checkWordlistSet().ok());
+    }
+    // A shipped-style Latin list must be plain a-z.
+    {
+        TempDir d;
+        d.write("d.txt", syntheticLatinList());
+        d.write("a.txt", syntheticLatinList());
+        d.write("manifest.json",
+                "{\"version\":2,\"lists\":[{\"lang\":\"dd\",\"file\":\"d.txt\",\"normalizer\":\"latin\",\"status\":\"dev\"},"
+                "{\"lang\":\"aa\",\"file\":\"a.txt\",\"normalizer\":\"latin\",\"status\":\"draft\"}]}");
+        setWordlistDir(d.str());
+        auto r = checkWordlistSet();
+        ASSERT_FALSE(r.ok());
+        EXPECT_NE(r.errors[0].find("only a-z"), std::string::npos) << r.errors[0];
+    }
 }

@@ -7,3 +7,12 @@
 Build definitions (CMakeLists.txt and build.sh, kept identical by `build_hygiene`):
 `SQLITE_THREADSAFE=1`, `SQLITE_DQS=0`, `SQLITE_OMIT_LOAD_EXTENSION`.
 The storage spec requires 3.51.3 or newer; `src/chaindb.cpp` fails to compile on older headers.
+
+## Word list sources
+
+| Component | Source | Terms |
+|---|---|---|
+| `wordlists/ar-quran-draft-2048.txt` (Arabic draft list) | Selected by `tools/make_ar_quran_list.py` from the Quranic Arabic Corpus morphology, v0.4 (Kais Dukes, University of Leeds), Arabic-script copy at https://github.com/mustafa0x/quran-morphology (file `quran-morphology.txt`, 6,322,866 bytes, fetched 2026-10-13 and used as data only, never executed) | Terms of use: credit "Quranic Arabic Corpus, http://corpus.quran.com" and link to it; the corpus file itself is not redistributed here, only a list of 2048 words chosen from it |
+
+The list is a DRAFT. Reviewers use `wordlists/review/ar-quran-draft-review.csv` (word, corpus lemma, part of speech, root, occurrences in the Quran).
+Rebuild: `EXACT=2 python3 -I tools/make_ar_quran_list.py <quran-morphology.txt>` (exact Quranic word forms; without `EXACT` it builds the dictionary-form variant).

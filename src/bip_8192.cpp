@@ -566,6 +566,65 @@ std::shared_ptr<const Wordlist> findWordlist(const std::string& lang, std::strin
     return list;
 }
 
+WordlistCheck checkWordlistSet() {
+    WordlistCheck r;
+    std::string err;
+    auto reg = currentRegistry(&err);
+    if (!reg) {
+        r.errors.push_back("word lists could not be loaded: " + err);
+        return r;
+    }
+    const auto& lists = reg->lists;
+    for (const auto& l : lists) {
+        if (l->entries.size() != MNEMONIC_WORDLIST_SIZE)
+            r.errors.push_back(l->lang + ": " + std::to_string(l->entries.size()) + " entries, expected 2048");
+        if (l->status == "test" || l->status == "dev") continue;   // placeholders are exempt from the shape rules
+        if (l->normalizer == "latin") {
+            for (size_t i = 0; i < l->entries.size(); ++i) {
+                const std::string& w = l->entries[i];
+                const bool plain = !w.empty() && std::all_of(w.begin(), w.end(),
+                                                             [](char c) { return c >= 'a' && c <= 'z'; });
+                if (!plain)
+                    r.errors.push_back(l->lang + " #" + std::to_string(i) + " '" + w + "': only a-z allowed");
+            }
+        }
+        std::unordered_map<std::string, std::vector<size_t>> byPrefix;
+        for (size_t i = 0; i < l->entries.size(); ++i) {
+            std::string norm;
+            if (normalizeMnemonicWord(l->normalizer, l->entries[i], norm) && l->normalizer == "latin" && norm.size() >= 4)
+                byPrefix[norm.substr(0, 4)].push_back(i);
+        }
+        size_t shared = 0;
+        for (const auto& kv : byPrefix) if (kv.second.size() > 1) shared += kv.second.size();
+        if (shared)
+            r.warnings.push_back(l->lang + ": " + std::to_string(shared) + " words share their first four letters with another word");
+    }
+    for (size_t a = 0; a < lists.size(); ++a) {
+        for (size_t b = a + 1; b < lists.size(); ++b) {
+            // "dev" and "test" lists are placeholders: they exist to be replaced, no real wallet depends on them.
+            if (lists[a]->status == "test" || lists[b]->status == "test" ||
+                lists[a]->status == "dev" || lists[b]->status == "dev") continue;
+            size_t reported = 0;
+            for (size_t i = 0; i < lists[a]->entries.size(); ++i) {
+                std::string na;
+                if (!normalizeMnemonicWord(lists[a]->normalizer, lists[a]->entries[i], na)) continue;
+                auto itB = lists[b]->index.find(na);
+                if (itB == lists[b]->index.end()) {
+                    // The same typed text can also be a word of list b under b's own folding.
+                    std::string nb;
+                    if (!normalizeMnemonicWord(lists[b]->normalizer, lists[a]->entries[i], nb)) continue;
+                    itB = lists[b]->index.find(nb);
+                    if (itB == lists[b]->index.end()) continue;
+                }
+                if (itB->second != i && reported++ < 20)
+                    r.errors.push_back(lists[a]->lang + " #" + std::to_string(i) + " '" + lists[a]->entries[i] + "' is " +
+                                       lists[b]->lang + " #" + std::to_string(itB->second) + ": same spelling, different index");
+            }
+        }
+    }
+    return r;
+}
+
 // ============================================================
 // BIT HELPERS
 // ============================================================

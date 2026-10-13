@@ -7,6 +7,7 @@ import { toSvg } from "../qr.js";
 // The recovery phrase lives only in this module variable while the user writes
 // it down. It is never put in localStorage, sessionStorage, the URL or the DOM
 // after the confirm step, and is dropped as soon as the step is completed.
+let restored = null; // { from, words, address }: the Arabic form of a phrase restored in another language
 let pending = null; // { words: string[], direction, address, persisted, saveError }
 
 window.addEventListener("beforeunload", (e) => {
@@ -34,7 +35,7 @@ export function mount(root) {
       return;
     }
     lastSig = null;
-    draw(sig, () => (mode === "done" ? doneView() : mainView(s)));
+    draw(sig, () => (mode === "done" ? doneView() : mode === "restored" ? restoredView() : mainView(s)));
   }
   const focusHeading = () => { const el = holder.querySelector("h1"); if (el) el.focus({ preventScroll: true }); };
 
@@ -100,12 +101,14 @@ export function mount(root) {
 
   const devNotice = () => notice("warn", h("strong", null, "Development word list. "), "This node uses a placeholder word list, not the final release list. A phrase made now may not restore a wallet once the release list ships. Use it only for testing.");
 
+  const draftNotice = () => notice("warn", h("strong", null, "Draft word lists. "), "The Arabic and English word lists have not been reviewed yet. They are fine for testing, but do not rely on a phrase made now for coins that matter until the final lists ship.");
+
   // ---------- create ----------
   function createView() {
     const err = h("div");
     const devWarn = h("div");
     const lang = h("select", { id: "w-lang" }, h("option", { value: "" }, "Default"));
-    const langField = field({ id: "w-lang", label: "Phrase language", input: lang });
+    const langField = field({ id: "w-lang", label: "Save my recovery phrase as", hint: "Both versions restore the same wallet. Write down only one.", input: lang });
     let words = 13;
     const seg = h("div", { class: "seg", role: "radiogroup", "aria-label": "Phrase length" },
       [[13, "13 words"], [25, "25 words"]].map(([n, label]) => h("label", null,
@@ -114,16 +117,23 @@ export function mount(root) {
       get("/api/wallets/languages").then((r) => { langs = r; fillLangs(); }).catch(() => { langField.hidden = true; });
     } else fillLangs();
     function fillLangs() {
-      const def = langs && langs.languages && langs.languages.find((l) => l.lang === langs.default);
-      devWarn.replaceChildren(...(def && def.status === "dev" ? [devNotice()] : []));
-      if (!langs || !langs.languages || langs.languages.length < 2) { langField.hidden = true; return; }
-      let names;
-      try { names = new Intl.DisplayNames(undefined, { type: "language" }); } catch { names = null; }
-      lang.replaceChildren(...langs.languages.map((l) => {
-        let label = l.lang;
-        try { label = (names && names.of(l.lang)) || l.lang; } catch { /* keep code */ }
-        return h("option", { value: l.lang, selected: l.lang === langs.default }, label + (l.status === "dev" ? " (preview list)" : ""));
-      }));
+      // Users choose between exactly two ways to keep their phrase: Arabic or English
+      // The placeholder development list is never offered.
+      const offered = ((langs && langs.languages) || []).filter((l) => l.status !== "dev");
+      const arabic = offered.find((l) => l.normalizer === "arabic");
+      const english = offered.find((l) => l.normalizer === "latin");
+      const choices = [arabic && { lang: arabic.lang, label: "Arabic", status: arabic.status },
+                       english && { lang: english.lang, label: "English", status: english.status }].filter(Boolean);
+      if (choices.length < 2) {
+        // Only the placeholder list exists on this node: keep the old behaviour (default list, with its warning).
+        const def = langs && langs.languages && langs.languages.find((l) => l.lang === langs.default);
+        devWarn.replaceChildren(...(def && def.status === "dev" ? [devNotice()] : []));
+        langField.hidden = true;
+        return;
+      }
+      devWarn.replaceChildren(...(choices.some((c) => c.status === "draft") ? [draftNotice()] : []));
+      lang.replaceChildren(...choices.map((c, i) => h("option", { value: c.lang, selected: i === 0 }, c.label)));
+      langField.hidden = false;
     }
     const submit = h("button", { type: "submit", class: "btn primary lg" }, "Create wallet");
     const form = h("form", { class: "card", novalidate: true },
@@ -139,11 +149,14 @@ export function mount(root) {
       busy(submit, true, "Creating…");
       try {
         const body = { words };
-        if (!langField.hidden && lang.value) body.language = lang.value;
+        if (!langField.hidden && lang.value) {
+          body.language = lang.value;
+          body.includeCanonical = true;   // for English: also return the Arabic words (ignored for Arabic)
+        }
         const r = await post("/api/wallets/create", body);
         const used = langs && langs.languages && langs.languages.find((l) => l.lang === r.language);
-        pending = { dev: !!(used && used.status === "dev"), words: String(r.mnemonic).trim().split(/\s+/), direction: r.direction === "rtl" ? "rtl" : "ltr", address: r.wallet && r.wallet.address, persisted: r.persisted !== false, saveError: r.error || "" };
-        r.mnemonic = null;
+        pending = { dev: !!(used && used.status === "dev"), draft: !!(used && used.status === "draft"), words: String(r.mnemonic).trim().split(/\s+/), direction: r.direction === "rtl" ? "rtl" : "ltr", canonical: r.canonicalMnemonic ? String(r.canonicalMnemonic).trim().split(/\s+/) : null, address: r.wallet && r.wallet.address, persisted: r.persisted !== false, saveError: r.error || "" };
+        r.mnemonic = null; r.canonicalMnemonic = null;
         await loadWallets(false);
         if (pending && pending.address) selectWallet(pending.address);
         go("phrase");
@@ -177,6 +190,7 @@ export function mount(root) {
           h("span", { class: `pill${step === 1 ? " current" : ""}` }, "1  Write it down"), h("span", { class: `pill${step === 2 ? " current" : ""}` }, "2  Check it")),
         !p.persisted && notice("error", h("strong", null, "The wallet could not be saved to disk. "), p.saveError || "It exists in memory only and will be lost when the node stops."),
         p.dev && devNotice(),
+        p.draft && draftNotice(),
         step === 1 ? step1() : step2()]);
     }
     function step1() {
@@ -188,6 +202,10 @@ export function mount(root) {
       return card(null, h("div", { class: "stack" },
         notice("warn", h("strong", null, `Write these ${p.words.length} words on paper, in order. `), "This is the only time they are shown. Do not screenshot them, email them or store them in a notes app."),
         list,
+        p.canonical && h("div", { class: "stack" },
+          h("p", { class: "muted", style: "margin:0" }, "The same phrase in the base Arabic list. Either version restores this wallet; you only need to keep one."),
+          h("ol", { class: `words${revealed ? "" : " hidden"}`, dir: "rtl", lang: "ar", "aria-label": "Recovery phrase in the base Arabic list" },
+            p.canonical.map((w, i) => h("li", null, h("span", { class: "n" }, `${i + 1}.`), h("span", null, w))))),
         h("div", { class: "row" },
           h("button", { type: "button", class: "btn", "aria-pressed": revealed, onclick: () => { revealed = !revealed; paint(); } }, icon(revealed ? "eyeoff" : "eye", { size: 16 }), revealed ? "Hide words" : "Reveal words")),
         h("label", { class: "check", for: "ack" }, ack, h("span", null, "I have written down all the words in order and stored the paper somewhere safe.")),
@@ -225,6 +243,17 @@ export function mount(root) {
     return [...a].sort((x, y) => x - y);
   }
 
+  function restoredView() {
+    if (!restored) { setTimeout(() => go("main"), 0); return h("div"); }
+    const r = restored;
+    return h("div", { class: "stack" }, pageHead("Wallet restored", r.address ? `Wallet ${r.address}` : undefined),
+      card(null, h("div", { class: "stack" },
+        notice("ok", `The phrase you entered was recognised as ${r.from}. This is the same phrase in the base Arabic list, for checking.`),
+        h("ol", { class: "words", dir: "rtl", lang: "ar", "aria-label": "Recovery phrase in the base Arabic list" },
+          r.words.map((w, i) => h("li", null, h("span", { class: "n" }, `${i + 1}.`), h("span", null, w)))),
+        h("div", { class: "row actions" }, h("button", { class: "btn primary", type: "button", onclick: () => { restored = null; go("main"); } }, "Done")))));
+  }
+
   function doneView() {
     return h("div", { class: "stack" }, pageHead("Wallet ready"),
       card(null, h("div", { class: "stack" },
@@ -251,12 +280,18 @@ export function mount(root) {
       if (!phrase) { err.replaceChildren(notice("error", "Enter your recovery phrase.")); ta.focus(); return; }
       busy(submit, true, "Restoring…");
       try {
-        const r = await post("/api/wallets/restore", { mnemonic: phrase, passphrase: pass.value });
+        const r = await post("/api/wallets/restore", { mnemonic: phrase, passphrase: pass.value, includeCanonical: true });
         ta.value = ""; pass.value = "";
         await loadWallets(false);
         if (r.wallet) selectWallet(r.wallet.address);
         toast(r.existing ? "That wallet was already on this node." : "Wallet restored.", "ok");
         if (r.persisted === false) toast("Warning: the wallet could not be saved to disk.", "error", 8000);
+        if (r.canonicalMnemonic && r.detectedLanguage && r.detectedLanguage !== r.canonicalLanguage) {
+          restored = { from: r.detectedLanguage, words: String(r.canonicalMnemonic).trim().split(/\s+/), address: r.wallet && r.wallet.address };
+          r.canonicalMnemonic = null;
+          go("restored");
+          return;
+        }
         go("main");
       } catch (ex) {
         err.replaceChildren(notice("error", ex instanceof ApiError && ex.offline ? "Cannot reach the node." : ex.status === 400 ? `The node rejected the phrase: ${ex.message}` : ex.message));

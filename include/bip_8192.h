@@ -146,6 +146,22 @@ std::vector<std::string> mnemonicLanguages(std::string* err = nullptr);   // man
 std::string defaultMnemonicLanguage(std::string* err = nullptr);          // first dev/release list
 std::shared_ptr<const Wordlist> findWordlist(const std::string& lang, std::string* err = nullptr);
 
+/**
+ * Whole-set checks that a single list cannot do alone (run by tests, CI and
+ * tools/bucks-check-wordlists):
+ *   errors   - a word that two lists spell identically but give different indices (a phrase
+ *              could then decode to the wrong wallet); a release/draft Latin-script list whose
+ *              entries are not plain a-z; a non-test list that is not 2048 entries (loader).
+ *   warnings - words sharing their first four letters inside one list (harder to type).
+ * Lists with status "test" or "dev" (placeholders) are exempt from the cross-list spelling rule.
+ */
+struct WordlistCheck {
+    std::vector<std::string> errors;
+    std::vector<std::string> warnings;
+    bool ok() const { return errors.empty(); }
+};
+WordlistCheck checkWordlistSet();
+
 // ============================================================
 // Encode / decode
 // ============================================================

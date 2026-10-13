@@ -44,3 +44,4 @@ build-ci-*/
 *.sqlite-shm
 *.dat
 *.lock
+__pycache__/

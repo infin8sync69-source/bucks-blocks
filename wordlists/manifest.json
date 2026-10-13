@@ -1,1 +1,1 @@
-{"version":2,"lists":[{"lang":"ar-dev","file":"ar-dev-2048.txt","normalizer":"arabic","status":"dev"}]}
+{"version":2,"lists":[{"lang":"ar-dev","file":"ar-dev-2048.txt","normalizer":"arabic","status":"dev"},{"lang":"ar-quran-draft","file":"ar-quran-draft-2048.txt","normalizer":"arabic","status":"draft"},{"lang":"en-draft","file":"en-draft-2048.txt","normalizer":"latin","status":"draft"}]}
