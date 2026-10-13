@@ -232,6 +232,16 @@ ValidationState ChainState::ProcessNewBlock(const Block& block, bool requested) 
     return ValidationState{};
 }
 
+void ChainState::raiseForkAlert(const ForkAlert& a, uint64_t depth) {
+    const bool isNew = !alert_.active || alert_.otherTip != a.otherTip;
+    alert_ = a;
+    if (!isNew) return;
+    logErr() << "⚠ FORK ALERT: a branch with more work forks " << depth << " blocks below our tip (at height "
+             << a.forkHeight << "), deeper than the automatic reorg limit of " << params_.maxAutoReorgDepth
+             << ". This node stays on its chain. After checking with other operators which chain is right, "
+                "approve it with POST /api/node/approve-reorg {\"tipHash\": \"<hex>\"}.\n";
+}
+
 bool ChainState::approveReorg(const Hash256& tipHash, std::string& err) {
     approved_.insert(tipHash);
     skipped_.erase(tipHash);
@@ -323,7 +333,7 @@ bool ChainState::activateBestChain(std::string& err) {
 
         const uint64_t depth = uint64_t(tip->height - fork->height);
         if (depth > params_.maxAutoReorgDepth && !approved_.count(best->hash)) {
-            alert_ = ForkAlert{true, fork->height, tip->hash, best->hash, best->chainWork - tip->chainWork};
+            raiseForkAlert(ForkAlert{true, fork->height, tip->hash, best->hash, best->chainWork - tip->chainWork}, depth);
             skipped_.insert(best->hash);
             continue;
         }
@@ -347,7 +357,7 @@ bool ChainState::activateBestChain(std::string& err) {
             }
             if (!found) stepLast = path.size() - 1;
             if (stepLast > 2 * params_.maxAutoReorgDepth + 32) {
-                alert_ = ForkAlert{true, fork->height, tip->hash, best->hash, best->chainWork - tip->chainWork};
+                raiseForkAlert(ForkAlert{true, fork->height, tip->hash, best->hash, best->chainWork - tip->chainWork}, depth);
                 skipped_.insert(best->hash);
                 continue;
             }

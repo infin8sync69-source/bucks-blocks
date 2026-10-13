@@ -54,6 +54,15 @@ foreach(flag -O2 -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie
     endif()
 endforeach()
 
+# --- vendored SQLite is built with the same definitions everywhere ---
+foreach(def SQLITE_THREADSAFE=1 SQLITE_DQS=0 SQLITE_OMIT_LOAD_EXTENSION)
+    string(FIND "${cmake_text}" "${def}" in_cmake)
+    string(FIND "${build_sh}" "${def}" in_sh)
+    if(in_cmake EQUAL -1 OR in_sh EQUAL -1)
+        list(APPEND errors "${def} must be defined for sqlite3.c in both CMakeLists.txt and build.sh")
+    endif()
+endforeach()
+
 # --- .gitignore keeps wallets, secrets and tool output out of git ---
 foreach(pattern wallets.json *.cookie .env .env.* !.env.example *.key *.pem
                 restore.json *.db *.sqlite build/ compile_commands.json .cache/

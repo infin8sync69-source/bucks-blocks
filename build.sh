@@ -56,14 +56,14 @@ mkdir -p "$BUILD_DIR"
 # Compile C source (sqlite3)
 echo "Compiling sqlite3..."
 cc "${OPT_FLAGS[@]}" "${HARDEN_FLAGS[@]}" \
-    -c "$SRC_DIR/sqlite3.c" -o "$BUILD_DIR/sqlite3.o" -DSQLITE_THREADSAFE=1
+    -c "$SRC_DIR/sqlite3.c" -o "$BUILD_DIR/sqlite3.o" -DSQLITE_THREADSAFE=1 -DSQLITE_DQS=0 -DSQLITE_OMIT_LOAD_EXTENSION
 
 # Compile all C++ source files (same order as bucks_core in CMakeLists.txt,
 # plus main for the executable)
 echo "Compiling source files..."
 CPP_SOURCES=(
     crypto serialize u256 chainparams sighash chain coins undo merkle    transaction block  
-    wallet hd_8192 server network bip_8192 protocol_enc genesis validation_rules gold_rules connect_block chainstate chaindb node policy miner pow mempool
+    wallet hd_8192 server network bip_8192 protocol_enc genesis validation_rules gold_rules connect_block chainstate chaindb node policy fsutil mempool_file miner pow mempool
     script
     main
 )

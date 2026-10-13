@@ -91,6 +91,10 @@ elseif(MSVC)
     endif()
 endif()
 
+# Vendored SQLite: same definitions as build.sh (checked by build_hygiene).
+set_source_files_properties(src/sqlite3.c PROPERTIES COMPILE_DEFINITIONS
+    "SQLITE_THREADSAFE=1;SQLITE_DQS=0;SQLITE_OMIT_LOAD_EXTENSION")
+
 # Bucks core library
 add_library(bucks_core STATIC
     src/sqlite3.c
@@ -101,6 +105,8 @@ add_library(bucks_core STATIC
     src/sighash.cpp
     src/chain.cpp
     src/policy.cpp
+    src/fsutil.cpp
+    src/mempool_file.cpp
     src/chaindb.cpp
     src/node.cpp
     src/miner.cpp

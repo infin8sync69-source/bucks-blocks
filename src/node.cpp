@@ -4,6 +4,9 @@
 #include <ctime>
 
 #include "consensus.h"
+#include "fsutil.h"
+#include "log.h"
+#include "mempool_file.h"
 #include "script.h"
 
 namespace Bucks {
@@ -12,6 +15,7 @@ std::unique_ptr<Node> Node::open(const std::string& networkDir, const ChainParam
                                  const LoadOptions& load, std::string& err, int& exitCode, Clock clock) {
     std::unique_ptr<Node> n(new Node());
     n->params_ = params;
+    n->networkDir_ = networkDir;
     n->clock_ = clock ? std::move(clock) : Clock([] { return int64_t(std::time(nullptr)); });
 
     n->store_ = SqliteChainStore::open(networkDir, n->params_, err, exitCode);
@@ -37,7 +41,42 @@ std::unique_ptr<Node> Node::open(const std::string& networkDir, const ChainParam
         return nullptr;
     }
     exitCode = EXIT_STORAGE_OK;
+    n->loadMempoolFile();
     return n;
+}
+
+void Node::loadMempoolFile() {
+    const std::string path = networkDir_ + "/mempool.dat";
+    std::string bytes;
+    if (!readWholeFile(path, bytes)) return;   // none yet: normal on a first start
+    std::vector<std::vector<uint8_t>> txs;
+    std::string err;
+    if (!decodeMempoolFile(bytes, params_.genesisHash, txs, err)) {
+        logErr() << "mempool.dat ignored: " << err << "\n";
+        return;
+    }
+    // Everything is re-validated against the current chain. A child can sit before its
+    // parent in a damaged file, so retry the leftovers while a pass makes progress.
+    size_t loaded = 0;
+    std::vector<std::vector<uint8_t>> pending = std::move(txs);
+    while (!pending.empty()) {
+        std::vector<size_t> dropped;
+        const size_t n = mempool_->reloadValidated(pending, *state_, dropped);
+        loaded += n;
+        if (n == 0) break;
+        std::vector<std::vector<uint8_t>> next;
+        for (size_t i : dropped) next.push_back(pending[i]);
+        pending = std::move(next);
+    }
+    logOut() << "✓ Mempool restored: " << loaded << " transaction(s), "
+             << pending.size() << " dropped\n";
+}
+
+void Node::saveMempoolFile() {
+    std::string err;
+    const std::string data = encodeMempoolFile(mempool_->serializedByArrival(), params_.genesisHash);
+    if (!writePrivateFileAtomic(networkDir_ + "/mempool.dat", data, &err))
+        logErr() << "could not save mempool.dat: " << err << "\n";
 }
 
 Node::~Node() {
@@ -48,6 +87,7 @@ void Node::shutdown() {
     std::lock_guard<std::mutex> lock(mu_);
     if (shutDown_ || !state_) return;
     shutDown_ = true;
+    saveMempoolFile();
     state_->shutdown();
 }
 
@@ -76,6 +116,7 @@ Node::TipInfo Node::tipLocked() const {
     t.initialBlockDownload = initialBlockDownloadLocked();
     t.forkAlert = state_->forkAlert().active;
     t.forkHeight = state_->forkAlert().forkHeight;
+    t.forkOtherTip = state_->forkAlert().otherTip;
     return t;
 }
 

@@ -362,6 +362,20 @@ size_t Mempool::reloadValidated(const std::vector<std::vector<uint8_t>>& rawTxs,
     return loaded;
 }
 
+std::vector<std::vector<uint8_t>> Mempool::serializedByArrival() const {
+    std::vector<const MempoolEntry*> all;
+    all.reserve(byTxid_.size());
+    for (const auto& [id, e] : byTxid_) all.push_back(&e);
+    std::sort(all.begin(), all.end(), [](const MempoolEntry* a, const MempoolEntry* b) {
+        if (a->entryTime != b->entryTime) return a->entryTime < b->entryTime;
+        return a->txid < b->txid;
+    });
+    std::vector<std::vector<uint8_t>> out;
+    out.reserve(all.size());
+    for (const MempoolEntry* e : all) out.push_back(e->tx.serialize());
+    return out;
+}
+
 // ---------------------------------------------------------------- orphans
 
 bool Mempool::evictOrphan(const std::vector<Hash256>& candidates) {

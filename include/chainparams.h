@@ -42,6 +42,10 @@ struct ChainParams {
 
     uint32_t    halvingInterval;
 
+    // "host:port" entries a node dials when it has too few peers. Empty until the owner
+    // publishes seed nodes for the network; `--seed` adds more at run time.
+    std::vector<std::string> seedNodes;
+
     // Chain selection safety (section 8.5)
     std::vector<Checkpoint> checkpoints;  // ascending height, first is genesis
     U256        minimumChainWork;

@@ -76,6 +76,9 @@ public:
     size_t reloadValidated(const std::vector<std::vector<uint8_t>>& rawTxs,
                            const ChainState& chain, std::vector<size_t>& dropped);
 
+    // Serialized transactions, oldest arrival first (a parent always arrives before its child).
+    std::vector<std::vector<uint8_t>> serializedByArrival() const;
+
     bool remove(const Hash256& txid);
     bool contains(const Hash256& txid) const { return byTxid_.count(txid) != 0; }
     const MempoolEntry* find(const Hash256& txid) const;

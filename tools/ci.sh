@@ -9,6 +9,7 @@
 #                          (default 60 per target; the nightly job uses 600). Needs a clang with the
 #                          libFuzzer runtime (Linux clang, Homebrew LLVM); set CC/CXX if it is not
 #                          the default compiler. Without libFuzzer it only replays the corpus.
+#   tools/ci.sh soak       three-node regtest soak (BUCKS_SOAK_SECONDS, default 90): mining, kill -9, restart, convergence
 #   tools/ci.sh all        build, asan, tsan, fuzz
 #
 # Build directories are build-ci-<job> next to the sources (git-ignored).
@@ -47,6 +48,12 @@ job_tsan() {
     # The default symbolizer can hang on macOS; resolve addresses with atos instead.
     [[ "$(uname)" == "Darwin" ]] && opts="$opts:symbolize=0"
     (cd "$dir" && TSAN_OPTIONS="$opts" ctest --output-on-failure --timeout 1800)
+}
+
+job_soak() {
+    local dir="$ROOT/build-ci-build"
+    [ -x "$dir/bucks" ] || configure_and_build "$dir" -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    "$ROOT/tools/soak.sh" "$dir/bucks" "${BUCKS_SOAK_SECONDS:-90}"
 }
 
 job_fuzz() {
@@ -89,6 +96,7 @@ case "$JOB" in
     asan)  job_asan ;;
     tsan)  job_tsan ;;
     fuzz)  job_fuzz ;;
-    all)   job_build; job_asan; job_tsan; job_fuzz ;;
+    soak)  job_soak ;;
+    all)   job_build; job_asan; job_tsan; job_fuzz; job_soak ;;
     *)     sed -n '2,17p' "${BASH_SOURCE[0]}"; exit 2 ;;
 esac

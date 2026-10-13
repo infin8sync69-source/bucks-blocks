@@ -178,3 +178,62 @@ TEST(Network, DifferentNetworkMagicIsIgnored) {
     netB.stop();
     netA.stop();
 }
+
+// A peer that vanishes or never reads must not kill or stall the node (SIGPIPE, short writes).
+TEST(P2pSend, ClosedPeerIsAnErrorNotASignal) {
+    NodeHarness h;
+    ASSERT_TRUE(h.node) << h.error;
+    Network net(*h.node);
+    int fds[2];
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+    Peer peer(net, fds[0], "127.0.0.1", 1);
+    close(fds[1]);   // the other side is gone; a plain send() would raise SIGPIPE here
+    EXPECT_FALSE(peer.sendMsg(NetMessage(MessageType::BLOCK, std::vector<uint8_t>(100'000, 7))));
+    EXPECT_EQ(peer.getState(), PeerState::DISCONNECTED);
+}
+
+TEST(P2pSend, PeerThatNeverReadsIsDroppedWithinTheDeadline) {
+    NodeHarness h;
+    ASSERT_TRUE(h.node) << h.error;
+    Network net(*h.node);
+    int fds[2];
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+    Peer peer(net, fds[0], "127.0.0.1", 1);
+    const auto start = std::chrono::steady_clock::now();
+    // Far more than the socket buffers hold; nobody reads fds[1].
+    EXPECT_FALSE(peer.sendMsg(NetMessage(MessageType::BLOCK, std::vector<uint8_t>(8'000'000, 7))));
+    const auto took = std::chrono::steady_clock::now() - start;
+    EXPECT_LT(took, std::chrono::seconds(8));
+    EXPECT_EQ(peer.getState(), PeerState::DISCONNECTED);
+    close(fds[1]);
+}
+
+// --connect keeps trying: a peer that is down at startup is found when it comes up, and a
+// connection that drops is dialled again.
+TEST(Network, PersistentPeerIsRedialled) {
+    NodeHarness a, b;
+    ASSERT_TRUE(a.node && b.node);
+    Network netB(*b.node);
+    const uint16_t portA = freePort();
+    const uint16_t portB = freePort();
+    netB.start(portB);
+    netB.addPersistentPeer("127.0.0.1", portA);   // nobody listens there yet
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    EXPECT_EQ(netB.peerCount(), 0u);
+
+    auto netA = std::make_unique<Network>(*a.node);
+    netA->start(portA);
+    ASSERT_TRUE(waitFor([&] { return netA->peerCount() == 1 && netB.peerCount() == 1; }, 30))
+        << "B never reached A";
+
+    // A goes away and comes back on the same port.
+    netA->stop();
+    netA.reset();
+    ASSERT_TRUE(waitFor([&] { return netB.peerCount() == 0; }, 30));
+    netA = std::make_unique<Network>(*a.node);
+    netA->start(portA);
+    EXPECT_TRUE(waitFor([&] { return netA->peerCount() == 1 && netB.peerCount() == 1; }, 60))
+        << "B did not dial A again";
+    netB.stop();
+    netA->stop();
+}

@@ -20,6 +20,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <netdb.h>
 #endif
 
 namespace Bucks {
@@ -227,10 +229,14 @@ NetMessage NetMessage::deserialize(const std::vector<uint8_t>& data, const std::
 // Peer implementation
 // ------------------------------------------------------------
 
-Peer::Peer(Network& net, int socket, const std::string& ip, uint16_t port, bool inbound)
-    : network(net), socket_fd(socket), ip(ip), port(port), connected(true), inbound(inbound),
+Peer::Peer(Network& net, int socket, const std::string& ip, uint16_t port)
+    : network(net), socket_fd(socket), ip(ip), port(port), connected(true),
       state(PeerState::HANDSHAKE), misbehaviorScore(0), encryptionNegotiated(false) {
 
+#ifndef _WIN32
+    // Non-blocking, so sendMsg's deadline holds (macOS ignores MSG_DONTWAIT for send).
+    fcntl(socket_fd, F_SETFL, fcntl(socket_fd, F_GETFL, 0) | O_NONBLOCK);
+#endif
     connectionTime = std::chrono::steady_clock::now();
     lastBlockRequestTime = connectionTime;
     lastHeadersRequestTime = connectionTime - std::chrono::seconds(60);
@@ -291,8 +297,36 @@ bool Peer::sendMsg(const NetMessage& msg) {
     std::vector<uint8_t> data = toSend.serialize(network.magic());
     std::lock_guard<std::mutex> lock(sendMutex);
 
-    int sent = ::send(socket_fd, reinterpret_cast<const char*>(data.data()), static_cast<int>(data.size()), 0);
-    return sent == static_cast<int>(data.size());
+    // Send everything or drop the peer: a short write would leave a half frame in the
+    // stream, and a peer that never reads must not stall the network thread for long.
+    // No SIGPIPE: a peer that closed under us is an error return, never a signal.
+#ifdef MSG_NOSIGNAL
+    constexpr int kSendFlags = MSG_NOSIGNAL | MSG_DONTWAIT;
+#else
+    constexpr int kSendFlags = MSG_DONTWAIT;
+#endif
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    size_t off = 0;
+    while (off < data.size()) {
+        const ssize_t n = ::send(socket_fd, reinterpret_cast<const char*>(data.data()) + off,
+                                 data.size() - off, kSendFlags);
+        if (n > 0) {
+            off += size_t(n);
+            continue;
+        }
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  deadline - std::chrono::steady_clock::now()).count();
+            if (left <= 0) break;
+            struct pollfd pfd = {socket_fd, POLLOUT, 0};
+            if (::poll(&pfd, 1, int(std::min<int64_t>(left, 1000))) >= 0) continue;
+        }
+        break;
+    }
+    if (off == data.size()) return true;
+    disconnect();
+    return false;
 }
 
 void Peer::processBuffer() {
@@ -634,7 +668,8 @@ Network::Network(Node& n)
 #endif
     
     // Initialize peer discovery
-    lastDiscoveryTime = std::chrono::steady_clock::now();
+    lastDiscoveryTime = std::chrono::steady_clock::now() - std::chrono::minutes(31);   // first discovery at once
+    lastMaintain_ = std::chrono::steady_clock::now();
     loadSeedNodes();
 
     // New tips and accepted transactions are announced to every peer. The listeners only
@@ -712,7 +747,29 @@ void Network::setupListenSocket() {
     Bucks::logOut() << "DEBUG: Network listening on port " << listenPort << std::endl;
 }
 
-bool Network::connectToPeer(const std::string& ip, uint16_t port) {
+namespace {
+
+// IPv4 dotted quad for a literal or a host name; false if it does not resolve.
+bool resolveIPv4(const std::string& host, std::string& out) {
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo* res = nullptr;
+    if (getaddrinfo(host.c_str(), nullptr, &hints, &res) != 0 || !res) return false;
+    char buf[INET_ADDRSTRLEN] = {};
+    const auto* sin = reinterpret_cast<const sockaddr_in*>(res->ai_addr);
+    const bool ok = inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf)) != nullptr;
+    freeaddrinfo(res);
+    if (ok) out = buf;
+    return ok;
+}
+
+} // namespace
+
+bool Network::connectToPeer(const std::string& host, uint16_t port) {
+    std::string ip;
+    if (!resolveIPv4(host, ip)) return false;
+
     int s = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
     if (s == -1) return false;
 
@@ -737,9 +794,74 @@ bool Network::connectToPeer(const std::string& ip, uint16_t port) {
     }
 
     std::lock_guard<std::mutex> lock(peersMutex);
-    peers[s] = std::make_unique<Peer>(*this, s, ip, port, false);
+    peers[s] = std::make_unique<Peer>(*this, s, ip, port);
     
     return true;
+}
+
+void Network::addPersistentPeer(const std::string& host, uint16_t port) {
+    std::lock_guard<std::mutex> lock(peersMutex);
+    for (const auto& p : persistentPeers_)
+        if (p.host == host && p.port == port) return;
+    persistentPeers_.push_back({host, port, std::chrono::steady_clock::now(), 5});
+}
+
+void Network::addSeedNode(const std::string& hostPort) {
+    std::lock_guard<std::mutex> lock(peersMutex);
+    if (std::find(seedNodes.begin(), seedNodes.end(), hostPort) == seedNodes.end())
+        seedNodes.push_back(hostPort);
+}
+
+// Called from the network thread about once a second.
+void Network::maintainConnections() {
+    const auto now = std::chrono::steady_clock::now();
+    if (now - lastMaintain_ < std::chrono::seconds(1)) return;
+    lastMaintain_ = now;
+
+    struct Dial { size_t index; };
+    std::vector<size_t> due;
+    {
+        std::lock_guard<std::mutex> lock(peersMutex);
+        for (size_t i = 0; i < persistentPeers_.size(); ++i) {
+            auto& pp = persistentPeers_[i];
+            std::string ip;
+            bool connected = false;
+            if (resolveIPv4(pp.host, ip)) {
+                for (const auto& [fd, peer] : peers) {
+                    // Outbound entries carry the dialled port; an inbound socket from the same
+                    // host also means the link exists, whichever side opened it.
+                    if (peer->getIP() == ip && peer->getState() != PeerState::DISCONNECTED) {
+                        connected = true;
+                        break;
+                    }
+                }
+            }
+            if (connected) {
+                pp.backoffSeconds = 5;
+                pp.nextAttempt = now;
+            } else if (now >= pp.nextAttempt) {
+                due.push_back(i);
+            }
+        }
+    }
+    for (size_t i : due) {
+        std::string host;
+        uint16_t port;
+        {
+            std::lock_guard<std::mutex> lock(peersMutex);
+            host = persistentPeers_[i].host;
+            port = persistentPeers_[i].port;
+        }
+        const bool ok = connectToPeer(host, port);
+        std::lock_guard<std::mutex> lock(peersMutex);
+        auto& pp = persistentPeers_[i];
+        // Even a connect that succeeded is re-checked next round; back off either way so a peer
+        // that accepts and then drops us is not hammered.
+        pp.nextAttempt = now + std::chrono::seconds(pp.backoffSeconds);
+        pp.backoffSeconds = std::min(pp.backoffSeconds * 2, 300);
+        if (!ok) Bucks::logOut() << "DEBUG: cannot reach " << host << ":" << port
+                                 << ", retrying in " << pp.backoffSeconds / 2 << " s" << std::endl;
+    }
 }
 
 void Network::run() {
@@ -770,6 +892,8 @@ void Network::run() {
         }
 
         pruneZombiePeers();
+        maintainConnections();
+        update();
 
         if (FD_ISSET(listenSocket, &readFds)) {
             acceptNewConnection();
@@ -886,7 +1010,7 @@ void Network::acceptNewConnection() {
         return;
     }
 
-    peers[s] = std::make_unique<Peer>(*this, s, ip, ntohs(addr.sin_port), true);
+    peers[s] = std::make_unique<Peer>(*this, s, ip, ntohs(addr.sin_port));
 }
 
 void Network::pruneZombiePeers() {
@@ -1002,16 +1126,7 @@ void Network::update() {
 // Peer Discovery Implementation (Phase 6)
 
 void Network::loadSeedNodes() {
-    // FIX: Production seed nodes — update with actual IPs before mainnet launch
-    //      — Bucks v1 security patch
-    // The old value (127.0.0.1:18333) means every node starts with only localhost
-    // as its peer and can never discover the rest of the network.
-    seedNodes = {
-        "us-east.bucks.network:8333",
-        "eu-west.bucks.network:8333",
-        "sg.bucks.network:8333"
-    };
-
+    seedNodes = node.params().seedNodes;
     Bucks::logOut() << "DEBUG: Loaded " << seedNodes.size() << " seed nodes" << std::endl;
 }
 
@@ -1035,7 +1150,10 @@ void Network::discoverPeers() {
                 size_t colonPos = seed.find(':');
                 if (colonPos == std::string::npos) continue;
                 std::string ip  = seed.substr(0, colonPos);
-                uint16_t   port = static_cast<uint16_t>(std::stoi(seed.substr(colonPos + 1)));
+                int portNum = 0;
+                try { portNum = std::stoi(seed.substr(colonPos + 1)); } catch (...) { continue; }
+                if (portNum < 1 || portNum > 65535) continue;
+                uint16_t   port = static_cast<uint16_t>(portNum);
 
                 bool alreadyConnected = false;
                 for (const auto& [fd, peer] : peers) {

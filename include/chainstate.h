@@ -86,6 +86,7 @@ public:
     GoldRules::GoldState gold() const { return store_.gold(); }
     uint64_t tipSequence() const { return tipSequence_.load(std::memory_order_acquire); }
     const ForkAlert& forkAlert() const { return alert_; }
+    void raiseForkAlert(const ForkAlert& a, uint64_t depth);   // logs once per competing tip
 
     // Section 8.5, "when the miner may work". Empty when mining is allowed,
     // otherwise the reason ("node is syncing"). Regtest has no restriction.

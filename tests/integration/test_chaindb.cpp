@@ -40,7 +40,6 @@ private:
     sqlite3* db_ = nullptr;
 };
 
-std::string hexOf(const Hash256& h) { return hexStr(std::vector<uint8_t>(h.begin(), h.end())); }
 
 OutPoint op(uint8_t fill, uint32_t index) {
     OutPoint o;
@@ -95,6 +94,21 @@ TEST(ChainDb, IdentityAndVersion) {
     }
     EXPECT_EQ(SqliteChainStore::open(c.dir(), c.params(), err, code), nullptr);
     EXPECT_EQ(code, EXIT_DATABASE_CORRUPT) << err;
+}
+
+// One process per data directory: a second open while the first is alive is refused,
+// and the lock is released when the first closes.
+TEST(ChainDb, SecondOpenOfSameDirectoryIsRefused) {
+    PersistentChain c;
+    ASSERT_TRUE(c.open().ok);
+    std::string err;
+    int code = 0;
+    EXPECT_EQ(SqliteChainStore::open(c.dir(), c.params(), err, code), nullptr);
+    EXPECT_EQ(code, EXIT_STORAGE_FAILURE);
+    EXPECT_NE(err.find("already using"), std::string::npos) << err;
+    c.close(true);
+    auto again = SqliteChainStore::open(c.dir(), c.params(), err, code);
+    EXPECT_NE(again, nullptr) << err;
 }
 
 // DBT-2

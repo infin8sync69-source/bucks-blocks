@@ -5,6 +5,7 @@ add_executable(integration_tests
     test_chain_spend.cpp
     test_chainstate.cpp
     test_mempool.cpp
+    test_mempool_file.cpp
     test_miner.cpp
     test_chaindb.cpp
     test_startup.cpp

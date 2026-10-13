@@ -29,8 +29,9 @@ static void printUsage() {
         "  --server                  start the REST API / web UI\n"
         "  --port <n>                API port (default: per network, 8080 on main)\n"
         "  --p2p-port <n>            P2P port (default: per network, 8733 on main)\n"
-        "  --connect <ip:port>       connect to a peer\n"
-        "  --web-root <dir>          static UI directory (default frontend/dist)\n"
+        "  --connect <host:port>     keep a connection to this peer (repeatable)\n"
+        "  --seed <host:port>        seed node, dialled while there are fewer than 3 peers (repeatable)\n"
+        "  --web-root <dir>          static UI directory (default: web/ next to the sources)\n"
         "  --datadir <dir>           wallets, API cookie and <network>/chain.sqlite (default ~/.bucks)\n"
         "  --checkblocks <n>         verify the last n blocks at start (default 24, 0 = all)\n"
         "  --checkdb[=full]          heavier database checks at start\n"
@@ -51,6 +52,9 @@ int main(int argc, char* argv[]) {
     Bucks::logOut() << "=== Bucks Node (PATH-B) ===\n";
 
     // Handle shutdown signals
+#ifdef SIGPIPE
+    std::signal(SIGPIPE, SIG_IGN);   // a peer closing mid-send is an error return, not a crash
+#endif
     std::signal(SIGINT, handleSignal);
     std::signal(SIGTERM, handleSignal);
 
@@ -59,8 +63,13 @@ int main(int argc, char* argv[]) {
     NetworkId networkId = NetworkId::MAIN;
     uint16_t port = 0;      // 0 = the network default
     uint16_t p2pPort = 0;
-    std::string connectPeer = "";
-    std::string webRoot = "frontend/dist";
+    std::vector<std::string> connectPeers;
+    std::vector<std::string> seedPeers;
+#ifdef BUCKS_SOURCE_DIR
+    std::string webRoot = std::string(BUCKS_SOURCE_DIR) + "/web";
+#else
+    std::string webRoot = "web";
+#endif
     bool enableIPFS = false;
     uint16_t ipfsPort = 5001;
     bool autoMine = false;
@@ -93,7 +102,9 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--p2p-port" && i + 1 < argc) {
             p2pPort = static_cast<uint16_t>(std::stoi(argv[++i]));
         } else if (arg == "--connect" && i + 1 < argc) {
-            connectPeer = argv[++i];
+            connectPeers.push_back(argv[++i]);
+        } else if (arg == "--seed" && i + 1 < argc) {
+            seedPeers.push_back(argv[++i]);
         } else if (arg == "--web-root" && i + 1 < argc) {
              webRoot = argv[++i];
         } else if (arg == "--ipfs-enable") {
@@ -176,15 +187,39 @@ int main(int argc, char* argv[]) {
     network.start(p2pPort);
     Bucks::logOut() << "✓ P2P network started on port " << p2pPort << "\n";
 
-    if (!connectPeer.empty()) {
-        size_t colon = connectPeer.find(':');
-        if (colon != std::string::npos) {
-            std::string ip = connectPeer.substr(0, colon);
-            uint16_t p = static_cast<uint16_t>(std::stoi(connectPeer.substr(colon + 1)));
-            if (network.connectToPeer(ip, p)) {
-                Bucks::logOut() << "✓ Connecting to peer " << connectPeer << "...\n";
-            }
+    auto splitHostPort = [](const std::string& hp, std::string& host, uint16_t& port) {
+        const size_t colon = hp.rfind(':');
+        if (colon == std::string::npos || colon == 0) return false;
+        try {
+            const int p = std::stoi(hp.substr(colon + 1));
+            if (p < 1 || p > 65535) return false;
+            port = static_cast<uint16_t>(p);
+        } catch (...) {
+            return false;
         }
+        host = hp.substr(0, colon);
+        return true;
+    };
+    for (const std::string& hp : seedPeers) {
+        std::string host;
+        uint16_t p = 0;
+        if (!splitHostPort(hp, host, p)) {
+            Bucks::logErr() << "FATAL: --seed expects host:port, got '" << hp << "'\n";
+            network.stop();
+            return 2;
+        }
+        network.addSeedNode(hp);
+    }
+    for (const std::string& hp : connectPeers) {
+        std::string host;
+        uint16_t p = 0;
+        if (!splitHostPort(hp, host, p)) {
+            Bucks::logErr() << "FATAL: --connect expects host:port, got '" << hp << "'\n";
+            network.stop();
+            return 2;
+        }
+        network.addPersistentPeer(host, p);
+        Bucks::logOut() << "✓ Keeping a connection to peer " << hp << "\n";
     }
 
     Server* server = nullptr;

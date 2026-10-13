@@ -1,4 +1,5 @@
 #include "server.h"
+#include "fsutil.h"
 #include "log.h"
 #include "node.h"
 #include "pow.h"
@@ -17,6 +18,8 @@
 #include <unordered_map>
 #include <memory>
 #include "network.h"
+#include "consensus.h"
+#include "policy.h"
 #include <algorithm>
 #include <thread>
 #include <mutex>
@@ -47,6 +50,8 @@
 using json = nlohmann::json;
 
 namespace Bucks {
+
+constexpr const char* BUCKS_NODE_VERSION = "0.2.0-testnet";
 
 namespace fs = std::filesystem;
 
@@ -125,56 +130,6 @@ bool readTextFile(const std::string& path, std::string& out) {
     ss << in.rdbuf();
     out = ss.str();
     return true;
-}
-
-// Write `data` to `path` with mode 0600 via temp file + fsync + rename, so
-// a crash leaves either the old or the new file, never a truncated one.
-bool writePrivateFileAtomic(const std::string& path, const std::string& data, std::string* err) {
-    const std::string tmp = path + ".tmp";
-    auto fail = [&](const std::string& what) {
-        if (err) *err = what + ": " + std::strerror(errno);
-        std::error_code ec;
-        fs::remove(tmp, ec);
-        return false;
-    };
-#ifndef _WIN32
-    ::unlink(tmp.c_str());
-    int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
-    if (fd < 0) return fail("cannot create " + tmp);
-    size_t off = 0;
-    while (off < data.size()) {
-        ssize_t n = ::write(fd, data.data() + off, data.size() - off);
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            ::close(fd);
-            return fail("cannot write " + tmp);
-        }
-        off += static_cast<size_t>(n);
-    }
-    if (::fsync(fd) != 0) { ::close(fd); return fail("cannot fsync " + tmp); }
-    if (::close(fd) != 0) return fail("cannot close " + tmp);
-    if (::rename(tmp.c_str(), path.c_str()) != 0) return fail("cannot rename " + tmp);
-    // Make the rename itself durable.
-    fs::path dir = fs::path(path).parent_path();
-    int dfd = ::open(dir.empty() ? "." : dir.string().c_str(), O_RDONLY);
-    if (dfd >= 0) { ::fsync(dfd); ::close(dfd); }
-    return true;
-#else
-    {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out) return fail("cannot create " + tmp);
-        out << data;
-        if (!out) return fail("cannot write " + tmp);
-    }
-    std::error_code ec;
-    fs::rename(tmp, path, ec);
-    if (ec) {
-        if (err) *err = "cannot rename " + tmp + ": " + ec.message();
-        fs::remove(tmp, ec);
-        return false;
-    }
-    return true;
-#endif
 }
 
 // Create `path` (and parents) and make it private to the owner.
@@ -376,8 +331,9 @@ std::string Server::defaultDataDir() {
     return ".bucks";
 }
 
-Server::Server(Node& n, Network*, const ServerConfig& cfg)
+Server::Server(Node& n, Network* net, const ServerConfig& cfg)
     : node(n),
+      network_(net),
       config(cfg),
       isRunning(false),
       svr(new httplib::Server()) {
@@ -599,6 +555,8 @@ bool Server::start(int port) {
         }
         if (startsWith(req.path, "/api/")) {
             res.set_header("Cache-Control", "no-store");
+        } else {
+            res.set_header("Cache-Control", "no-cache");   // static UI: always revalidate (ETag), so upgrades show at once
         }
         const std::string origin = req.get_header_value("Origin");
         if (!origin.empty() && corsOriginAllowed(origin)) {
@@ -886,8 +844,17 @@ void Server::setupRoutes() {
     });
 
     // Get Status
-    s->Get("/api/status", [](const httplib::Request&, httplib::Response& res) {
-        res.set_content(json{{"status", "ok"}}.dump(), "application/json");
+    s->Get("/api/status", [this](const httplib::Request&, httplib::Response& res) {
+        const auto up = std::chrono::duration_cast<std::chrono::seconds>(
+                            std::chrono::steady_clock::now() - startedAt_).count();
+        json j{
+            {"status", "ok"},
+            {"version", BUCKS_NODE_VERSION},
+            {"network", node.params().name},
+            {"uptimeSeconds", up},
+            {"peerCount", network_ ? network_->peerCount() : 0},
+        };
+        res.set_content(j.dump(), "application/json");
     });
 
     // =========================================================
@@ -966,8 +933,14 @@ void Server::setupRoutes() {
             {"utxoCount", t.stats.count},
             {"circulatingSupply", t.stats.totalAmount},
             {"mempoolSize", node.mempoolSize()},
+            {"addressVersion", p.p2pkhAddressVersion},
+            {"coinbaseMaturity", Bucks::Consensus::COINBASE_MATURITY},
+            {"minRelayFeeRate", Policy::MIN_RELAY_FEERATE},
+            {"dustLimit", Policy::DUST_LIMIT},
             {"syncing", t.initialBlockDownload},
             {"forkAlert", t.forkAlert},
+            {"forkHeight", t.forkHeight},
+            {"forkOtherTip", t.forkAlert ? hash256ToHex(t.forkOtherTip) : std::string()},
             {"isValid", true}
         };
         res.set_content(j.dump(), "application/json");
@@ -1401,6 +1374,25 @@ void Server::setupRoutes() {
             {"success", true},
             {"message", "Auto-mining stopped"}
         }.dump(), "application/json");
+    });
+
+    // Operator decision after a fork alert (spec 8.5): follow the deeper-reorg branch whose tip is given.
+    s->Post("/api/node/approve-reorg", [this](const httplib::Request& req, httplib::Response& res) {
+        json j = json::parse(req.body, nullptr, false);
+        const std::string hex = (j.is_object() && j.contains("tipHash") && j["tipHash"].is_string())
+                                    ? j["tipHash"].get<std::string>() : std::string();
+        const bool isHex = hex.size() == 64 &&
+                           hex.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos;
+        if (!isHex) {
+            reply(res, 400, errorJson("tipHash (64 hex characters) is required"));
+            return;
+        }
+        std::string err;
+        if (!node.approveReorg(hexToHash256(hex), err)) {
+            reply(res, 409, errorJson(err));
+            return;
+        }
+        res.set_content(json{{"success", true}}.dump(), "application/json");
     });
 
     s->Get("/api/mining/status", [this](const httplib::Request&, httplib::Response& res) {

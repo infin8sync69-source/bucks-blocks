@@ -39,6 +39,7 @@ public:
         bool initialBlockDownload = false;
         bool forkAlert = false;
         uint32_t forkHeight = 0;
+        Hash256 forkOtherTip{};
     };
 
     // Opens <networkDir>/chain.sqlite, runs the startup checks of section 8.7
@@ -112,6 +113,9 @@ private:
     void notifyTip(uint64_t sequenceBefore);
 
     ChainParams params_;
+    std::string networkDir_;
+    void loadMempoolFile();
+    void saveMempoolFile();
     Clock clock_;
     std::unique_ptr<SqliteChainStore> store_;
     std::unique_ptr<ChainState> state_;

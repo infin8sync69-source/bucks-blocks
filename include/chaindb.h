@@ -78,6 +78,7 @@ private:
     bool loadCached(std::string& err);
 
     sqlite3* db_ = nullptr;
+    int lockFd_ = -1;   // exclusive flock on <dir>/chain.lock: one process per data directory
     std::string path_;
     std::unique_ptr<CoinsViewDB> coins_;
     UtxoStats stats_;

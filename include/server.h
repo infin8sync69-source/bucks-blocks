@@ -55,7 +55,7 @@ struct ServerConfig {
     size_t maxWorkers = 0;                // 0 = httplib default thread pool
     size_t maxRequestSize = 1024 * 1024;  // request body limit (bytes)
     bool enableRateLimit = true;
-    size_t rateLimitRequests = 100;
+    size_t rateLimitRequests = 300;
     std::chrono::seconds rateLimitWindow{60};
     bool enableLogging = true;
     std::string webRoot = "web";
@@ -80,14 +80,14 @@ struct ServerConfig {
     std::vector<std::string> allowedHosts;
     // Key the rate limiter on X-Forwarded-For (only behind a trusted proxy).
     bool trustProxy = false;
-    // Sent on every response. The default is what the in-browser-Babel UI in
-    // web/ needs; a bundled UI (frontend/dist) can drop unpkg and
-    // 'unsafe-inline' for scripts.
+    // Sent on every response. The bundled UI in web/ is dependency-free ES
+    // modules served by the node itself: no CDN, no inline script or style,
+    // no third-party origin.
     std::string contentSecurityPolicy =
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://unpkg.com; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
-        "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
+        "script-src 'self'; "
+        "style-src 'self'; "
+        "font-src 'self'; "
         "img-src 'self' data:; "
         "connect-src 'self'; "
         "frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'";
@@ -148,6 +148,8 @@ public:
 private:
     // ---- Core references (read-heavy, write-light) ----
     Node& node;
+    Network* network_ = nullptr;
+    std::chrono::steady_clock::time_point startedAt_ = std::chrono::steady_clock::now();
     size_t tipListenerId = 0;
     size_t txListenerId = 0;
     ServerConfig config;

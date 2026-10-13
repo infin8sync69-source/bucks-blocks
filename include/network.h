@@ -122,7 +122,7 @@ class Node;
 
 class Peer {
 public:
-    Peer(Network& net, int socket, const std::string& ip, uint16_t port, bool inbound);
+    Peer(Network& net, int socket, const std::string& ip, uint16_t port);
     ~Peer();
 
     void disconnect();
@@ -155,7 +155,6 @@ private:
     std::string ip;
     uint16_t port;
     bool connected;
-    bool inbound;
     PeerState state;
     
     std::vector<uint8_t> receiveBuffer;
@@ -186,7 +185,12 @@ public:
     void stop();
 
     // Outbound peer connection
-    bool connectToPeer(const std::string& ip, uint16_t port);
+    bool connectToPeer(const std::string& host, uint16_t port);
+
+    // A peer to keep (--connect): redialled with exponential backoff (5 s up to 5 min) whenever
+    // the connection is missing. Seed nodes are only used while the node has fewer than 3 peers.
+    void addPersistentPeer(const std::string& host, uint16_t port);
+    void addSeedNode(const std::string& hostPort);
 
     // Message relay
     void broadcast(const NetMessage& msg);
@@ -244,6 +248,16 @@ private:
     std::chrono::steady_clock::time_point lastDiscoveryTime;
     void discoverPeers();
     void loadSeedNodes();
+
+    struct PersistentPeer {
+        std::string host;
+        uint16_t port;
+        std::chrono::steady_clock::time_point nextAttempt;
+        int backoffSeconds = 5;
+    };
+    std::vector<PersistentPeer> persistentPeers_;
+    std::chrono::steady_clock::time_point lastMaintain_;
+    void maintainConnections();
 
     std::thread networkThread;
     

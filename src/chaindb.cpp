@@ -1,9 +1,13 @@
 #include "chaindb.h"
 
+#include <fcntl.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
 #include <filesystem>
 #include <map>
 
@@ -14,6 +18,9 @@
 
 namespace Bucks {
 
+
+static_assert(SQLITE_VERSION_NUMBER >= 3051003,
+              "storage spec requires SQLite 3.51.3 or newer (see THIRD_PARTY.md)");
 namespace {
 
 constexpr int kSchemaVersion = 2;
@@ -243,6 +250,7 @@ bool SqliteChainStore::exec(const char* sql, std::string* err) const {
 SqliteChainStore::~SqliteChainStore() {
     coins_.reset();   // finalises its statement before the connection closes
     if (db_) sqlite3_close(db_);
+    if (lockFd_ >= 0) ::close(lockFd_);   // after the database: the next process may open it now
 }
 
 bool SqliteChainStore::createSchema(const ChainParams& params, std::string& err) {
@@ -335,6 +343,22 @@ std::unique_ptr<SqliteChainStore> SqliteChainStore::open(const std::string& dir,
 
     std::unique_ptr<SqliteChainStore> store(new SqliteChainStore());
     store->path_ = path;
+
+    // One process per data directory. The lock dies with the process, so a crash never leaves it stuck.
+    {
+        const std::string lockPath = dir + "/chain.lock";
+        const mode_t oldMask = umask(077);
+        store->lockFd_ = ::open(lockPath.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+        umask(oldMask);
+        if (store->lockFd_ < 0) {
+            err = "cannot open " + lockPath + ": " + std::strerror(errno);
+            return nullptr;
+        }
+        if (flock(store->lockFd_, LOCK_EX | LOCK_NB) != 0) {
+            err = "another Bucks process is already using " + dir + " (lock held on " + lockPath + ")";
+            return nullptr;
+        }
+    }
     const mode_t old = umask(077);
     int rc = sqlite3_open_v2(path.c_str(), &store->db_,
                              SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_EXRESCODE,

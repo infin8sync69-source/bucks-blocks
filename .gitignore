@@ -40,3 +40,7 @@ frontend/dist/
 *.log
 Thumbs.db
 build-ci-*/
+*.sqlite-wal
+*.sqlite-shm
+*.dat
+*.lock
