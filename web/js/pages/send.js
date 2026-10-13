@@ -1,0 +1,209 @@
+import { h, icon, copyButton, pageHead, skeletonRows, errorState, notice, field, busy, netBadge } from "../ui.js";
+import { post, ApiError } from "../api.js";
+import { state, loadWallets, selectWallet, selectedWallet, emit } from "../store.js";
+import { fmtBucks, parseBucks, validateAddress, MIN_FEE_UNITS, COINBASE_MATURITY, NETWORKS, shortAddr } from "../util.js";
+
+export function mount(root) {
+  const holder = h("div", { class: "stack" });
+  root.append(holder);
+  let flow = null; // form/review/result, built once the prerequisites are met
+  let shown = ""; // what holder currently displays
+  let walletSig = "";
+
+  function prerequisites(s) {
+    if (!s.walletsEnabled) return errorState(s.walletError || "The node started without its wallet subsystem.", null, "Wallets are unavailable on this node");
+    if (s.wallets === null) {
+      if (s.walletsError) return errorState(s.walletsError, () => loadWallets().then(emit), "Could not load wallets");
+      return skeletonRows(3);
+    }
+    if (!s.wallets.length) return h("div", { class: "state empty" }, h("div", null, h("strong", null, "You need a wallet to send"), h("p", null, "This node has no wallet yet.")), h("a", { class: "btn primary", href: "#/wallet" }, "Create or restore a wallet"));
+    if (!s.info) return skeletonRows(2);
+    return null;
+  }
+
+  function update(s) {
+    const blocked = prerequisites(s);
+    if (blocked) {
+      flow = null; walletSig = "";
+      const key = JSON.stringify(["blocked", s.walletsEnabled, s.walletsError, s.wallets === null, s.wallets && s.wallets.length, !!s.info]);
+      if (key !== shown) { shown = key; holder.replaceChildren(pageHead("Send", "Transfer BUCKS to another address."), blocked); }
+      return;
+    }
+    const sig = JSON.stringify([s.info.network, s.wallets.map((w) => w.address)]);
+    if (!flow || sig !== walletSig) {
+      walletSig = sig;
+      flow = buildFlow(s);
+      shown = "flow:" + sig;
+      holder.replaceChildren(flow.el);
+    }
+    flow.refresh(s);
+  }
+
+  function buildFlow(s0) {
+    const net = s0.info.network;
+    const netName = NETWORKS[net] ? NETWORKS[net].label : net;
+    let step = "form"; // form | review | done
+    let touchedTo = false, touchedAmt = false;
+    let sentInFlight = false;
+
+    const from = h("select", { id: "s-from" });
+    const to = h("input", { id: "s-to", type: "text", autocomplete: "off", autocapitalize: "off", spellcheck: "false", "aria-describedby": "s-to-err", placeholder: "Recipient address" });
+    const amt = h("input", { id: "s-amt", type: "text", inputmode: "decimal", autocomplete: "off", placeholder: "0.00000000", "aria-describedby": "s-amt-hint s-amt-err" });
+    const toField = field({ id: "s-to", label: "Recipient address", input: to });
+    const amtInput = h("div", { class: "input-affix" }, amt, h("span", { class: "affix" }, "BUCKS"));
+    const balHint = h("span");
+    const amtField = field({ id: "s-amt", label: "Amount", input: amtInput });
+    amtField.querySelector("label").after(amtInput);
+    amtField.insertBefore(h("div", { class: "hint", id: "s-amt-hint" }, balHint), amtField.querySelector(".field-error"));
+    const fromField = field({ id: "s-from", label: "From wallet", input: from });
+    const reviewBtn = h("button", { type: "submit", class: "btn primary lg" }, "Review payment", icon("arrow", { size: 16 }));
+
+    function fillFrom(s) {
+      const cur = selectedWallet();
+      from.replaceChildren(...s.wallets.map((w) => h("option", { value: w.address, selected: cur && cur.address === w.address }, `${shortAddr(w.address)}  ·  ${fmtBucks(w.balance, { trim: true })}`)));
+      fromField.hidden = s.wallets.length < 2;
+    }
+    const wallet = (s) => s.wallets.find((w) => w.address === from.value) || s.wallets[0];
+    const hintText = () => `Available: ${fmtBucks(wallet(state).balance, { trim: true })} BUCKS. Up to 8 decimal places.`;
+
+    function setErr(f, input, msg) {
+      f.classList.toggle("invalid", !!msg);
+      f.querySelector(".field-error").textContent = msg;
+      if (msg) input.setAttribute("aria-invalid", "true"); else input.removeAttribute("aria-invalid");
+    }
+    function check(showAll) {
+      const result = { ok: true };
+      const v = validateAddress(to.value, net);
+      setErr(toField, to, (showAll || touchedTo) && !v.ok && !(v.empty && !showAll) ? v.reason : "");
+      if (!v.ok) result.ok = false;
+      const a = parseBucks(amt.value);
+      let amtErr = "";
+      if (!a.ok) { result.ok = false; if (amt.value.trim() || showAll) amtErr = a.error; }
+      else {
+        const bal = BigInt(wallet(state).balance);
+        if (a.units > bal) { amtErr = `That is more than this wallet holds (${fmtBucks(bal, { trim: true })} BUCKS).`; result.ok = false; }
+        else if (a.units + MIN_FEE_UNITS > bal) { amtErr = `Not enough left to also pay the network fee (at least ${fmtBucks(MIN_FEE_UNITS, { trim: true })} BUCKS).`; result.ok = false; }
+        result.units = a.units;
+      }
+      setErr(amtField, amt, showAll || touchedAmt ? amtErr : "");
+      return result;
+    }
+
+    to.addEventListener("input", () => { if (touchedTo) check(false); });
+    to.addEventListener("blur", () => { if (to.value.trim()) { touchedTo = true; check(false); } });
+    amt.addEventListener("input", () => { if (touchedAmt) check(false); });
+    amt.addEventListener("blur", () => { if (amt.value.trim()) { touchedAmt = true; check(false); } });
+    from.addEventListener("change", () => { selectWallet(from.value); balHint.textContent = hintText(); check(false); });
+
+    const form = h("form", { class: "card", novalidate: true },
+      h("div", { class: "stack" }, fromField, toField, amtField,
+        h("div", { class: "notice info" }, icon("info", { size: 18 }), h("div", null, h("strong", null, "Network fee: "), `set automatically by the node, at least ${fmtBucks(MIN_FEE_UNITS, { trim: true })} BUCKS.`)),
+        h("div", { class: "row actions" }, reviewBtn)));
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      touchedTo = touchedAmt = true;
+      const r = check(true);
+      if (!r.ok) { (form.querySelector(".invalid input") || to).focus(); return; }
+      toReview(r.units);
+    });
+
+    // ----- review -----
+    const reviewBox = h("div");
+    function toReview(units) {
+      step = "review";
+      const w = wallet(state);
+      const back = h("button", { type: "button", class: "btn", onclick: () => { step = "form"; show(); amt.focus(); } }, icon("chevl", { size: 16 }), "Edit");
+      const confirm = h("button", { type: "button", class: "btn primary lg" }, icon("send", { size: 18 }), "Confirm and send");
+      const err = h("div", { "aria-live": "assertive" });
+      const dest = to.value.trim();
+      confirm.addEventListener("click", () => send(units, w, dest, confirm, back, err));
+      reviewBox.replaceChildren(h("section", { class: "card" }, h("div", { class: "stack" },
+        h("div", { class: "row between" }, h("h2", null, "Review and confirm"), netBadge(net)),
+        net !== "main" && notice("warn", `This is ${netName.toLowerCase()}. The coins have no real value.`),
+        h("div", { class: "review" },
+          h("div", null, h("span", { class: "k" }, "From"), h("span", { class: "mono wrap" }, w.address)),
+          h("div", null, h("span", { class: "k" }, "To"), h("span", { class: "mono wrap" }, dest)),
+          h("div", null, h("span", { class: "k" }, "Amount"), h("span", { class: "big" }, `${fmtBucks(units)} BUCKS`)),
+          h("div", null, h("span", { class: "k" }, "Network fee"), h("span", null, `at least ${fmtBucks(MIN_FEE_UNITS)} BUCKS (set by the node)`)),
+          h("div", null, h("span", { class: "k" }, "Total (min.)"), h("span", null, `${fmtBucks(units + MIN_FEE_UNITS)} BUCKS`))),
+        h("p", { class: "muted", style: "margin:0;font-size:.88rem" }, "Transactions cannot be reversed. Check the first and last characters of the recipient address."),
+        err,
+        h("div", { class: "row actions" }, confirm, back))));
+      show();
+      confirm.focus();
+    }
+
+    async function send(units, w, dest, confirm, back, err) {
+      if (sentInFlight) return;
+      sentInFlight = true;
+      err.replaceChildren();
+      busy(confirm, true, "Sending…");
+      back.disabled = true;
+      try {
+        const r = await post("/api/transactions/send", { from: w.address, to: dest, amount: Number(units) }, { timeout: 30000 });
+        step = "done";
+        loadWallets(true);
+        showDone(r.transaction, units, dest);
+        to.value = ""; amt.value = ""; touchedTo = touchedAmt = false;
+        check(false);
+      } catch (ex) {
+        confirm.disabled = false;
+        confirm.replaceChildren(icon("send", { size: 18 }), "Confirm and send");
+        back.disabled = false;
+        err.replaceChildren(notice("error", explain(ex)));
+      } finally { sentInFlight = false; }
+    }
+
+    function explain(ex) {
+      if (ex instanceof ApiError) {
+        if (ex.offline) return "The node did not confirm the payment. It may or may not have been sent. Check the History page before trying again.";
+        const m = ex.message || "";
+        if (/insufficient|no spendable/i.test(m)) return `${m}. Newly mined rewards can be spent only after ${COINBASE_MATURITY} further blocks, and coins in a pending payment are locked until it is mined.`;
+        if (/address|base58|checksum|version/i.test(m)) return `The node rejected the recipient address: ${m}`;
+        if (ex.status === 401) return "Your session has expired. Sign in again; nothing was sent.";
+        if (ex.status === 429) return "The node is receiving too many requests. Wait a moment and try again.";
+        return m;
+      }
+      return String(ex.message || ex);
+    }
+
+    // ----- done -----
+    const doneBox = h("div");
+    function showDone(tx, units, dest) {
+      const txid = tx && tx.hash;
+      doneBox.replaceChildren(h("section", { class: "card" }, h("div", { class: "stack" },
+        notice("ok", h("strong", null, "Payment submitted. "), "It is in the node's mempool and will be confirmed when the next block includes it."),
+        h("div", { class: "review" },
+          h("div", null, h("span", { class: "k" }, "Amount"), h("span", null, `${fmtBucks(units)} BUCKS`)),
+          h("div", null, h("span", { class: "k" }, "To"), h("span", { class: "mono wrap" }, dest)),
+          h("div", null, h("span", { class: "k" }, "Transaction ID"), h("span", { class: "row" }, h("span", { class: "mono wrap" }, txid || "unknown"), txid && copyButton(txid, "Copy", { what: "transaction id", compact: true })))),
+        h("div", { class: "row actions" },
+          h("button", { type: "button", class: "btn primary", onclick: () => { step = "form"; show(); to.focus(); } }, "Send another"),
+          h("a", { class: "btn", href: "#/history" }, "View history"),
+          h("a", { class: "btn ghost", href: "#/wallet" }, "Back to wallet")))));
+      show();
+    }
+
+    const syncWarn = h("div");
+    const el = h("div", { class: "stack" }, pageHead("Send", `Transfer BUCKS on ${netName.toLowerCase()}.`), syncWarn, form, reviewBox, doneBox);
+    function show() {
+      form.hidden = step !== "form";
+      reviewBox.hidden = step !== "review";
+      doneBox.hidden = step !== "done";
+    }
+    show();
+
+    return {
+      el,
+      refresh(s) {
+        if (from.options.length !== s.wallets.length) fillFrom(s);
+        else [...from.options].forEach((o) => { const w = s.wallets.find((x) => x.address === o.value); if (w) o.textContent = `${shortAddr(w.address)}  ·  ${fmtBucks(w.balance, { trim: true })}`; });
+        balHint.textContent = hintText();
+        syncWarn.replaceChildren(...(s.info && s.info.syncing ? [notice("warn", "This node is still syncing. Balances may be out of date and payments may be rejected until it catches up.")] : []));
+      },
+    };
+  }
+
+  return { update, destroy() {} };
+}

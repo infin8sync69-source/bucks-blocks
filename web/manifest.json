@@ -1,33 +1,15 @@
 {
-  "name": "Bucks Wallet",
+  "name": "Bucks node console",
   "short_name": "Bucks",
-  "description": "Secure cryptocurrency wallet for Bucks blockchain",
-  "start_url": "/",
+  "description": "Web console for a Bucks node: status, wallet, mining.",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#2563eb",
-  "orientation": "portrait-primary",
+  "background_color": "#0a1020",
+  "theme_color": "#0a1020",
   "icons": [
-    {
-      "src": "/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
   ],
-  "categories": ["finance", "utilities"],
-  "screenshots": [
-    {
-      "src": "/screenshot-mobile.png",
-      "sizes": "540x720",
-      "type": "image/png",
-      "form_factor": "narrow"
-    }
-  ]
+  "categories": ["finance", "utilities"]
 }
