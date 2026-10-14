@@ -32,6 +32,7 @@ import collections
 import csv
 import hashlib
 import os
+import re
 import sys
 import unicodedata
 
@@ -79,6 +80,15 @@ def display_form(lemma):
     return out
 
 
+def modernize(t):
+    """Spellings that make a modern typist's input fold to something else (audit of the Arabic list, problem 1):
+    initial or post-prefix ءا is آ, and a final ؤا is أ (the Uthmani silent alef)."""
+    t = re.sub(r"(^|(?<=[وفبلك]))ءا", "آ", t)
+    if t.endswith("ؤا"):
+        t = t[:-2] + "أ"
+    return t
+
+
 def exact_display(token):
     """A Quranic word in modern spelling: marks and tatweel removed, ٱ -> ا, and the dagger alef written out
     the way modern spelling does: after a final ى it is just the ى (هدى), after a medial ى it makes the ا
@@ -97,7 +107,7 @@ def exact_display(token):
                 out.append("ا")
         else:
             out.append(ch)
-    t = unicodedata.normalize("NFC", "".join(out))
+    t = modernize(unicodedata.normalize("NFC", "".join(out)))
     if any(ch not in set("ءآأؤإئابةتثجحخدذرزسشصضطظعغفقكلمنهوىي") for ch in t):
         return None
     return t
@@ -166,6 +176,14 @@ def main():
                 if whole is not None:
                     full_forms[lem][(arabic_fold(whole), whole)] += 1
 
+    # Reviewed respellings (tools/ar_respell.csv): Uthmani spellings written the modern way, bare forms.
+    respell = {}
+    rp = os.path.join(HERE, "ar_respell.csv")
+    if os.path.exists(rp):
+        for row in csv.DictReader(open(rp, encoding="utf-8")):
+            respell[row["word"]] = row["replacement"]
+    respelled_from = {v: k for k, v in respell.items()}
+
     excl_words, excl_roots = read_exclusions()
     log = collections.Counter()
     by_fold = {}
@@ -210,13 +228,22 @@ def main():
             if cur["n"] >= e["n"]:
                 continue
         shown = shown if exact else display_form(lem)
+        if shown in respell:
+            shown = respell[shown]
+            w = "".join(c for c in arabic_fold(shown) if c in FOLDED_LETTERS)
+            if not 3 <= len(w) <= 7:
+                log["respelled form length not 3-7"] += 1
+                continue
+            if w in excl_words:
+                log["excluded after respelling"] += 1
+                continue
         if shown.startswith(("ئ", "ؤ", "ى", "ة")):
             log["malformed start (a seat or ending letter first)"] += 1
             continue
         if shown.endswith(("ؤ", "ئ")):
             log["odd final hamza (pausal spelling in the corpus lemma)"] += 1
             continue
-        if arabic_fold(shown) != (w if exact else lemma_fold(lem)):
+        if arabic_fold(shown) != (w if exact else lemma_fold(lem)) and shown not in respelled_from:
             log["display form does not fold to the lemma (skipped)"] += 1
             continue
         by_fold[w] = {"tier2": exact and tier2, "word": w, "shown": shown, "lemma": lem, "pos": pos, "root": e["root"], "n": e["n"]}
@@ -288,6 +315,7 @@ def main():
     if os.path.exists(csv_path):
         for old in csv.DictReader(open(csv_path, encoding="utf-8")):
             kept[old["word"]] = (old.get("reviewer_notes", ""), old.get("english_meaning", ""))
+            kept.setdefault(modernize(old["word"]), kept[old["word"]])   # the same word, now spelled the modern way
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         what = ("2048 words exactly as written in the Quran (one per dictionary word, its most frequent form)"
                 if exact else "2048 content lemmas (dictionary forms) attested in the Quran")
@@ -301,7 +329,7 @@ def main():
         wr = csv.writer(f)
         wr.writerow(["index", "word", "folded", "corpus_lemma", "pos", "root", "quran_occurrences", "reviewer_notes", "english_meaning"])
         for i, r in enumerate(chosen):
-            notes, meaning = kept.get(r["shown"], ("", ""))
+            notes, meaning = kept.get(r["shown"]) or kept.get(respelled_from.get(r["shown"], ""), ("", ""))
             wr.writerow([i, r["shown"], r["word"], r["lemma"], r["pos"], r["root"], r["n"], notes, meaning])
     print(f"wrote {out_path}\n  sha256 {hashlib.sha256(open(out_path, 'rb').read()).hexdigest()}\nwrote {csv_path}")
 

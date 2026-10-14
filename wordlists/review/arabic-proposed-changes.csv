@@ -1,0 +1,720 @@
+index,word,issue_type,severity,reason,proposed_action,replacement
+0,ءاباء,spelling,Must,Initial ءا is the Uthmani spelling of آ; typed modern آباء folds to اباء and will not match ءاباء [Quran surface count: 1],replace,آباء
+1,ءاتية,spelling,Must,Initial ءا is Uthmani for آ (modern آتية); folded form differs from what a user types [Quran surface count: 2],replace,آتية
+2,ءاثرك,spelling,Must,Initial ءا is Uthmani for آ (modern آثرك); also carries attached pronoun ك [Quran surface count: 1],replace,آثرك
+3,ءاثم,spelling,Must,Initial ءا is Uthmani for آ (modern آثم); the word is also in the sin family (Consider) [Quran surface count: 1],replace,آثم
+4,ءاخذ,spelling,Must,Initial ءا is Uthmani for آ (modern آخذ) [Quran surface count: 1],replace,آخذ
+5,ءاذان,spelling,Must,Initial ءا is Uthmani for آ (modern آذان) [Quran surface count: 4],replace,آذان
+6,ءاذناك,spelling,Must,Initial ءا is Uthmani for آ (modern آذناك) [Quran surface count: 1],replace,آذناك
+7,ءاسن,spelling,Must,Initial ءا is Uthmani for آ (modern آسن) [Quran surface count: 1],replace,آسن
+8,ءال,sens-b+spelling,Must,Initial ءا is Uthmani for آ (modern آل) | آل is used in the Quran almost only in named families (آل فرعون، آل عمران، آل إبراهيم، آل لوط) and evokes the Prophet's family; judgement call | suggested backfill (no semantic link): كسوتهم [Quran surface count: 22],replace,كسوتهم
+9,ءالاء,sens-h+spelling,Must,Initial ءا is Uthmani for آ (modern آلاء) | آلاء is the refrain of Surah al-Rahman (فبأي آلاء ربكما تكذبان); formulaic | suggested backfill (no semantic link): أصابعهم [Quran surface count: 34],replace,أصابعهم
+10,ءامنة,spelling+a11-meaning,Must,"Initial ءا is Uthmani for آ (modern آمنة) | آمنة is a very common woman's name (mother of the Prophet, Amina); name-like without vowels | suggested backfill (no semantic link): أضغانهم [Quran surface count: 1]",replace,أضغانهم
+11,ءامنين,spelling,Must,Initial ءا is Uthmani for آ (modern آمنين) [Quran surface count: 7],replace,آمنين
+12,ءامين,sens-h,Must,آمين: after respelling it is the liturgical Amen said after Fatiha and supplication (formula); in the Quran it is a different word (heading to) but the bare spelling is the formula | suggested backfill (no semantic link): تنازعتم [Quran surface count: 1],replace,تنازعتم
+13,ءانفا,spelling,Must,Initial ءا is Uthmani for آ (modern آنفا) [Quran surface count: 1],replace,آنفا
+14,ءانية,spelling,Must,Initial ءا is Uthmani for آ (modern آنية) [Quran surface count: 1],replace,آنية
+15,ءاوى,spelling,Must,Initial ءا is Uthmani for آ (modern آوى) [Quran surface count: 3],replace,آوى
+16,أبابيل,sens-c,Consider,"أبابيل belongs to one event (birds of the Elephant, Surah al-Fil); distinctive Quranic story term [Quran surface count: 1]",keep-note,
+24,أبواه,a11-meaning,Consider,أبواه (his parents) is the dual of أب; family of أبو root already represented by ءاباء; none [Quran surface count: 2],keep-note,
+27,أترابا,sens-c,Consider,"أترابا is the age-mates of the houris in the paradise description (56:37, 78:33; 38:52) [Quran surface count: 2]",keep-note,
+31,أتوكؤا,spelling,Must,أتوكؤا is the Uthmani spelling (waw-hamza plus alef); modern is أتوكأ [Quran surface count: 1],replace,أتوكأ
+34,أثاما,sens-f,Should,أثاما is the punishment/penalty in hell (25:68 يلق أثاما); sin family with excluded punishment words | suggested backfill (no semantic link): يمهدون [Quran surface count: 1],replace,يمهدون
+37,إثما,sens-f,Consider,إثما (sin) belongs to the sin family (ءاثم، أثيم، تأثيم، أثاما); moral censure similar to excluded فسق/ظلم; low severity for the neutral noun [Quran surface count: 7],keep-note,
+38,اثنتين,near-duplicate,Should,اثنتين and اثنين are the same numeral (fem/masc) and one letter apart; easy to confuse | suggested backfill (no semantic link): أصوافها [Quran surface count: 4],replace,أصوافها
+39,اثنين,near-duplicate,Should,اثنين and اثنتين are one letter apart; same lexeme (A5) | suggested backfill (no semantic link): إقامتكم [Quran surface count: 10],replace,إقامتكم
+40,أثيم,sens-f,Should,"أثيم means wicked sinner, mostly in hell (طعام الأثيم); semantically excluded فاسق/ظالم class | suggested backfill (no semantic link): بالعقود [Quran surface count: 5]",replace,بالعقود
+45,أجرموا,sens-f,Should,أجرموا is a verb of the excluded root family مجرم/جريمة (crime/guilt); root جرم not in root exclusions | suggested backfill (no semantic link): بحاملين [Quran surface count: 3],replace,بحاملين
+61,اختلاق,near-duplicate,Should,اختلاق and اختلاف differ only by the dot of ف/ق | suggested backfill (no semantic link): بفاتنين [Quran surface count: 1],replace,بفاتنين
+67,أخزى,sens-f,Should,"أخزى comparative of خزي (disgrace), خزي is excluded (category f); root خزي | suggested backfill (no semantic link): بمزحزحه [Quran surface count: 1]",replace,بمزحزحه
+74,أدراك,sens-h,Should,أدراك appears 13 times in the formula وما أدراك ما (القارعة، سجين، الحاقة...) leading into hell and last-day terms | suggested backfill (no semantic link): تبايعتم [Quran surface count: 13],replace,تبايعتم
+86,أرحم,sens-a,Must,أرحم is the divine superlative in أرحم الراحمين (every use); category a covers attributes in every form | suggested backfill (no semantic link): يحاوره [Quran surface count: 4],replace,يحاوره
+91,أزفت,sens-c,Should,"أزفت is the verb of الآزفة (the Hour drew near, 53:57); last-day term | suggested backfill (no semantic link): تداينتم [Quran surface count: 1]",replace,تداينتم
+92,أزلفت,sens-c,Consider,أزلفت used for paradise brought near (26:90، 50:31، 81:13) and hell brought near; eschatological context [Quran surface count: 1],keep-note,
+98,إستبرق,sens-c,Should,"إستبرق is paradise-garment vocabulary (18:31, 44:53, 55:54, 76:21: every Quranic use) | suggested backfill (no semantic link): تعاسرتم [Quran surface count: 1]",replace,تعاسرتم
+112,استئس,spelling,Must,استئس is not a word and not attested in the Quran: the corpus form is استيأس (a small yaa seat was dropped by the exact_display step) [Quran surface count: 0],replace,استيأس
+152,أعبد,sens-d,Should,"أعبد (I worship) is the verb of worship, used in Surat al-Kafirun and creed statements (category d) | suggested backfill (no semantic link): تفادوهم [Quran surface count: 13]",replace,تفادوهم
+154,اعتمر,sens-d,Must,اعتمر is the verb of performing umrah (2:158); umrah is an excluded ritual term (category d) | suggested backfill (no semantic link): خلطوا [Quran surface count: 1],replace,خلطوا
+156,أعجمى,spelling,Should,Final ى for ي (Uthmani): modern is أعجمي; also describes the language of revelation (41:44، 16:103) [Quran surface count: 1],replace,أعجمي
+165,أعوذ,sens-h,Must,أعوذ is the isti'adha formula (أعوذ بالله...); formula and supplication | suggested backfill (no semantic link): عرضتم [Quran surface count: 6],replace,عرضتم
+169,أغويتنى,sens-c,Should,أغويتنى is Iblis' accusation to God (7:16; 15:39 رب بما أغويتني); final ى for ي and attached pronoun; excluded Iblis context | suggested backfill (no semantic link): تنابزوا [Quran surface count: 2],replace,تنابزوا
+173,افترى,sens-f,Consider,افترى is mostly افترى على الله كذبا (86% of uses next to an excluded word); the disbelief formula [Quran surface count: 14],keep-note,
+177,إفك,sens-b,Consider,"إفك also names the slander episode of Surah al-Nur (حديث الإفك, Aisha); judgement [Quran surface count: 4]",keep-note,
+180,أقتت,sens-c,Should,أقتت is the time-fixing of the messengers in the Last Day sura al-Mursalat (77:11); eschatological | suggested backfill (no semantic link): توكيدها [Quran surface count: 1],replace,توكيدها
+183,اقتده,spelling,Consider,"اقتده ends in the Quranic pausal ha (هاء السكت, 6:90 فبهداهم اقتده); it reads as imitate-him in modern Arabic, so only a mild oddity [Quran surface count: 1]",keep-note,
+186,أقسم,sens-h,Consider,أقسم (56:75; 69:38; 70:40; 75:1-2; 81:15; 84:16; 90:1) is the oath-opening لا أقسم [Quran surface count: 8],keep-note,
+187,أقصا,spelling,Must,"أقصا uses the alef of the Uthmani construct; modern spelling is أقصى (typed أقصى folds to اقصي, not اقصا); also evokes al-Masjid al-Aqsa (holy place) | suggested backfill (no semantic link): جرحتم [Quran surface count: 2]",replace,جرحتم
+193,إكراه,sens-h,Consider,إكراه is almost only the verse لا إكراه في الدين; formula-like [Quran surface count: 1],keep-note,
+197,الجب,al-prefix,Should,الجب carries the article ال (rule A4) and is the well of Joseph (named narrative) | suggested backfill (no semantic link): شمائلهم [Quran surface count: 2],replace,شمائلهم
+198,الذل,al-prefix,Should,الذل carries the article ال (rule A4) | suggested backfill (no semantic link): فاثبتوا [Quran surface count: 3],replace,فاثبتوا
+199,الرس,sens-b,Must,"الرس is a named people/place (أصحاب الرس, 25:38، 50:12) and carries ال (A4) | suggested backfill (no semantic link): عقدتم [Quran surface count: 2]",replace,عقدتم
+200,الضر,al-prefix,Should,الضر carries the article ال (rule A4); also Ayyub's cry مسني الضر | suggested backfill (no semantic link): فاحترقت [Quran surface count: 7],replace,فاحترقت
+202,أمانى,spelling,Should,Final ى for ي (Uthmani): modern is أماني [Quran surface count: 2],replace,أماني
+205,امرأت,spelling,Must,امرأت is the construct (pausal-style) spelling with ت; modern is امرأة; the Quran uses it only before named persons (امرأت عمران، فرعون، نوح، لوط، العزيز) | suggested backfill (no semantic link): فرهان [Quran surface count: 6],replace,فرهان
+206,امرؤا,spelling,Must,امرؤا is the Uthmani spelling (with extra alef); modern is امرؤ [Quran surface count: 1],replace,امرؤ
+212,أمهاتكم,attached-form,Consider,أمهاتكم also in the list of forbidden marriages and 'mothers of the believers'; attached pronoun كم; low severity [Quran surface count: 6],keep-note,
+213,أمين,a11-meaning,Should,أمين is a very common personal name and the epithet of the Prophet and Gabriel (أمين); also close to the formula آمين | suggested backfill (no semantic link): فارقوهن [Quran surface count: 11],replace,فارقوهن
+214,أميون,sens-b,Consider,"أميون (unlettered) refers to the Arabs/unlettered scripture-less people, root of 'the unlettered prophet'; judgement [Quran surface count: 1]",keep-note,
+223,أندادا,sens-f,Consider,أندادا is the shirk word (rivals set up to God) [Quran surface count: 6],keep-note,
+225,إنسيا,sens-c,Consider,إنسيا: the human (as against جن/انس excluded); 19:26 Mary; low [Quran surface count: 1],keep-note,
+226,أنشأ,sens-g,Consider,أنشأ: creation verb whose subject is almost always God (6:98، 53:32) [Quran surface count: 2],keep-note,
+228,أنشره,sens-c,Should,أنشره is the resurrection verb (80:22 ثم إذا شاء أنشره); نشور and بعث excluded | suggested backfill (no semantic link): فاستغلظ [Quran surface count: 1],replace,فاستغلظ
+234,أنعم,sens-g,Should,"أنعم: all uses have God as subject (أنعم الله عليهم / أنعمت عليهم), a divine act of bestowing grace; found by the neighbour-word check | suggested backfill (no semantic link): فتنادوا [Quran surface count: 5]",replace,فتنادوا
+237,انفطرت,sens-c,Consider,انفطرت (82:1 إذا السماء انفطرت) is a last-day sura opener [Quran surface count: 1],keep-note,
+240,أنكالا,sens-c,Consider,أنكالا is a hell punishment (73:12 إن لدينا أنكالا وجحيما) [Quran surface count: 1],keep-note,
+242,انكدرت,sens-c,Should,"انكدرت occurs only in 81:2 (إذا النجوم انكدرت), a Takwir last-day sign | suggested backfill (no semantic link): كالصريم [Quran surface count: 1]",replace,كالصريم
+248,أواه,sens-b,Should,أواه is the epithet of Ibrahim (9:114، 11:75); also an interjection in Arabic (A11) | suggested backfill (no semantic link): لأعنتكم [Quran surface count: 1],replace,لأعنتكم
+251,أوتى,spelling,Should,Final ى for ي (Uthmani): modern أوتي [Quran surface count: 14],replace,أوتي
+254,أوزعنى,spelling,Should,Final ى for ي (Uthmani): modern أوزعني; it is the formula of supplication رب أوزعني أن أشكر نعمتك | suggested backfill (no semantic link): لتضيقوا [Quran surface count: 2],replace,لتضيقوا
+257,أئمة,sens-b,Consider,"أئمة (leaders, imams) carries the religious office imam (أئمة الكفر / أئمة يهدون بأمرنا) [Quran surface count: 5]",keep-note,
+260,بإذن,sens-h,Should,بإذن is mostly the formula بإذن الله; attached preposition ب | suggested backfill (no semantic link): لموفوهم [Quran surface count: 23],replace,لموفوهم
+265,باسرة,sens-c,Consider,باسرة is a Last Day face description (75:24) [Quran surface count: 1],keep-note,
+269,باقية,sens-a,Consider,"باقية is the feminine of الباقي, a divine name; root بقي [Quran surface count: 2]",keep-note,
+270,بالأفق,attached-form,Consider,بالأفق carries both prepositional ب and the article ال; refers to Gabriel's vision (53:7، 81:23) [Quran surface count: 2],drop,
+272,بالبخل,attached-form,Consider,بالبخل carries ب and the article ال; the bare بخل is attested [Quran surface count: 2],replace,بخل
+273,بالحسنى,sens-a,Consider,بالحسنى resembles الأسماء الحسنى; attached ب and article [Quran surface count: 3],keep-note,
+277,بتابع,attached-form,Consider,بتابع carries a ب; context is the qibla (2:145) [Quran surface count: 2],keep-note,
+280,بحمد,sens-h,Must,بحمد is the tasbih formula سبح بحمد ربك / يسبحون بحمد ربهم (category h) | suggested backfill (no semantic link): فسالت [Quran surface count: 10],replace,فسالت
+281,بحيرة,a11-meaning,Consider,بحيرة in modern Arabic is a lake; the Quranic gloss 'dromedary' (a cut-eared camel dedicated to idols) is obscure [Quran surface count: 1],keep-note,
+286,براءة,sens-e,Consider,براءة is the name of Surah al-Tawba and its opening declaration [Quran surface count: 2],keep-note,
+288,بررة,sens-c,Should,"بررة occurs only in 80:16 (كرام بررة), the angelic scribes; with سفرة (825) it forms one angel phrase | suggested backfill (no semantic link): مانعتهم [Quran surface count: 1]",replace,مانعتهم
+289,برزخ,sens-c,Should,برزخ (barzakh) is the intermediate state after death (23:100) as well as the barrier of 55:20; eschatological term | suggested backfill (no semantic link): والبغال [Quran surface count: 2],replace,والبغال
+293,برىء,spelling,Should,Final ى for ي (Uthmani): modern is بريء [Quran surface count: 9],replace,بريء
+309,بعثر,sens-c,Should,"بعثر upheaved: بعثرت القبور (82:4، 100:9), resurrection day; بعث family excluded | suggested backfill (no semantic link): وزيتونا [Quran surface count: 1]",replace,وزيتونا
+315,بقطع,attached-form,Consider,بقطع carries the preposition ب; the bare قطع is attested [Quran surface count: 2],replace,قطع
+319,بمصرخى,spelling,Should,Final ى for ي (Uthmani): modern بمصرخي; Iblis' address in 14:22; attached ب and pronoun | suggested backfill (no semantic link): وفصيلته [Quran surface count: 1],replace,وفصيلته
+320,بنى,a11-meaning,Should,"بنى (modern بنى built) and بني (sons of, my son) are the same bare spelling after folding; the Quranic use is almost only بني إسرائيل (named people) | suggested backfill (no semantic link): ومرعاها [Quran surface count: 31]",replace,ومرعاها
+328,بورك,sens-g,Consider,بورك: blessing verb with divine subject (27:8) [Quran surface count: 1],keep-note,
+337,تبارا,sens-f,Consider,تبارا is Noah's curse (71:28 ولا تزد الظالمين إلا تبارا) [Quran surface count: 1],keep-note,
+338,تبتغى,spelling,Should,Final ى for ي (Uthmani): modern تبتغي [Quran surface count: 2],replace,تبتغي
+340,تبتيلا,sens-d,Must,"تبتيلا is the verbal noun of تبتل, which is excluded (category d: devotion/retreat of worship, 73:8) | suggested backfill (no semantic link): فنظرة [Quran surface count: 1]",replace,فنظرة
+347,تبسل,sens-c,Consider,تبسل (6:70 doom of a soul) in hell/eschatology context [Quran surface count: 1],keep-note,
+352,تبيانا,sens-e,Consider,تبيانا is the Quran described as a clarification of everything (16:89) [Quran surface count: 1],keep-note,
+355,تتبيب,sens-f,Should,"تتبيب (perdition, 11:101) is the same root as the curse تبت يدا أبي لهب (111:1) | suggested backfill (no semantic link): ومستودع [Quran surface count: 1]",replace,ومستودع
+357,تتجافى,sens-d,Consider,تتجافى is the verse of night prayer (32:16 تتجافى جنوبهم عن المضاجع) [Quran surface count: 1],keep-note,
+361,تتلى,sens-e,Must,"تتلى is the passive of تلا, which is excluded (category e: recitation of the verses, تتلى عليهم آياتنا) | suggested backfill (no semantic link): مأمنه [Quran surface count: 16]",replace,مأمنه
+364,تثريب,sens-h,Consider,تثريب is the formula لا تثريب عليكم اليوم يغفر الله لكم (12:92) only [Quran surface count: 1],keep-note,
+377,تخاطبنى,spelling,Should,Final ى for ي (Uthmani): modern تخاطبني; Noah's speech (11:37، 23:27) | suggested backfill (no semantic link): يألونكم [Quran surface count: 2],replace,يألونكم
+389,تدعون,sens-d,Consider,"تدعون root دعو (prayer, supplication); du'a excluded; the verb is also an ordinary 'you call' [Quran surface count: 20]",keep-note,
+393,تذهل,sens-c,Consider,تذهل is the Day-of-Resurrection quake verse (22:2) [Quran surface count: 1],keep-note,
+398,تراود,sens-f,Consider,"تراود is attempted seduction (12:30), obscene-adjacent in modern Arabic [Quran surface count: 1]",keep-note,
+400,ترتيلا,sens-e,Must,ترتيلا is Quran recitation (tartil: 73:4 ورتل القرآن ترتيلا; 25:32); قرا and تلا are excluded | suggested backfill (no semantic link): مدتهم [Quran surface count: 2],replace,مدتهم
+402,ترجمون,sens-f,Consider,ترجمون: stoning (rajm) as punishment; 44:20 is a threat of stoning [Quran surface count: 1],keep-note,
+404,ترهقنى,spelling,Should,Final ى for ي (Uthmani): modern ترهقني; Moses' speech 18:73 | suggested backfill (no semantic link): يتراجعا [Quran surface count: 1],replace,يتراجعا
+408,تزدرى,spelling,Should,Final ى for ي (Uthmani): modern تزدري [Quran surface count: 1],replace,تزدري
+433,تضرعا,sens-d,Consider,"تضرعا (6:63; 7:55; 7:205): humble supplication, du'a vocabulary [Quran surface count: 3]",keep-note,
+438,تطهيرا,sens-d,Consider,تطهيرا is the ahl al-bayt verse (33:33 ويطهركم تطهيرا) and ritual purity [Quran surface count: 1],keep-note,
+439,تظاهرا,sens-b,Consider,تظاهرا addresses two of the Prophet's wives (66:4) [Quran surface count: 2],keep-note,
+440,تظمؤا,spelling,Must,تظمؤا is the Uthmani spelling; modern is تظمأ [Quran surface count: 1],replace,تظمأ
+442,تعالى,sens-h,Must,"تعالى is the divine exaltation formula تعالى الله عما يشركون, parallel to excluded متعال and سبحان | suggested backfill (no semantic link): مزقتم [Quran surface count: 3]",replace,مزقتم
+454,تفتؤا,spelling,Must,تفتؤا is the Uthmani spelling; modern is تفتأ (12:85 تالله تفتؤا) [Quran surface count: 1],replace,تفتأ
+457,تفسيرا,sens-e,Consider,تفسيرا: tafsir (25:33) [Quran surface count: 1],keep-note,
+460,تفضيلا,near-duplicate,Should,تفضيلا and تفصيلا differ only by the dot of ص/ض | suggested backfill (no semantic link): يترددون [Quran surface count: 2],replace,يترددون
+461,تفىء,spelling,Should,تفىء final ى for ي and hamza spelling; modern is تفيء [Quran surface count: 1],replace,تفيء
+462,تقاة,sens-b,Consider,"تقاة is the verse often cited for taqiyya (3:28), sectarian association [Quran surface count: 1]",keep-note,
+463,تقتيلا,sens-f,Consider,"تقتيلا is slaughter (33:61 وقتلوا تقتيلا), a violence word with the cursed [Quran surface count: 1]",keep-note,
+465,تقدير,sens-a,Consider,تقدير occurs only in ذلك تقدير العزيز العليم (6:96، 36:38، 41:12) with two divine names [Quran surface count: 3],keep-note,
+467,تقربوا,sens-f,Consider,تقربوا is mostly the prohibition formula ولا تقربوا (الزنا، الفواحش) [Quran surface count: 5],keep-note,
+471,تقول,a11-meaning,Should,تقول bare spelling is the extremely common 'you say / she says'; the Quranic gloss forge (69:44 تقول) is rare | suggested backfill (no semantic link): يتسللون [Quran surface count: 11],replace,يتسللون
+473,تكبيرا,sens-d,Should,تكبيرا is the takbir (17:111 وكبره تكبيرا) [Quran surface count: 1],drop,
+476,تكليما,sens-g,Should,"تكليما is God speaking to Moses (4:164 وكلم الله موسى تكليما), exclusively divine [Quran surface count: 1]",drop,
+477,تكن,a11-meaning,Must,تكن is a form of كان (excluded) in most Quranic uses (ولا تكن من...); the corpus lemma is a rare other verb meaning conceal | suggested backfill (no semantic link): وجدكم [Quran surface count: 21],replace,وجدكم
+478,تلظى,sens-c,Must,"تلظى is the hell-fire verb (92:14), the root لظي is excluded (category c) | suggested backfill (no semantic link): وحفدة [Quran surface count: 1]",replace,وحفدة
+479,تلفح,sens-c,Must,تلفح is hellfire (23:104 تلفح وجوههم النار) | suggested backfill (no semantic link): وريشا [Quran surface count: 1],replace,وريشا
+480,تلقف,sens-b,Consider,تلقف belongs to the story of Moses' staff (7:117، 20:69، 26:45) [Quran surface count: 3],keep-note,
+487,تمور,sens-c,Consider,تمور: the mountain/heaven sway on Judgement Day (52:9) [Quran surface count: 2],keep-note,
+494,تنفس,sens-c,Consider,تنفس (81:18) is a Takwir last-day verse [Quran surface count: 1],keep-note,
+502,توسوس,sens-c,Consider,"توسوس root وسوس (whispering of Satan, 50:16) [Quran surface count: 1]",keep-note,
+504,توفيقى,sens-h,Should,توفيقى is the formula وما توفيقي إلا بالله (11:88); final ى for ي; tawfiq is also a name [Quran surface count: 1],drop,
+505,تيسر,sens-e,Consider,تيسر is mostly the instruction on recitation (73:20 فاقرؤوا ما تيسر منه) [Quran surface count: 2],keep-note,
+506,ثالث,sens-f,Consider,ثالث is the Trinity statement (5:73 ثالث ثلاثة); also an ordinary ordinal [Quran surface count: 1],keep-note,
+507,ثانى,spelling,Should,"Final ى for ي (Uthmani): modern ثاني; uses are 9:40 (ثاني اثنين, the Prophet and Abu Bakr in the cave) and 22:9 [Quran surface count: 2]",drop,
+512,ثقلت,sens-c,Consider,ثقلت is the weighing of the scales verb (7:8، 23:102، 101:6) [Quran surface count: 4],keep-note,
+515,ثمانى,spelling,Should,Final ى for ي (Uthmani): modern ثماني; one letter from ثمانين [Quran surface count: 1],replace,ثماني
+516,ثمانين,near-duplicate,Consider,ثمانين and ثمانى (ثماني) are both 'eight/eighty' and one edit apart [Quran surface count: 1],keep-note,
+517,ثمر,near-duplicate,Consider,ثمر and ثمرات are singular/plural of one lexeme (A5) [Quran surface count: 1],keep-note,
+518,ثمرات,near-duplicate,Consider,ثمرات is the plural of ثمر (A5) [Quran surface count: 4],keep-note,
+521,ثيبات,sens-f,Should,"ثيبات (non-virgin women, 66:5 in the verse about the Prophet's wives) is sexual-status vocabulary tied to a specific household [Quran surface count: 1]",drop,
+524,جارية,a11-meaning,Consider,جارية is modern 'young girl / slave girl'; Quranic gloss 'flowing' (88:12) differs [Quran surface count: 1],keep-note,
+540,جرم,a11-meaning,Must,"جرم in the Quran is only the idiom لا جرم (surely) but the bare word means crime/guilt, the family of excluded مجرم/جريمة; root جرم | suggested backfill (no semantic link): وصهرا [Quran surface count: 5]",replace,وصهرا
+545,جلدة,sens-f,Consider,جلدة is the lash of the zina punishment (24:2) [Quran surface count: 2],keep-note,
+548,جمالت,spelling,Should,جمالت is the Uthmani plural (no alef before ت); modern جمالات; also appears only in hell simile 77:33 [Quran surface count: 1],drop,
+568,حاش,sens-h,Should,"حاش occurs only in حاش لله (12:31، 12:51), an exclamation of God's purity (parallel to سبحان) [Quran surface count: 2]",drop,
+573,حاضرى,spelling,Should,"Final ى for ي (Uthmani): modern حاضري; used only in حاضري المسجد الحرام (2:196), a holy-place phrase [Quran surface count: 1]",drop,
+576,حافين,sens-c,Consider,حافين is the angels around the Throne (39:75) [Quran surface count: 1],keep-note,
+577,حامية,sens-c,Should,حامية is hellfire (88:4 نارا حامية; 101:11 نار حامية) [Quran surface count: 2],drop,
+579,حبطت,sens-f,Consider,حبطت: deeds voided by disbelief (almost always حبطت أعمالهم) [Quran surface count: 6],keep-note,
+581,حجاب,sens-d,Consider,حجاب modern 'hijab'; religious dress term; Quranic 'veil/screen' [Quran surface count: 4],keep-note,
+584,حدود,sens-h,Consider,حدود is mostly حدود الله [Quran surface count: 12],keep-note,
+585,حديث,sens-e,Consider,"حديث in modern Arabic is the hadith (traditions of the Prophet); also 'talk, modern' [Quran surface count: 10]",keep-note,
+586,حذركم,attached-form,Consider,"حذركم carries the pronoun كم; the bare حذر is attested (4:71, 4:102) [Quran surface count: 2]",replace,حذر
+590,حرمات,sens-d,Should,"حرمات (inviolable things, حرمات الله) belongs to the excluded حرم/احرام holy-sanctity family [Quran surface count: 1]",drop,
+592,حزب,sens-b,Consider,حزب occurs mostly in حزب الله / حزب الشيطان; modern political 'party' and Hezbollah [Quran surface count: 7],keep-note,
+594,حسبنا,sens-h,Should,حسبنا occurs in the formula حسبنا الله ونعم الوكيل (3:173; 9:59) with excluded divine names; attached pronoun [Quran surface count: 3],drop,
+603,حطاما,sens-c,Consider,حطاما shares root with excluded حطمة (hell); here the ordinary 'debris' sense [Quran surface count: 3],keep-note,
+604,حطة,sens-h,Should,حطة is the formula the Israelites were told to say (2:58، 7:161) [Quran surface count: 2],drop,
+605,حفظ,a11-meaning,Consider,حفظ in modern Arabic mainly means memorising (Quran); Quranic 'guarded' [Quran surface count: 1],keep-note,
+609,حمالة,sens-f,Must,"حمالة occurs only in 111:4 (وامرأته حمالة الحطب), the curse on Abu Lahab's wife (Surah al-Masad) | suggested backfill (no semantic link): وقضبا [Quran surface count: 1]",replace,وقضبا
+616,حيواة,spelling,Must,حيواة is the Uthmani spelling (waw for alef); modern is حياة; typed حياة folds to حياه and does not match حيواه [Quran surface count: 4],replace,حياة
+625,خافضة,sens-c,Should,"خافضة is from 56:3 (خافضة رافعة), the Event (الواقعة, excluded) sura [Quran surface count: 1]",drop,
+626,خالاتك,sens-b,Consider,"خالاتك occurs only in 33:50, the verse of the Prophet's permitted marriages [Quran surface count: 1]",keep-note,
+627,خالدين,sens-c,Should,خالدين is nearly always خالدين فيها: abiding for ever in hell/paradise; eschatological formula [Quran surface count: 44],drop,
+630,خالك,sens-b,Consider,"خالك occurs only in 33:50, the verse of the Prophet's permitted marriages [Quran surface count: 1]",keep-note,
+646,خزنتها,sens-c,Should,"خزنتها (39:71, 39:73, 67:8) are the keepers of hell/paradise, the angelic wardens [Quran surface count: 3]",drop,
+655,خضر,sens-b,Should,"خضر: homograph of الخضر (Khidr, the figure of Surah al-Kahf in tradition), and mostly paradise garments (18:31, 76:21) [Quran surface count: 4]",drop,
+660,خطوات,sens-c,Consider,خطوات occurs only in خطوات الشيطان [Quran surface count: 5],keep-note,
+661,خفت,a11-meaning,Should,خفت is 'light' (7:9) but also 'I feared' (19:5 خفت الموالي) in the Quran; two common readings [Quran surface count: 5],drop,
+665,خليلا,sens-b,Consider,خليلا: the epithet of Ibrahim (4:125 خليل الله) [Quran surface count: 3],keep-note,
+669,خنزير,sens-f,Should,خنزير (swine/pig) is the unclean animal and a common insult in Arabic [Quran surface count: 1],drop,
+672,خيرات,sens-c,Consider,خيرات 55:70 (فيهن خيرات حسان) refers to the houris of paradise [Quran surface count: 1],keep-note,
+679,داعى,spelling,Should,Final ى for ي (Uthmani): modern داعي; occurs in 46:31-32 (أجيبوا داعي الله) [Quran surface count: 2],replace,داعي
+682,دانية,sens-c,Consider,"دانية is paradise fruit hanging low (69:23, 76:14) [Quran surface count: 2]",keep-note,
+692,دعا,a11-meaning,Must,دعا in modern Arabic is 'he called / supplicated' (دعاء is excluded); Quranic 'thrust' (52:13 يدعون ... دعا) is obscure | suggested backfill (no semantic link): يثنون [Quran surface count: 4],replace,يثنون
+693,دعواهم,sens-d,Should,دعواهم: their supplication/cry; includes 10:10 دعواهم فيها سبحانك اللهم (formula); du'a family [Quran surface count: 4],drop,
+694,دعوة,sens-d,Should,دعوة is supplication (2:186 دعوة الداع إذا دعان; 13:14 دعوة الحق); du'a excluded [Quran surface count: 4],drop,
+697,دكة,sens-c,Consider,دكة (69:14) pulverising of the earth on the Last Day [Quran surface count: 1],keep-note,
+699,دهاقا,sens-c,Consider,دهاقا (78:34) paradise cups [Quran surface count: 1],keep-note,
+700,ديارا,a11-meaning,Consider,ديارا appears only in Noah's curse (71:26); modern 'homes' [Quran surface count: 1],keep-note,
+701,دين,a11-meaning,Consider,دين is religion/creed and also debt in modern Arabic [Quran surface count: 11],keep-note,
+702,ذائقة,sens-c,Consider,"ذائقة is the formula كل نفس ذائقة الموت (3:185, 21:35, 29:57) [Quran surface count: 3]",keep-note,
+705,ذروا,a11-meaning,Should,"ذروا is both the winnowing of 51:1 and the imperative 'leave!' (ذروا ظاهر الإثم, ذروا البيع) [Quran surface count: 1]",drop,
+707,ذكرى,sens-e,Should,ذكرى (reminder) is the verbal noun in the family of excluded ذكر/تذكرة; modern also 'memory' [Quran surface count: 11],drop,
+710,ذمة,sens-b,Consider,"ذمة is the covenant of protection (dhimma, 9:8,10) [Quran surface count: 2]",keep-note,
+711,ذنوب,a11-meaning,Should,ذنوب in the Quran is 'a bucket/share' (51:59 only) but in modern Arabic it is 'sins' (plural of ذنب): the sin vocabulary of category f [Quran surface count: 1],drop,
+713,رءوف,sens-a,Must,رءوف is al-Ra'uf (divine name); the exclusion رووف only matched because of the folded spelling ؤ=و; the Uthmani spelling رءوف escaped | suggested backfill (no semantic link): يرضعن [Quran surface count: 6],replace,يرضعن
+714,رءياى,spelling,Must,رءياى: Uthmani رءيا + final ى; modern is رؤياي; typed form does not fold to رءياى [Quran surface count: 2],replace,رؤياي
+716,رابية,near-duplicate,Should,"رابية and رابيا are the same adjective, one letter apart after folding (ة/ا) [Quran surface count: 1]",drop,
+717,راجعون,sens-h,Should,راجعون occurs in إنا لله وإنا إليه راجعون (2:156) and the return-to-God verses [Quran surface count: 4],drop,
+719,راعنا,sens-f,Must,راعنا is the word the Quran forbids believers to use (2:104 لا تقولوا راعنا); an insult in origin | suggested backfill (no semantic link): يلتكم [Quran surface count: 1],replace,يلتكم
+723,راق,a11-meaning,Consider,راق: death-bed healer (75:27); modern 'refined' / ruqyah practitioner [Quran surface count: 1],keep-note,
+725,ربطنا,attached-form,Consider,ربطنا is the verb with attached pronoun (we bound) used for God binding hearts (18:14) [Quran surface count: 1],keep-note,
+729,رجز,sens-f,Consider,"رجز: punishment/impurity (74:5, 7:134) [Quran surface count: 3]",keep-note,
+731,رجوما,sens-c,Consider,رجوما (67:5) 'missiles' for the devils [Quran surface count: 1],keep-note,
+732,رجيم,sens-c,Must,رجيم occurs only in الشيطان الرجيم / شيطان رجيم (the epithet of Satan); shaytan is excluded | suggested backfill (no semantic link): أبرموا [Quran surface count: 4],replace,أبرموا
+735,رحمة,sens-a,Should,"رحمة is God's mercy (mostly رحمة الله / رحمة ربك), the noun of the excluded names رحمن/رحيم; also a woman's name [Quran surface count: 34]",drop,
+736,رحيق,sens-c,Consider,رحيق (83:25 paradise drink) [Quran surface count: 1],keep-note,
+741,رضوان,sens-c,Should,رضوان (3:162; 3:174; 57:27) divine pleasure; Ridwan is also the name of paradise's keeper in tradition and a common name [Quran surface count: 3],drop,
+742,رضى,sens-h,Must,"رضى (read رضي) is the formula رضي الله عنهم (5:119, 9:100, 58:22, 98:8); also modern رضى 'satisfaction'; final ى | suggested backfill (no semantic link): أذاعوا [Quran surface count: 5]",replace,أذاعوا
+746,رفرف,sens-c,Should,رفرف (55:76) is paradise upholstery [Quran surface count: 1],drop,
+758,رهينة,near-duplicate,Consider,"رهينة and رهين are one lexeme (A5); 52:21, 74:38 [Quran surface count: 1]",keep-note,
+759,رواسى,spelling,Should,Final ى for ي (Uthmani): modern رواسي [Quran surface count: 9],replace,رواسي
+766,زبر,a11-meaning,Should,زبر is 'pieces of iron' (18:96) and also the scriptures الزبر (zabur is excluded) [Quran surface count: 2],drop,
+767,زجاجة,sens-c,Consider,زجاجة is part of the light verse (24:35) [Quran surface count: 1],keep-note,
+768,زجرة,sens-c,Should,"زجرة (37:19, 79:13) is the Last Day blast [Quran surface count: 2]",drop,
+774,زفير,sens-c,Should,"زفير (11:106, 25:12) is the sound of the damned in hell [Quran surface count: 2]",drop,
+775,زلزالا,near-duplicate,Consider,"زلزالا, زلزلت, زلزلة are three forms of one lexeme (A5) [Quran surface count: 1]",keep-note,
+776,زلزلت,sens-c,Should,"زلزلت occurs in 99:1 (إذا زلزلت الأرض زلزالها), the Last Day sura [Quran surface count: 1]",drop,
+777,زلزلة,sens-c,Should,زلزلة occurs in 22:1 (إن زلزلة الساعة شيء عظيم); الساعة is excluded [Quran surface count: 1],drop,
+780,زمرا,sens-c,Should,"زمرا occurs only in 39:71,73 (hell and paradise groups) [Quran surface count: 2]",drop,
+781,زمهريرا,sens-c,Should,"زمهريرا (76:13) is bitter cold, hell in tradition [Quran surface count: 1]",drop,
+782,زنجبيلا,sens-c,Consider,زنجبيلا is a paradise drink (76:17) [Quran surface count: 1],keep-note,
+783,زنيم,sens-f,Should,زنيم (68:13) is glossed 'bastard / of illegitimate descent'; obscene-adjacent [Quran surface count: 1],drop,
+786,زوجت,sens-c,Should,"زوجت occurs in 81:7 (وإذا النفوس زوجت), the Takwir last-day verse; also modern 'I married' [Quran surface count: 1]",drop,
+787,زيادة,sens-c,Consider,زيادة 10:26 is understood as the vision of God [Quran surface count: 1],keep-note,
+792,ساحر,sens-f,Consider,ساحر: sorcery accusation against prophets (sihr) [Quran surface count: 7],keep-note,
+794,سافلين,sens-c,Consider,سافلين occurs only in أسفل سافلين (95:5) [Quran surface count: 1],keep-note,
+800,ساهون,sens-d,Consider,ساهون: 107:5 (عن صلاتهم ساهون) and 51:11 [Quran surface count: 2],keep-note,
+802,سائحات,sens-b,Consider,"سائحات occurs only in 66:5, the verse about the Prophet's wives [Quran surface count: 1]",keep-note,
+807,سبقت,sens-h,Consider,سبقت occurs mostly in the formula سبقت كلمة ربك [Quran surface count: 7],keep-note,
+808,سبيل,sens-d,Consider,"سبيل: mostly سبيل الله; very frequent and religiously loaded, but also an ordinary 'way' [Quran surface count: 87]",keep-note,
+811,سحروا,sens-f,Consider,سحروا: sorcery verb [Quran surface count: 1],keep-note,
+817,سراجا,sens-b,Consider,سراجا (33:46 وسراجا منيرا) is an epithet of the Prophet [Quran surface count: 3],keep-note,
+818,سراحا,near-duplicate,Should,"سراحا is one dot or letter from سراجا, سرابا, سراعا and ترابا/غرابا (a cluster of 7 words one letter apart) [Quran surface count: 2]",drop,
+819,سراعا,sens-c+near-duplicate,Should,"سراعا is in the same one-letter cluster as سرابا, سراجا, سراحا, ترابا, غرابا, سحابا | سراعا (50:44, 70:43) Last Day rising from graves [Quran surface count: 2]",drop,
+821,سرر,sens-c,Should,سرر: couches of paradise (every use) [Quran surface count: 5],drop,
+825,سفرة,sens-c,Should,"سفرة occurs only in 80:15, the angelic scribes [Quran surface count: 1]",drop,
+829,سقاية,sens-d,Consider,سقاية is the water-giving of the pilgrims (9:19) [Quran surface count: 1],keep-note,
+831,سكارى,a11-meaning,Consider,سكارى (intoxicated): alcohol connotation; 4:43 and 22:2 [Quran surface count: 2],keep-note,
+835,سكينة,sens-e,Consider,"سكينة: tranquillity sent down by God (2:248, 48:4); also a name [Quran surface count: 1]",keep-note,
+837,سلسلة,sens-c,Consider,سلسلة (69:32) is the chain of hell [Quran surface count: 1],keep-note,
+840,سلما,a11-meaning,Should,سلما: ladder (6:35) / 'wholly one man's' (39:29); same spelling as سلم 'peace' from the root of excluded سلام [Quran surface count: 2],drop,
+845,سموم,sens-c,Consider,"سموم is the hellfire wind (52:27, 56:42) [Quran surface count: 1]",keep-note,
+847,سندس,sens-c,Should,"سندس is the paradise silk (18:31, 44:53, 76:21 only) [Quran surface count: 3]",drop,
+848,سنقتل,sens-f,Consider,سنقتل attached future س; Pharaoh's threat (7:127) [Quran surface count: 1],keep-note,
+849,سنة,a11-meaning,Should,"سنة is year, drowsiness (2:255 آية الكرسي), and the Prophetic sunna (a scripture-adjacent term) [Quran surface count: 14]",drop,
+850,سوءة,sens-f,Must,"سوءة (5:31, Cain; other forms in 7:20-27 and 20:121) is the private parts/nakedness; obscene-adjacent, also root سوأ of excluded سوء | suggested backfill (no semantic link): اعتراك [Quran surface count: 2]",replace,اعتراك
+856,سيرت,sens-c,Should,"سيرت (78:20, 81:3) the mountains set moving on the Last Day [Quran surface count: 2]",drop,
+857,سيهزم,sens-b,Consider,سيهزم (54:45) is the verse about the Battle of Badr (excluded) [Quran surface count: 1],keep-note,
+858,سيئة,sens-f,Should,سيئة (misdeed): same sin vocabulary as excluded سوء [Quran surface count: 12],drop,
+859,شاخصة,sens-c,Consider,شاخصة (21:97) Last Day stare [Quran surface count: 1],keep-note,
+860,شاعر,sens-e,Consider,شاعر: the accusation against the Prophet (قالوا شاعر) [Quran surface count: 3],keep-note,
+861,شافعين,sens-c,Should,شافعين (26:100) intercession (Last Day) [Quran surface count: 1],drop,
+862,شاكرا,sens-a,Should,شاكرا: divine attribute الشاكر (4:147 وكان الله شاكرا عليما); شكور excluded [Quran surface count: 3],drop,
+868,شديد,sens-f,Consider,"شديد is mostly followed by the excluded العقاب / العذاب (شديد العقاب), 77% of its uses sit next to an excluded word [Quran surface count: 35]",keep-note,
+871,شرعة,sens-e,Consider,شرعة (5:48) the revealed law [Quran surface count: 1],keep-note,
+872,شرقيا,near-duplicate,Consider,شرقيا and شرقية are one lexeme (A5) [Quran surface count: 1],keep-note,
+874,شريعة,sens-e,Should,"شريعة is Shari'a, the divine law (45:18) [Quran surface count: 1]",drop,
+879,شفاعة,sens-c,Should,شفاعة is intercession on the Day of Judgement [Quran surface count: 6],drop,
+880,شفيع,sens-c,Should,شفيع is the intercessor of the Last Day [Quran surface count: 5],drop,
+882,شقيا,sens-f,Should,"شقيا is the damned/wretched (root of excluded شقاء); 19:4,32,48 [Quran surface count: 3]",drop,
+885,شهادة,sens-h,Consider,"شهادة: testimony, also the Muslim creed (shahada) [Quran surface count: 5]",keep-note,
+886,شهوة,sens-f,Consider,شهوة: sexual desire (7:81) [Quran surface count: 2],keep-note,
+887,شهيقا,sens-c,Should,شهيقا (67:7) the sound of the damned in hell (with زفير in 11:106) [Quran surface count: 1],drop,
+888,شواظ,sens-c,Should,شواظ (55:35) is hellfire flame [Quran surface count: 1],drop,
+889,شورى,sens-e,Consider,شورى is the title of Surah 42 and a modern political term [Quran surface count: 1],keep-note,
+892,صابرة,near-duplicate,Consider,صابرة and صابرا: one lexeme (A5) [Quran surface count: 1],keep-note,
+893,صاحبة,sens-a,Consider,"صاحبة occurs in the negation 'God has no consort' (6:101, 72:3) [Quran surface count: 2]",keep-note,
+898,صافات,sens-e,Consider,صافات: title of Surah 37 (والصافات صفا) and angels in ranks [Quran surface count: 2],keep-note,
+899,صالوا,sens-c,Must,صالوا (38:59 إنهم صالوا النار): enterers of hell fire; root صلي (excluded as صلي) | suggested backfill (no semantic link): أغفلنا [Quran surface count: 1],replace,أغفلنا
+902,صبغة,sens-a,Consider,صبغة occurs mostly as صبغة الله (2:138) [Quran surface count: 2],keep-note,
+905,صدقة,sens-d,Should,"صدقة: sadaqa, charity as an act of worship (zakat excluded) [Quran surface count: 4]",drop,
+909,صديقا,sens-b,Should,"صديقا: epithet of prophets Ibrahim, Idris (19:41, 19:56); siddiq [Quran surface count: 2]",drop,
+910,صديقة,sens-b,Should,صديقة: epithet of Mary (5:75) [Quran surface count: 1],drop,
+911,صرحا,sens-b,Consider,"صرحا: Pharaoh/Haman (28:38, 40:36) and the Queen of Sheba [Quran surface count: 2]",keep-note,
+915,صعودا,sens-c,Consider,صعودا (74:17) the climb in hell [Quran surface count: 1],keep-note,
+916,صعيدا,sens-d,Consider,"صعيدا is the soil of tayammum (4:43, 5:6) [Quran surface count: 4]",keep-note,
+917,صغار,a11-meaning,Consider,"صغار: Quranic 'abasement' (6:124), modern 'little ones' [Quran surface count: 1]",keep-note,
+919,صغيرا,near-duplicate,Consider,صغيرا and صغيرة: one lexeme (A5) [Quran surface count: 2],keep-note,
+924,صفوان,a11-meaning,Consider,صفوان: modern personal name Safwan [Quran surface count: 1],keep-note,
+925,صلبوه,sens-b,Should,صلبوه (4:157) is the crucifixion of Jesus; doctrinally sensitive [Quran surface count: 1],drop,
+926,صلح,a11-meaning,Consider,صلح modern 'peace treaty / reconciliation'; Quranic V 'was fitting' [Quran surface count: 2],keep-note,
+928,صلصال,sens-b,Consider,"صلصال: the material of the creation of man (15:26, 55:14) [Quran surface count: 4]",keep-note,
+933,صوامع,sens-d,Consider,صوامع (22:40) places of worship [Quran surface count: 1],keep-note,
+935,صيد,sens-d,Consider,صيد: hunting in the ihram verses [Quran surface count: 2],keep-note,
+936,ضاحكا,near-duplicate,Consider,ضاحكا and ضاحكة: one lexeme (A5) [Quran surface count: 1],keep-note,
+939,ضالين,sens-f,Should,"ضالين: the last word of the Fatiha (ولا الضالين), the pair of excluded مغضوب [Quran surface count: 2]",drop,
+940,ضامر,sens-d,Should,"ضامر occurs only in 22:27 (the call to pilgrimage, hajj) [Quran surface count: 1]",drop,
+944,ضريع,sens-c,Must,ضريع occurs only in 88:6 (the food of hell); consistent with excluded غسلين/غساق | suggested backfill (no semantic link): أوجفتم [Quran surface count: 1],replace,أوجفتم
+948,ضلال,sens-f,Consider,"ضلال: 'clear error' (ضلال مبين), paired with disbelief [Quran surface count: 27]",keep-note,
+956,طاغين,sens-f,Should,طاغين (37:30; 38:55; 78:22) transgressors who go to hell; root طغي of excluded طاغوت [Quran surface count: 2],drop,
+958,طائف,a11-meaning,Should,طائف is Ta'if (the city) as a homograph; 68:19 'a visitation' and 7:201 [Quran surface count: 2],drop,
+961,طبع,sens-g,Should,طبع occurs in طبع الله على قلوبهم: God sealing hearts (divine act) [Quran surface count: 3],drop,
+966,طغى,sens-f,Consider,"طغى: Pharaoh story (20:24, 79:17) [Quran surface count: 5]",keep-note,
+973,طهورا,sens-d,Consider,"طهورا: purifying water (25:48), ritual purity [Quran surface count: 2]",keep-note,
+974,طور,sens-b,Must,"طور (23:20 طور سيناء) is Mount Sinai (Tur), a named place | suggested backfill (no semantic link): بدينار [Quran surface count: 1]",replace,بدينار
+977,طيبة,a11-meaning,Consider,طيبة is a name of Medina (Taybah) [Quran surface count: 9],keep-note,
+987,عابدات,sens-d,Should,"عابدات (66:5, the Prophet's wives) is the worship vocabulary [Quran surface count: 1]",drop,
+988,عابدون,sens-d,Should,"عابدون (2:138; 23:47; 109:3, 109:5): worshippers, worship root عبد [Quran surface count: 4]",drop,
+989,عابرى,spelling,Should,"Final ى for ي (Uthmani): modern عابري; only in عابري سبيل (4:43, prayer verse) [Quran surface count: 1]",drop,
+993,عاقب,sens-f,Should,عاقب: the verb of punishment (counterpart of excluded عقاب/عقوبة) [Quran surface count: 1],drop,
+996,عاكفون,sens-d,Should,عاكفون (2:187 in the mosques; 21:52 devoted to idols): i'tikaf/devotion [Quran surface count: 2],drop,
+998,عالين,near-duplicate,Should,"عالين, عاليا, عالية are one adjective in three forms (A5) [Quran surface count: 1]",drop,
+999,عالية,near-duplicate,Should,عالية and عاليا are one adjective in two forms (A5); 88:10 refers to paradise [Quran surface count: 2],drop,
+1001,عاملة,sens-c,Should,"عاملة occurs only in 88:3 (عاملة ناصبة), where ناصبة is excluded [Quran surface count: 1]",drop,
+1004,عباد,sens-d,Consider,عباد mostly عباد الله / عبادي [Quran surface count: 11],keep-note,
+1005,عبادته,sens-d,Must,عبادته is worship itself (category d: acts of worship); عبادة is the central ritual noun; attached pronoun | suggested backfill (no semantic link): تجسسوا [Quran surface count: 3],replace,تجسسوا
+1007,عبس,sens-e,Consider,"عبس is the opening of Surah 80, about the Prophet and the blind man [Quran surface count: 2]",keep-note,
+1008,عبوسا,sens-c,Consider,عبوسا (76:10) the Day of Judgement [Quran surface count: 1],keep-note,
+1012,عجل,a11-meaning,Consider,عجل 'hasten' vs عجل 'a calf' (the golden calf) [Quran surface count: 2],keep-note,
+1013,عجوز,a11-meaning,Consider,عجوز is 'old woman' but often derogatory ('crone') in Arabic usage [Quran surface count: 2],keep-note,
+1020,عربيا,sens-e,Should,"عربيا: almost always قرآنا عربيا, naming the Quran as Arabic [Quran surface count: 8]",drop,
+1023,عزة,sens-a,Consider,عزة: العزة لله; root عزز of excluded عزيز [Quran surface count: 1],keep-note,
+1026,عسعس,sens-c,Consider,عسعس occurs only in 81:17 (Takwir) [Quran surface count: 1],keep-note,
+1032,عفا,sens-g,Should,عفا is mostly God pardoning (عفا الله عنك); عفو is excluded [Quran surface count: 6],drop,
+1033,عفريت,sens-c,Must,عفريت (27:39) is a demon of the jinn; jinn excluded | suggested backfill (no semantic link): تحاضون [Quran surface count: 1],replace,تحاضون
+1034,عقبى,sens-c,Consider,"عقبى (13:22,24) the final abode (paradise/hell) [Quran surface count: 4]",keep-note,
+1038,علام,sens-a,Must,"علام occurs only in علام الغيوب (5:109,116; 9:78; 34:48), a divine attribute (عليم excluded) | suggested backfill (no semantic link): تريحون [Quran surface count: 4]",replace,تريحون
+1040,علوا,sens-h,Consider,علوا: mostly the formula تعالى عما يقولون علوا كبيرا (17:43) [Quran surface count: 4],keep-note,
+1041,عماتك,sens-b,Consider,"عماتك occurs only in 33:50, the verse of the Prophet's permitted marriages [Quran surface count: 1]",keep-note,
+1042,عمك,sens-b,Consider,"عمك occurs only in 33:50, the Prophet's marriage verse [Quran surface count: 1]",keep-note,
+1043,عميق,sens-d,Consider,عميق occurs in the Hajj verse (22:27 فج عميق) and 'deep' [Quran surface count: 1],keep-note,
+1048,عورات,sens-f,Should,عورات (24:31; 24:58) are the private parts / times of nakedness; obscene-adjacent like سوءة [Quran surface count: 2],drop,
+1049,عيدا,sens-d,Consider,عيدا (5:114) is the festival (Eid) of the table sent down for Jesus [Quran surface count: 1],keep-note,
+1050,عيشة,sens-c,Consider,عيشة occurs only in عيشة راضية (paradise) [Quran surface count: 2],keep-note,
+1051,غاسق,sens-e,Consider,غاسق is the opening of the protective sura al-Falaq (113:3) [Quran surface count: 1],keep-note,
+1053,غالب,sens-a,Consider,غالب (12:21 والله غالب على أمره) is a divine attribute [Quran surface count: 3],keep-note,
+1059,غدوت,sens-b,Consider,غدوت (3:121) is the Battle of Uhud verse [Quran surface count: 1],keep-note,
+1061,غراما,sens-c,Should,غراما is the punishment of hell (25:65); modern 'passion / gram' (A11) [Quran surface count: 1],drop,
+1063,غرف,sens-c,Consider,"غرف: chambers of paradise (25:75, 29:58, 39:20) [Quran surface count: 2]",keep-note,
+1064,غرورا,sens-c,Consider,"غرورا: the deceit of Satan (4:120, 17:64, 35:40) [Quran surface count: 5]",keep-note,
+1065,غشاوة,sens-f,Consider,"غشاوة is the covering on the hearts of disbelievers (2:7, 45:23) [Quran surface count: 2]",keep-note,
+1069,غضب,sens-f,Should,غضب: mostly غضب الله; root غضب of excluded مغضوب [Quran surface count: 8],drop,
+1079,غنمتم,sens-d,Consider,غنمتم is the spoils/khums verse (8:41) [Quran surface count: 2],keep-note,
+1080,غواش,sens-c,Should,غواش (7:41) is the covering of hellfire above the damned [Quran surface count: 1],drop,
+1082,غول,a11-meaning,Should,غول (37:47) 'bane in wine' but 'ghoul/demon' in Arabic; jinn-adjacent [Quran surface count: 1],drop,
+1083,غيابت,sens-b,Consider,"غيابت is the pit of Joseph (12:10, 12:15); Uthmani plural spelling (modern غيابة) [Quran surface count: 2]",drop,
+1084,غير,other,Consider,غير is a function word ('other than / not'); rule A1 excludes particles [Quran surface count: 69],keep-note,
+1085,فاتكم,attached-form,Consider,فاتكم carries the pronoun كم; the bare فات is attested [Quran surface count: 3],replace,فات
+1087,فاجرا,sens-f,Should,فاجرا shares root with excluded فجور; 71:27 Noah's curse [Quran surface count: 1],drop,
+1088,فأجمعوا,attached-form,Consider,فأجمعوا carries the conjunction ف; the bare أجمعوا is attested [Quran surface count: 2],replace,أجمعوا
+1089,فأحبط,sens-g,Consider,فأحبط: God voiding deeds (33:19) [Quran surface count: 3],keep-note,
+1093,فارهبون,sens-h,Should,"فارهبون is God's first-person imperative (2:40, 16:51 وإياي فارهبون); attached ف and pronoun [Quran surface count: 2]",drop,
+1096,فاستعذ,sens-h,Must,"فاستعذ is the instruction to say the isti'adha (7:200, 16:98, 40:56, 41:36); formula | suggested backfill (no semantic link): تسرحون [Quran surface count: 4]",replace,تسرحون
+1098,فاطر,sens-a,Must,"فاطر occurs only as the divine epithet فاطر السماوات والأرض, an exclusive attribute of God | suggested backfill (no semantic link): تسيمون [Quran surface count: 6]",replace,تسيمون
+1100,فاقرة,sens-c,Should,فاقرة (75:25) is a calamity of the Last Day sura (القيامة) [Quran surface count: 1],drop,
+1102,فاكهة,sens-c,Consider,"فاكهة is mainly the fruit of paradise (55:11, 55:52, 56:20,32, 38:51) [Quran surface count: 6]",keep-note,
+1103,فاكهين,sens-c,Should,"فاكهين (44:27; 52:18): delighted, said of the people of paradise [Quran surface count: 2]",drop,
+1104,فالق,sens-g,Should,"فالق (6:95,96) فالق الحب والنوى / الإصباح: divine epithet [Quran surface count: 2]",drop,
+1105,فامسحوا,sens-d,Should,"فامسحوا is wudu' / tayammum (4:43, 5:6) [Quran surface count: 2]",drop,
+1114,فتمنوا,sens-c,Consider,"فتمنوا فتمنوا الموت (2:94, 62:6) [Quran surface count: 2]",keep-note,
+1117,فتيان,near-duplicate,Consider,فتيان and فتية are plurals of one noun (A5) [Quran surface count: 1],keep-note,
+1119,فتية,near-duplicate,Consider,"فتية and فتيان are plurals of one noun (A5); Companions of the Cave (18:10,13) [Quran surface count: 1]",keep-note,
+1123,فخلف,attached-form,Consider,"فخلف carries the conjunction ف; the bare خلف is attested (also 'behind', two meanings) [Quran surface count: 2]",keep-note,
+1126,فذوقوا,sens-f,Should,فذوقوا is the address to the damned (ذوقوا العذاب); العذاب is excluded [Quran surface count: 11],drop,
+1127,فرادى,sens-c,Consider,فرادى: Resurrection (6:94 جئتمونا فرادى) [Quran surface count: 1],keep-note,
+1129,فراغ,a11-meaning,Should,فراغ is 'emptiness / free time' in modern Arabic; Quranic V راغ 'he slipped' (37:91) [Quran surface count: 3],drop,
+1132,فرش,sens-c,Consider,"فرش is paradise furnishing (55:54, 56:34) [Quran surface count: 1]",keep-note,
+1135,فريضة,sens-d,Should,فريضة is a religious obligation (fard); 9:60 'فريضة من الله' [Quran surface count: 5],drop,
+1138,فصعق,sens-c,Should,فصعق is the trumpet blast of the Last Day (39:68) [Quran surface count: 1],drop,
+1141,فعقروها,sens-b,Consider,فعقروها (11:65; 26:157; 91:14): Salih's she-camel [Quran surface count: 3],keep-note,
+1142,ففزع,sens-c,Should,ففزع is the trumpet terror of the Last Day (27:87) [Quran surface count: 2],drop,
+1145,فكهين,near-duplicate,Consider,فكهين is the same word as فاكهين (1103); one letter apart [Quran surface count: 1],keep-note,
+1146,فلانا,other,Consider,"فلانا is the indefinite pronoun 'so-and-so' (25:28), pronoun-like (A1) [Quran surface count: 1]",keep-note,
+1153,قادر,sens-a,Must,"قادر is al-Qadir, a name of God (6:37 and 17:99 إن الله قادر على); قدير is excluded | suggested backfill (no semantic link): تغفلون [Quran surface count: 2]",replace,تغفلون
+1156,قاصرات,sens-c,Should,"قاصرات is the houris (قاصرات الطرف, 37:48; 38:52; 55:56) [Quran surface count: 3]",drop,
+1162,قانتات,sens-d,Must,"قانتات: قنت is excluded (devotion in prayer); this is its feminine plural (33:35, 66:5) | suggested backfill (no semantic link): تغمضوا [Quran surface count: 2]",replace,تغمضوا
+1163,قانتون,sens-d,Must,"قانتون: قنت is excluded (2:116, 30:26) | suggested backfill (no semantic link): تفسحوا [Quran surface count: 2]",replace,تفسحوا
+1164,قاهرون,sens-a,Consider,"قاهرون root قهر of excluded قهار (Pharaoh's boast, 7:127) [Quran surface count: 1]",keep-note,
+1167,قائمة,near-duplicate,Consider,قائمة and قائما are one adjective [Quran surface count: 5],keep-note,
+1169,قبيلا,sens-c+near-duplicate,Consider,"قبيلا (17:92) lists God and the angels | قبيلا belongs to the -يلا cluster (خليلا, دليلا, قليلا, قبيلا, وبيلا, فتيلا) [Quran surface count: 1]",keep-note,
+1171,قترة,sens-c,Consider,"قترة (10:26, 80:41) the darkening of faces on the Last Day [Quran surface count: 1]",keep-note,
+1177,قربات,sens-d,Consider,قربات (9:99) acts of devotion [Quran surface count: 1],keep-note,
+1178,قردة,sens-f,Should,قردة (apes) is the transformation punishment of the Sabbath-breakers and a common slur on Jews [Quran surface count: 2],drop,
+1179,قرضا,sens-h,Consider,"قرضا: mostly قرضا حسنا (a loan to God, 2:245 etc.) [Quran surface count: 6]",keep-note,
+1181,قروء,sens-f,Consider,قروء: menstrual periods (2:228) [Quran surface count: 1],keep-note,
+1182,قرين,sens-c,Should,قرين (43:36 a devil assigned as companion; 37:51) the jinn/devil companion [Quran surface count: 2],drop,
+1187,قصاص,sens-f,Should,"قصاص is retaliation (qisas), the punishment law (2:178-179) [Quran surface count: 2]",drop,
+1191,قطران,sens-c,Should,قطران (14:50) is the tar garments of hell [Quran surface count: 1],drop,
+1196,قلى,sens-b,Consider,"قلى occurs only in 93:3 (ما ودعك ربك وما قلى), addressed to the Prophet [Quran surface count: 1]",keep-note,
+1198,قليلة,near-duplicate,Consider,قليلة and قليلا are one adjective [Quran surface count: 1],keep-note,
+1200,قميصه,sens-b,Consider,"قميصه: Joseph's shirt (12:18, 25, 26...) [Quran surface count: 5]",keep-note,
+1204,قوارير,sens-c,Consider,"قوارير (76:15,16) paradise vessels [Quran surface count: 1]",keep-note,
+1207,قوسين,sens-b,Consider,قوسين (53:9) the vision of Gabriel [Quran surface count: 1],keep-note,
+1211,كادح,sens-c,Consider,كادح (84:6) meeting the Lord on the Last Day [Quran surface count: 1],keep-note,
+1214,كأسا,a11-meaning,Consider,"كأسا: paradise wine cup (76:5, 78:34) and 'drinking glass' [Quran surface count: 2]",keep-note,
+1215,كاشف,sens-a,Should,"كاشف: 'none can remove it but God' (6:17, 10:107); divine act [Quran surface count: 2]",drop,
+1216,كاشفة,sens-c,Should,كاشفة (53:58) the Hour has none to remove it besides God [Quran surface count: 1],drop,
+1218,كافة,other,Consider,"كافة is the adverbial 'all/entirely' (2:208; 9:36), function-like (A1) [Quran surface count: 5]",keep-note,
+1219,كالحون,sens-c,Should,كالحون (23:104) the disfigured faces of the damned [Quran surface count: 1],drop,
+1220,كالمهل,sens-c,Should,كالمهل: molten brass of hell (18:29; 44:45; 70:8); attached ك and ال [Quran surface count: 3],drop,
+1222,كاملين,near-duplicate,Consider,كاملين and كاملة are one adjective [Quran surface count: 1],keep-note,
+1224,كبائر,sens-f,Should,"كبائر are the grave sins (4:31, 42:37, 53:32) [Quran surface count: 3]",drop,
+1227,كثيبا,sens-c,Consider,كثيبا (73:14) mountains on the Last Day [Quran surface count: 1],keep-note,
+1229,كثيرة,near-duplicate,Consider,كثيرة and كثيرا are one adjective [Quran surface count: 11],keep-note,
+1230,كجهر,attached-form,Should,كجهر: ك prefixed to جهر; جهارا and جهرة are already in the list (A5) [Quran surface count: 1],drop,
+1231,كدنا,a11-meaning,Should,"كدنا: 'we almost' (كاد) and 'we plotted' (كيد, 12:76); two readings [Quran surface count: 1]",drop,
+1232,كذاب,near-duplicate,Consider,كذاب and كذابا are one noun (A5) [Quran surface count: 4],keep-note,
+1237,كسالى,sens-d,Consider,"كسالى: lazy in prayer (4:142, 9:54) [Quran surface count: 2]",keep-note,
+1240,كشطت,sens-c,Should,كشطت (81:11) is a Takwir last-day verse [Quran surface count: 1],drop,
+1243,كفل,a11-meaning,Should,"كفل: 'a share' (4:85) and the name ذو الكفل (Dhul-Kifl, a prophet) [Quran surface count: 1]",drop,
+1244,كفوا,sens-a,Must,"كفوا: 112:4 (ولم يكن له كفوا أحد), the last verse of the Ikhlas sura whose other words احد/صمد are excluded; the same spelling is also the imperative 'restrain' in 4:77 | suggested backfill (no semantic link): تفكهون [Quran surface count: 2]",replace,تفكهون
+1247,كلبهم,sens-f,Should,"كلبهم: 'dog' is a common insult in Arabic; the cave dog of 18:18, 22; attached pronoun [Quran surface count: 3]",drop,
+1248,كلتا,other,Consider,"كلتا is the dual pronoun-like 'both' (18:33), a function word (A1) [Quran surface count: 1]",keep-note,
+1251,كنزتم,sens-f,Consider,كنزتم: the punishment verse (9:35 فذوقوا ما كنتم تكنزون) [Quran surface count: 1],keep-note,
+1252,كهفهم,sens-b,Consider,كهفهم: the cave of the sleepers (Surah al-Kahf) [Quran surface count: 2],keep-note,
+1253,كهئة,spelling,Must,"كهئة is not attested: the Quran writes كهيئة (3:49, 5:110, the bird of Jesus); the small yaa was dropped | suggested backfill (no semantic link): تمرحون [Quran surface count: 0]",replace,تمرحون
+1254,كوكبا,sens-b,Consider,كوكبا: Ibrahim (6:76) and Yusuf (12:4) [Quran surface count: 2],keep-note,
+1255,لابثين,sens-c,Should,"لابثين occurs only in 78:23 (لابثين فيها أحقابا), hell [Quran surface count: 1]",drop,
+1258,لاغية,sens-c,Should,لاغية (88:11) is the paradise description [Quran surface count: 1],drop,
+1259,لامستم,sens-f,Should,"لامستم (4:43, 5:6) is the touching of women (sexual euphemism) in the tayammum verse [Quran surface count: 2]",drop,
+1264,لتردين,spelling,Should,لتردين is the Uthmani writing of لتردين with the pronoun yaa dropped (37:56); hell context; looks like a feminine plural verb [Quran surface count: 1],drop,
+1267,لجى,spelling,Should,Final ى for ي (Uthmani): modern لجي (24:40 بحر لجي) [Quran surface count: 1],replace,لجي
+1269,لذة,sens-c,Consider,"لذة: paradise drink (37:46, 47:15) [Quran surface count: 2]",keep-note,
+1272,لصاحبه,attached-form,Consider,لصاحبه carries a ل; 9:40 is the Prophet and Abu Bakr in the cave [Quran surface count: 2],drop,
+1274,لغوب,sens-c,Consider,لغوب (35:35) paradise [Quran surface count: 2],keep-note,
+1275,لفتاه,sens-b,Consider,لفتاه: Moses and his young servant (18:60) [Quran surface count: 2],keep-note,
+1278,لقاء,sens-c,Should,"لقاء: لقاء ربهم / لقاء الله / لقاء الآخرة, meeting God on the Last Day [Quran surface count: 8]",drop,
+1279,للمتقين,sens-d,Should,للمتقين: the God-fearing (هدى للمتقين); attached ل and ال; المتقين is a religious term [Quran surface count: 18],drop,
+1280,للناس,al-prefix,Consider,للناس attached ل and ال (A4); a bare ناس is attested in the Quran [Quran surface count: 51],keep-note,
+1281,لمحى,sens-g,Must,"لمحى is لمحيي (30:50, 41:39) 'the one who gives life to the dead'; احيا excluded; spelled with ى for ي and attached ل | suggested backfill (no semantic link): حصونهم [Quran surface count: 2]",replace,حصونهم
+1282,لمزة,sens-f,Should,لمزة (104:1) is paired with excluded ويل; the slanderer [Quran surface count: 1],drop,
+1283,لواحة,sens-c,Must,"لواحة occurs only in 74:29 (hell, Saqar) ; سقر is excluded | suggested backfill (no semantic link): ركوبهم [Quran surface count: 1]",replace,ركوبهم
+1286,لوح,sens-e,Should,"لوح occurs only in 85:22 (لوح محفوظ), the Preserved Tablet [Quran surface count: 1]",drop,
+1292,مأتيا,sens-c,Consider,مأتيا (19:61) the promise of paradise [Quran surface count: 1],keep-note,
+1293,مارج,sens-c,Should,مارج (55:15) is the jinn's fire; jinn excluded [Quran surface count: 1],drop,
+1294,ماكثين,sens-c,Should,ماكثين (18:3): abiding for ever in paradise; 43:77 has the hell counterpart ماكثون [Quran surface count: 1],drop,
+1295,مأكول,sens-b,Consider,مأكول (105:5) the Elephant sura [Quran surface count: 1],keep-note,
+1298,مائدة,sens-b,Consider,مائدة is Surat al-Ma'ida; the table of Jesus (5:112-114) [Quran surface count: 2],keep-note,
+1300,مبارك,a11-meaning,Consider,مبارك is a common male name and a Quranic epithet for the book/Jesus [Quran surface count: 4],keep-note,
+1301,مباركة,near-duplicate,Consider,مباركة and مبارك: one adjective (A5) [Quran surface count: 3],keep-note,
+1302,مبثوثة,sens-c,Consider,مبثوثة (88:16) paradise [Quran surface count: 1],keep-note,
+1303,مبرءون,spelling,Must,مبرءون is the Uthmani spelling (hamza on the line); modern is مبرؤون; context is the acquittal of Aisha (24:26) | suggested backfill (no semantic link): سلقوكم [Quran surface count: 1],replace,سلقوكم
+1308,مبصرة,near-duplicate,Consider,مبصرة and مبصرا: one adjective (A5) [Quran surface count: 3],keep-note,
+1311,مبلسون,sens-c,Should,"مبلسون (6:44; 23:77; 43:75) the despairing, the root of إبليس (excluded) [Quran surface count: 3]",drop,
+1312,مبنية,sens-c+near-duplicate,Consider,مبنية (39:20) the paradise rooms | مبنية and مبينة differ by a transposition/dot (ن/ي) [Quran surface count: 1],drop,
+1315,متابا,sens-d,Must,"متابا is the noun of repentance (25:71, 13:30); توبة, تائب are excluded | suggested backfill (no semantic link): شاكلته [Quran surface count: 1]",replace,شاكلته
+1318,متبرجات,sens-d,Consider,متبرجات (24:60; 33:33) dress code [Quran surface count: 1],keep-note,
+1328,متشابها,sens-e,Consider,متشابها: partly the Quran 'متشابها مثاني' (39:23) [Quran surface count: 3],keep-note,
+1333,متفرقون,near-duplicate,Consider,متفرقون and متفرقة: one adjective (A5) [Quran surface count: 1],keep-note,
+1334,مثابة,sens-b,Should,مثابة occurs only in 2:125 (the Ka'ba as a resort); holy place [Quran surface count: 1],drop,
+1335,مثبورا,sens-b,Consider,مثبورا: Pharaoh (17:102) [Quran surface count: 1],keep-note,
+1341,مثوى,sens-c,Should,مثوى: mostly the abode in hell (النار مثواكم) [Quran surface count: 9],drop,
+1345,مجنون,sens-f,Should,مجنون is an insult (used against the Prophet and prophets); modern 'crazy' [Quran surface count: 6],drop,
+1346,محاريب,sens-d,Should,"محاريب (34:13) is the mihrab, prayer niche [Quran surface count: 1]",drop,
+1348,محتضر,a11-meaning,Consider,محتضر: dying person in modern Arabic; Quran 54:28 'attended' [Quran surface count: 1],keep-note,
+1350,محذورا,near-duplicate,Should,"محذورا belongs to the cluster محجورا, محذورا, محسورا, محظورا, مهجورا (five words one letter apart) [Quran surface count: 1]",drop,
+1351,محررا,sens-b,Consider,محررا: dedicated to God's service by Mary's mother (3:35) [Quran surface count: 1],keep-note,
+1352,محرم,a11-meaning,Should,"محرم: pilgrim in ihram, the month Muharram, a mahram relative; ihram excluded; Quranic 'forbidden' (2:85) [Quran surface count: 1]",drop,
+1358,محصنات,sens-f,Should,محصنات (4:25) chaste women in the verse on marriage with slave girls and zina [Quran surface count: 1],drop,
+1359,محصنة,near-duplicate,Consider,محصنة and محصنات: one lexeme (A5) [Quran surface count: 1],keep-note,
+1360,محصنين,sens-f,Should,محصنين occurs in 4:24 غير مسافحين (zina law) [Quran surface count: 2],drop,
+1361,محضرون,sens-c,Should,محضرون: mostly those brought to the punishment/Reckoning [Quran surface count: 5],drop,
+1362,محظورا,near-duplicate,Should,"محظورا belongs to the cluster محجورا, محذورا, محسورا, محظورا, مهجورا [Quran surface count: 1]",drop,
+1363,محفوظ,sens-e,Should,محفوظ occurs in لوح محفوظ (85:22) [Quran surface count: 1],drop,
+1364,محكمة,sens-e,Should,محكمة (47:20 سورة محكمة): scripture terminology [Quran surface count: 1],drop,
+1365,محلقين,sens-d,Must,"محلقين occurs only in 48:27 (محلقين رءوسكم ومقصرين), the ritual of the pilgrimage | suggested backfill (no semantic link): شغلتنا [Quran surface count: 1]",replace,شغلتنا
+1366,محلى,spelling,Should,Final ى for ي (Uthmani): modern محلي; also 5:1 غير محلي الصيد وأنتم حرم (ihram) [Quran surface count: 1],drop,
+1367,محمودا,sens-b,Should,محمودا: 17:79 مقاما محمودا (the Prophet's station); from the root of excluded محمد/احمد [Quran surface count: 1],drop,
+1368,محيط,sens-a,Should,محيط: mostly God's encompassing (والله بما يعملون محيط) [Quran surface count: 7],drop,
+1371,مختوم,sens-c,Consider,مختوم (83:25) sealed paradise drink [Quran surface count: 1],keep-note,
+1375,مخضود,sens-c,Should,مخضود (56:28) paradise [Quran surface count: 1],drop,
+1376,مخلدون,sens-c,Should,مخلدون (56:17; 76:19) the immortal youths of paradise [Quran surface count: 2],drop,
+1377,مخلصا,sens-d,Should,"مخلصا (19:51; 39:2,11,14): sincerity in worship [Quran surface count: 4]",drop,
+1378,مخلصين,sens-d,Should,"مخلصين: مخلصين له الدين, sincere worship; also 'the chosen servants' (37:40) [Quran surface count: 7]",drop,
+1381,مدادا,sens-a,Consider,مدادا (18:109): ink for the words of my Lord [Quran surface count: 1],keep-note,
+1383,مدحورا,sens-c,Should,"مدحورا (7:18; 17:18, 39): Iblis' expulsion, hell [Quran surface count: 3]",drop,
+1387,مدكر,sens-h,Should,"مدكر is the refrain فهل من مدكر (54:15, 17, 22, 32, 40) and root ذكر [Quran surface count: 6]",drop,
+1388,مدهنون,sens-e,Consider,مدهنون (56:81) is about the Quran [Quran surface count: 1],keep-note,
+1389,مذءوما,sens-c,Must,مذءوما occurs only in 7:18 (اخرج منها مذءوما مدحورا) to Iblis; Uthmani spelling (modern مذؤوما) | suggested backfill (no semantic link): عاديتم [Quran surface count: 1],replace,عاديتم
+1390,مذبذبين,sens-f,Should,مذبذبين (4:143) describes the hypocrites; نفاق excluded [Quran surface count: 1],drop,
+1397,مرتفقا,sens-c,Consider,مرتفقا (18:29 hell; 18:31 paradise) [Quran surface count: 2],keep-note,
+1399,مرجعكم,sens-c,Should,"مرجعكم: إلى الله مرجعكم / إلى ربكم مرجعكم, return to God [Quran surface count: 11]",drop,
+1403,مردفين,sens-b,Should,مردفين (8:9) is the thousand angels at Badr; Badr excluded [Quran surface count: 1],drop,
+1405,مرساها,sens-c,Should,مرساها (7:187; 79:42) are the questions about the Hour; الساعة excluded [Quran surface count: 2],drop,
+1407,مرصادا,sens-c,Should,مرصادا occurs only in 78:21 (إن جهنم كانت مرصادا) [Quran surface count: 1],drop,
+1408,مرصد,sens-d,Consider,مرصد (9:5) the sword verse [Quran surface count: 1],keep-note,
+1411,مرضات,sens-h,Should,مرضات (2:207; 2:265; 4:114; 66:1) is the formula ابتغاء مرضات الله; Uthmani spelling (modern مرضاة) [Quran surface count: 4],drop,
+1413,مرضيا,near-duplicate,Consider,مرضيا and مرضية: one adjective (A5); 19:55 Ismail [Quran surface count: 1],keep-note,
+1414,مرضية,near-duplicate,Consider,مرضية and مرضيا: one adjective (A5); راضية مرضية (89:28) is paradise [Quran surface count: 1],keep-note,
+1416,مرفوعة,sens-c,Consider,"مرفوعة: raised couches of paradise (56:34, 88:13) [Quran surface count: 3]",keep-note,
+1417,مرقوم,sens-c,Should,"مرقوم (83:9,20) the record of deeds (كتاب مرقوم) [Quran surface count: 2]",drop,
+1423,مزيد,sens-c,Should,"مزيد: 50:30, 50:35 the dialogue of hell/paradise (هل من مزيد) [Quran surface count: 2]",drop,
+1425,مسافحات,sens-f,Must,مسافحات: fornicating women (4:25) ; zina is excluded and this is its obscene-adjacent counterpart | suggested backfill (no semantic link): فأقبره [Quran surface count: 1],replace,فأقبره
+1426,مسافحين,sens-f,Must,مسافحين: fornicators (4:24; 5:5) ; zina is excluded | suggested backfill (no semantic link): فإمساك [Quran surface count: 2],replace,فإمساك
+1427,مساكن,sens-c,Consider,مساكن (9:72 paradise dwellings) [Quran surface count: 1],keep-note,
+1428,مستبشرة,sens-c,Consider,مستبشرة: faces on the Last Day (80:39) [Quran surface count: 1],keep-note,
+1434,مستقيم,sens-h,Should,مستقيم: almost always صراط مستقيم (Fatiha); صراط is excluded [Quran surface count: 26],drop,
+1441,مسحورا,sens-b+near-duplicate,Should,"مسحورا belongs to the cluster مستورا, مسحورا, مسرورا, مسطورا, محسورا | مسحورا: the accusation against the Prophet (17:47; 25:8) [Quran surface count: 3]",drop,
+1443,مسد,sens-f,Must,"مسد occurs only in 111:5 (Surah al-Masad, the curse on Abu Lahab's wife) | suggested backfill (no semantic link): فانهار [Quran surface count: 1]",replace,فانهار
+1446,مسطورا,sens-e+near-duplicate,Should,"مسطورا belongs to the cluster مستورا, مسحورا, مسرورا, مسطورا, محسورا (one letter apart) | مسطورا: written in the Book (17:58; 33:6) [Quran surface count: 2]",drop,
+1450,مسكوب,sens-c,Consider,مسكوب (56:31) paradise water [Quran surface count: 1],keep-note,
+1455,مسنون,sens-b,Consider,مسنون: creation of man from molded clay [Quran surface count: 3],keep-note,
+1456,مسودا,sens-f,Should,مسودا: faces blackened (16:58; 43:17); racially sensitive [Quran surface count: 2],drop,
+1457,مسودة,sens-f,Should,مسودة (39:60) faces of the damned blackened; racially sensitive [Quran surface count: 1],drop,
+1459,مسومين,sens-b,Should,مسومين (3:125) are the five thousand angels at Badr; attached [Quran surface count: 1],drop,
+1466,مشهود,sens-c,Consider,مشهود (11:103 ذلك يوم مشهود; 85:3) [Quran surface count: 1],keep-note,
+1471,مصدقا,sens-e,Should,"مصدقا: مصدقا لما بين يديه, the Quran/Torah confirming scripture [Quran surface count: 11]",drop,
+1479,مصيرا,sens-c,Consider,مصيرا: mostly hell (4:97; 25:15) [Quran surface count: 3],keep-note,
+1490,مطهرة,sens-c,Should,مطهرة: purified spouses of paradise (2:25; 3:15; 4:57); 80:14 and 98:2 the pure scrolls [Quran surface count: 5],drop,
+1491,مطويات,sens-c,Should,مطويات (39:67) the heavens rolled up in His right hand on the Last Day [Quran surface count: 1],drop,
+1493,معاذ,sens-h,Must,"معاذ occurs only in معاذ الله (12:23, 12:79); formula; also a Companion's name | suggested backfill (no semantic link): فتطاول [Quran surface count: 2]",replace,فتطاول
+1494,معاشا,near-duplicate,Consider,"معاشا, معايش, معيشة are one noun in three forms (A5) [Quran surface count: 1]",keep-note,
+1495,معايش,near-duplicate,Consider,معايش is the plural of معيشة (A5) [Quran surface count: 2],keep-note,
+1497,معجزى,spelling,Should,Final ى for ي (Uthmani): modern معجزي (9:2-3 غير معجزي الله) [Quran surface count: 2],drop,
+1499,معدودة,near-duplicate,Consider,معدودة and معدود: one adjective (A5) [Quran surface count: 3],keep-note,
+1505,معروفة,near-duplicate,Consider,معروفة and معروفا: one noun [Quran surface count: 1],keep-note,
+1506,معزل,sens-b,Consider,معزل (11:42): Noah's son [Quran surface count: 1],keep-note,
+1509,معقب,sens-a,Consider,"معقب (13:41 لا معقب لحكمه), divine [Quran surface count: 1]",keep-note,
+1510,معقبات,sens-c,Should,معقبات (13:11) are angels who guard [Quran surface count: 1],drop,
+1511,معكوفا,sens-d,Should,معكوفا (48:25 والهدي معكوفا) is the offering animals at Hudaybiyyah; هدي is excluded [Quran surface count: 1],drop,
+1512,معلوم,sens-d,Consider,معلوم includes 2:197 (Hajj months) and 'a known station' (37:164): mixed [Quran surface count: 9],keep-note,
+1513,معلومات,sens-d,Must,معلومات (2:197 أشهر معلومات; 22:28 أيام معلومات) are the Hajj months and days; hajj is excluded | suggested backfill (no semantic link): فثبطهم [Quran surface count: 2],replace,فثبطهم
+1517,مغاضبا,sens-b,Should,"مغاضبا occurs only in 21:87 (Yunus, ذا النون) [Quran surface count: 1]",drop,
+1519,مغتسل,sens-b,Consider,مغتسل (38:42) Ayyub's spring [Quran surface count: 1],keep-note,
+1523,مغلولة,sens-a,Should,مغلولة (5:64) the quote يد الله مغلولة (Jews about God); sensitive [Quran surface count: 2],drop,
+1524,مغنون,sens-c+near-duplicate,Should,"مغنون belongs to the cluster مجنون, مسنون, مغنون, مكنون, ممنون | مغنون (40:47) dialogue in hell [Quran surface count: 2]",drop,
+1526,مفاتح,sens-a,Consider,مفاتح: 6:59 وعنده مفاتح الغيب; 28:76 Qarun [Quran surface count: 1],keep-note,
+1527,مفازا,sens-c,Should,مفازا (78:31) paradise for the God-fearing [Quran surface count: 1],drop,
+1528,مفتحة,sens-c,Should,مفتحة (38:50) the opened gates of the gardens of Eden [Quran surface count: 1],drop,
+1529,مفتر,near-duplicate,Should,"مفتر, مفترون, مفترى, مفتريات are four forms of the root فرى (A5); افتراء, افترى already in the list [Quran surface count: 1]",drop,
+1530,مفترون,near-duplicate,Should,مفترون: A5 duplicate of the فرى family [Quran surface count: 1],drop,
+1531,مفترى,sens-e,Should,مفترى (28:36; 34:43) the Quran / signs called forged; A5 duplicate of the فرى family [Quran surface count: 2],drop,
+1532,مفتريات,sens-e,Should,مفتريات (11:13) the challenge to produce ten fabricated suras [Quran surface count: 1],drop,
+1536,مفصلا,sens-e,Should,مفصلا (6:114 أنزل إليكم الكتاب مفصلا) the Quran [Quran surface count: 1],drop,
+1540,مقاليد,sens-a,Consider,"مقاليد (39:63; 42:12) له مقاليد السماوات والأرض, God's [Quran surface count: 2]",keep-note,
+1541,مقام,sens-b,Should,مقام: مقام إبراهيم (2:125; 3:97) and مقام ربه [Quran surface count: 7],drop,
+1542,مقامع,sens-c,Should,مقامع (22:21) the iron rods of hell [Quran surface count: 1],drop,
+1544,مقتا,sens-f,Consider,مقتا (4:22 on marrying one's father's wife; 35:39) [Quran surface count: 3],keep-note,
+1545,مقتحم,sens-c,Should,مقتحم (38:59) the damned troop in hell [Quran surface count: 1],drop,
+1546,مقتدر,sens-a,Must,"مقتدر (54:42, 54:55) is a divine name (al-Muqtadir) | suggested backfill (no semantic link): فسيحوا [Quran surface count: 2]",replace,فسيحوا
+1549,مقترنين,sens-c,Consider,مقترنين (43:53) the angels [Quran surface count: 1],keep-note,
+1551,مقتصدة,near-duplicate,Consider,مقتصدة and مقتصد: one adjective [Quran surface count: 1],keep-note,
+1552,مقداره,sens-c,Should,مقداره (32:5; 70:4) the length of the Day [Quran surface count: 2],drop,
+1555,مقرنين,sens-c,Consider,مقرنين (14:49 chained in hell; 43:13) [Quran surface count: 4],keep-note,
+1557,مقصورات,sens-c,Should,مقصورات (55:72) the houris in the tents [Quran surface count: 1],drop,
+1560,مقطوعة,sens-c,Consider,"مقطوعة occurs only in 56:33 (paradise fruit, لا مقطوعة ولا ممنوعة) [Quran surface count: 1]",keep-note,
+1562,مقنعى,spelling,Should,Final ى for ي (Uthmani): modern مقنعي (14:43 Last Day: مقنعي رءوسهم) [Quran surface count: 1],drop,
+1563,مقيتا,sens-a,Must,"مقيتا is a divine attribute (4:85 وكان الله على كل شيء مقيتا, al-Muqit); modern مقيت means odious (A11) | suggested backfill (no semantic link): فيحفكم [Quran surface count: 1]",replace,فيحفكم
+1565,مكانتكم,sens-h,Consider,مكانتكم: mostly the formula اعملوا على مكانتكم إني عامل (to the unbelievers); attached pronoun كم [Quran surface count: 4],keep-note,
+1567,مكتوبا,sens-e,Should,مكتوبا occurs only in 7:157 (the Prophet written in the Torah and Gospel); scripture [Quran surface count: 1],drop,
+1568,مكث,sens-e,Consider,"مكث (17:106) is the pace of reciting the Quran; also a very common verb 'stay' (امكثوا, ماكثين) [Quran surface count: 1]",keep-note,
+1571,مكرمة,sens-e,Should,"مكرمة occurs only in 80:13 (صحف مكرمة), the honoured scrolls [Quran surface count: 1]",drop,
+1572,مكرمون,sens-c,Should,مكرمون (21:26 angels; 37:42 and 70:35 paradise) [Quran surface count: 3],drop,
+1574,مكظوم,sens-b,Should,مكظوم occurs only in 68:48 (Yunus and the whale) [Quran surface count: 1],drop,
+1576,مكنون,sens-e,Should,مكنون (56:78 كتاب مكنون the guarded Book; 37:49 houris; 52:24 paradise) [Quran surface count: 3],drop,
+1579,ملاق,sens-c,Should,ملاق occurs in 69:20 (meeting my reckoning); meeting God/Reckoning [Quran surface count: 1],drop,
+1580,ملاقوا,sens-c,Should,ملاقوا (2:46 ملاقوا ربهم; 2:249) meeting the Lord [Quran surface count: 3],drop,
+1584,ملكت,sens-f,Should,ملكت is nearly always ما ملكت أيمانكم (slavery/concubinage formula); root ملك of excluded ملك/مالك [Quran surface count: 15],drop,
+1593,ممنون,sens-c+near-duplicate,Should,"ممنون belongs to the cluster مجنون, مسنون, مغنون, مكنون, ممنون (five words one letter apart) | ممنون: غير ممنون (41:8; 84:25; 95:6) is the paradise reward formula [Quran surface count: 4]",drop,
+1603,منتقمون,sens-a,Should,منتقمون: God's vengeance (32:22; 43:41; 44:16); al-Muntaqim attribute [Quran surface count: 3],drop,
+1606,منجوك,sens-b,Consider,منجوك is Lot's angelic message (29:33) [Quran surface count: 1],keep-note,
+1607,منذر,sens-b,Should,منذر is the Prophet's role (إنما أنت منذر) [Quran surface count: 5],drop,
+1609,منزلون,sens-g,Consider,منزلون: 29:34 sending down punishment on Lot's people; root نزل of excluded تنزيل/انزل [Quran surface count: 1],keep-note,
+1610,منسكا,sens-d,Must,"منسكا (22:34, 22:67) is the rite of worship (manasik); نسك is excluded | suggested backfill (no semantic link): فيدمغه [Quran surface count: 2]",replace,فيدمغه
+1612,منشرة,sens-e,Should,"منشرة occurs only in 74:52 (صحفا منشرة), scrolls [Quran surface count: 1]",drop,
+1613,منشور,sens-e,Should,منشور (17:13 the open record; 52:3 رق منشور the unfurled scroll) [Quran surface count: 1],drop,
+1615,منضود,sens-c,Should,"منضود (11:82 stones of sijjil, excluded; 56:29 paradise) [Quran surface count: 2]",drop,
+1617,منفطر,sens-c,Should,منفطر occurs only in 73:18 (the heaven rent on the Last Day) [Quran surface count: 1],drop,
+1618,منفكين,sens-f,Should,منفكين occurs only in 98:1 (Surah al-Bayyina about disbelievers and People of the Book) [Quran surface count: 1],drop,
+1627,منيب,sens-d,Should,"منيب: turning in repentance to God (11:75 Ibrahim; 50:8, 50:33); توبة family excluded [Quran surface count: 4]",drop,
+1628,مهاجر,sens-b,Should,مهاجر: the Hijra (29:26 Ibrahim; 4:100); a historic religious term [Quran surface count: 1],drop,
+1629,مهاجرات,sens-b,Should,مهاجرات (60:10) the women emigrants of the Hijra [Quran surface count: 1],drop,
+1630,مهاد,sens-c,Should,مهاد (2:206; 3:197; 13:18; 38:56) the bed of hell [Quran surface count: 1],drop,
+1631,مهانا,sens-c,Should,"مهانا occurs only in 25:69 (hell, يخلد فيه مهانا) [Quran surface count: 1]",drop,
+1633,مهجورا,sens-e,Should,مهجورا occurs only in 25:30 (they abandoned this Quran) [Quran surface count: 1],drop,
+1635,مهطعين,sens-c,Should,مهطعين (14:43; 54:8; 70:36) the Last Day [Quran surface count: 3],drop,
+1636,مهلكى,spelling,Should,Final ى for ي (Uthmani): modern مهلكي (28:59 وما كنا مهلكي القرى) [Quran surface count: 1],drop,
+1639,مواضعه,sens-e,Should,"مواضعه (4:46; 5:13; 5:41): yuharrifuna al-kalim 'an mawadi'ih, the corruption of scripture [Quran surface count: 3]",drop,
+1640,مواطن,sens-b,Consider,"مواطن occurs only in 9:25 (Hunayn, excluded) [Quran surface count: 1]",keep-note,
+1641,موبقا,sens-c,Should,موبقا occurs only in 18:52 (the abyss between idols and their worshippers on the Last Day) [Quran surface count: 1],drop,
+1647,مؤصدة,sens-c,Should,مؤصدة (90:20; 104:8) the sealed fire of hell [Quran surface count: 2],drop,
+1649,موضونة,sens-c,Should,موضونة occurs only in 56:15 (paradise couches) [Quran surface count: 1],drop,
+1652,موعدة,sens-b,Consider,موعدة occurs only in 9:114 (Ibrahim and his father) [Quran surface count: 1],keep-note,
+1653,موعظة,sens-e,Should,موعظة (10:57; 2:275; 24:34) is mostly the Quran as admonition [Quran surface count: 3],drop,
+1654,موفورا,sens-c,Should,"موفورا occurs only in 17:63 (to Iblis, jahannam as ample recompense) [Quran surface count: 1]",drop,
+1656,موقوتا,sens-d,Should,"موقوتا occurs only in 4:103 (الصلاة كانت ... كتابا موقوتا), the ordained prayer times [Quran surface count: 1]",drop,
+1657,موقوفون,sens-c,Should,موقوفون (34:31) the wrongdoers standing before their Lord [Quran surface count: 1],drop,
+1667,ميقات,sens-d,Consider,"ميقات: Moses' appointment (7:142), the Day (56:50); modern miqat of the pilgrimage [Quran surface count: 2]",keep-note,
+1670,ناشئة,sens-d,Should,"ناشئة occurs only in 73:6 (ناشئة الليل), the night prayer (تهجد is excluded) [Quran surface count: 1]",drop,
+1673,ناصية,sens-f,Consider,ناصية: 96:15-16 (Abu Jahl); a stray word [Quran surface count: 1],keep-note,
+1674,ناضرة,sens-a,Should,"ناضرة occurs only in 75:22 (وجوه يومئذ ناضرة إلى ربها ناظرة), the vision of God [Quran surface count: 1]",drop,
+1675,ناظرة,sens-a,Should,"ناظرة occurs only in 75:23, the vision of God (with ناضرة) [Quran surface count: 1]",drop,
+1677,ناعمة,sens-c,Consider,ناعمة (88:8) faces on the Last Day [Quran surface count: 1],keep-note,
+1678,ناقة,sens-b,Should,"ناقة: the she-camel of Salih (ناقة الله, 7:73; 11:64; 26:155) [Quran surface count: 4]",drop,
+1682,نبتهل,sens-f,Must,نبتهل is the mubahala verse (3:61 نبتهل فنجعل لعنة الله على الكاذبين); لعنة is excluded | suggested backfill (no semantic link): كسادها [Quran surface count: 1],replace,كسادها
+1687,نجازى,spelling,Should,Final ى for ي (Uthmani): modern نجازي (34:17 وهل نجازي إلا الكفور) [Quran surface count: 1],drop,
+1688,نجزى,spelling,Should,Final ى for ي (Uthmani): modern نجزي; mostly كذلك نجزي المحسنين / القوم المجرمين [Quran surface count: 19],replace,نجزي
+1693,نذرت,sens-d,Should,نذرت (3:35 Mary's mother; 19:26 Mary's vow of fasting) [Quran surface count: 2],drop,
+1694,نذير,sens-b,Should,نذير is the Prophet's role (إنما أنا نذير مبين); epithet of messengers [Quran surface count: 29],drop,
+1696,نزاعة,sens-c,Should,نزاعة occurs only in 70:16 (hell) [Quran surface count: 1],drop,
+1697,نزل,sens-e,Must,"نزل is 'sent down' for the revelation (نزل به الروح الأمين, ما نزل); انزل, تنزيل, تنزلت are excluded | suggested backfill (no semantic link): للأنام [Quran surface count: 22]",replace,للأنام
+1702,نستعين,sens-h,Must,"نستعين occurs only in 1:5 (إياك نعبد وإياك نستعين), the Fatiha | suggested backfill (no semantic link): ليبطئن [Quran surface count: 1]",replace,ليبطئن
+1704,نسفت,sens-c,Should,نسفت occurs only in 77:10 (Last Day sura) [Quran surface count: 1],drop,
+1708,نشترى,spelling,Should,Final ى for ي (Uthmani): modern نشتري [Quran surface count: 1],replace,نشتري
+1713,نصليه,sens-c,Must,"نصليه (4:30) 'we shall roast him in fire' (other forms in 4:115, 74:26); صلي is excluded | suggested backfill (no semantic link): مبلغهم [Quran surface count: 1]",replace,مبلغهم
+1714,نضاختان,sens-c,Should,نضاختان occurs only in 55:66 (paradise springs) [Quran surface count: 1],drop,
+1715,نضرة,sens-c,Should,نضرة (76:11; 83:24) the glow of paradise; نعيم excluded [Quran surface count: 2],drop,
+1719,نطوى,spelling,Should,Final ى for ي (Uthmani): modern نطوي (21:104 Last Day: يوم نطوي السماء) [Quran surface count: 1],replace,نطوي
+1722,نعقل,sens-c,Should,نعقل occurs only in 67:10 (the dialogue of the dwellers of the blaze) [Quran surface count: 1],drop,
+1735,نقتبس,sens-c,Should,"نقتبس occurs only in 57:13 (Last Day, 'let us take light'; نور excluded) [Quran surface count: 1]",drop,
+1740,نقيرا,near-duplicate,Should,نقيرا is one letter from نقيبا and نفيرا (ر/ب/ف/ق dot twins) [Quran surface count: 2],drop,
+1741,نقيض,sens-c,Should,نقيض (43:36 نقيض له شيطانا) assigns a devil; modern 'opposite' [Quran surface count: 1],drop,
+1746,نكص,sens-c,Should,نكص occurs only in 8:48 (Iblis at Badr) [Quran surface count: 1],drop,
+1750,نملى,spelling,Should,Final ى for ي (Uthmani): modern نملي [Quran surface count: 2],replace,نملي
+1751,ننج,spelling,Should,"ننج is the pausal/Uthmani writing (10:103 ننج المؤمنين, final ي dropped); not a modern word [Quran surface count: 1]",replace,ننجي
+1752,ننسخ,sens-e,Should,"ننسخ occurs only in 2:106 (ما ننسخ من آية), abrogation of verses [Quran surface count: 1]",drop,
+1753,نورث,sens-c,Should,نورث occurs only in 19:63 (the inheritance of paradise) [Quran surface count: 1],drop,
+1755,نيلا,a11-meaning,Should,نيلا (9:120): modern نيل is the Nile (named river) and indigo [Quran surface count: 1],drop,
+1756,هاتوا,other,Consider,"هاتوا is the imperative 'bring!' (هاتوا برهانكم), a challenge formula; verb of a defective type that is not a normal lemma [Quran surface count: 4]",keep-note,
+1757,هاجر,a11-meaning,Should,"هاجر is Hagar (Hajar, wife of Ibrahim) in modern Arabic; Quranic 'emigrate'; the Hijra verb [Quran surface count: 1]",drop,
+1758,هادوا,sens-b,Must,هادوا: 'those who became Jews' (الذين هادوا); same root as excluded يهود | suggested backfill (no semantic link): مصيبها [Quran surface count: 10],replace,مصيبها
+1760,هاؤم,spelling,Should,هاؤم is a rare Uthmani word (69:19 هاؤم اقرؤوا كتابيه) in the Last Day sura; no ordinary meaning [Quran surface count: 1],drop,
+1763,هدا,near-duplicate,Should,"هدا is one dot/letter from هدى (guidance, an excluded word) ; also 19:90 (the Christian claim about God's son) [Quran surface count: 1]",drop,
+1765,هزوا,sens-e,Consider,"هزوا: اتخذوا آيات الله هزوا (2:231, 18:56, 45:9) [Quran surface count: 11]",keep-note,
+1769,هلم,other,Consider,"هلم is an interjection 'come here' (6:150; 33:18), a function word rather than a content word (A1) [Quran surface count: 2]",keep-note,
+1772,همزات,sens-c,Should,همزات occurs only in 23:97 (همزات الشياطين); shayatin excluded [Quran surface count: 1],drop,
+1773,هنئا,spelling,Must,"هنئا is not attested; the Quran writes هنيئا (4:4, 52:19, 69:24, 77:43); the small yaa seat was dropped [Quran surface count: 0]",replace,هنيئا
+1775,هيت,sens-f,Should,"هيت occurs only in 12:23 (Zulaikha's هيت لك), a seduction word [Quran surface count: 1]",drop,
+1776,هيهات,sens-c,Should,هيهات (23:36) is the interjection of the disbelievers disbelieving the Resurrection; not a content word [Quran surface count: 2],drop,
+1777,وأبقى,attached-form,Consider,وأبقى carries an attached و; the bare أبقى is attested (53:51) | وأبقى carries the conjunction و; the bare أبقى is attested [Quran surface count: 7],replace,أبقى
+1778,واجفة,sens-c,Should,واجفة occurs only in 79:8 (Last Day hearts) [Quran surface count: 1],drop,
+1779,واحدة,sens-a,Should,"واحدة: feminine of واحد (excluded); 'نفس واحدة', 'صيحة واحدة' [Quran surface count: 29]",drop,
+1783,واردون,sens-c,Should,واردون occurs only in 21:98 (you shall enter it: hell) [Quran surface count: 1],drop,
+1784,وازرة,sens-h,Consider,وازرة is the formula ولا تزر وازرة وزر أخرى [Quran surface count: 5],keep-note,
+1789,وأعتدنا,sens-f,Should,"وأعتدنا: وأعتدنا لهم عذابا أليما, the prepared-punishment formula; attached و [Quran surface count: 7]",drop,
+1791,واغلظ,sens-f,Should,واغلظ (9:73; 66:9) is the command to be harsh to the unbelievers and hypocrites [Quran surface count: 2],drop,
+1792,وإقام,sens-d,Must,"وإقام occurs only in وإقام الصلاة (21:73; 24:37), establishing prayer | suggested backfill (no semantic link): وازينت [Quran surface count: 2]",replace,وازينت
+1793,وأكواب,sens-c,Should,وأكواب (43:71; 76:15; 88:14) the goblets of paradise; attached و [Quran surface count: 3],drop,
+1796,والسلوى,sens-b,Should,والسلوى (2:57; 7:160; 20:80) the quails of the Israelites; attached و+ال [Quran surface count: 3],drop,
+1797,والسن,sens-f,Should,"والسن (5:45 والسن بالسن), the lex talionis; attached و+ال [Quran surface count: 1]",drop,
+1799,والميسر,sens-d,Should,"والميسر (2:219; 5:90, 91) gambling in the prohibition of wine and games of chance; attached و+ال [Quran surface count: 3]",drop,
+1802,وإيتاء,sens-d,Must,وإيتاء occurs in وإيتاء الزكاة (zakat is excluded) | suggested backfill (no semantic link): وبدارا [Quran surface count: 2],replace,وبدارا
+1803,وبرزت,sens-c,Should,وبرزت (26:91; 79:36) 'hell was brought into view' [Quran surface count: 2],drop,
+1804,وبرق,attached-form,Consider,وبرق carries the conjunction و; the bare برق is attested [Quran surface count: 1],replace,برق
+1807,وتمت,attached-form,Consider,وتمت carries the conjunction و; the bare تمت is attested [Quran surface count: 3],replace,تمت
+1808,وتنحتون,attached-form,Consider,وتنحتون carries the conjunction و; the bare تنحتون is attested [Quran surface count: 2],replace,تنحتون
+1810,وثلاث,attached-form,Consider,وثلاث carries the conjunction و; the bare ثلاث is attested [Quran surface count: 2],replace,ثلاث
+1815,وجيها,sens-b,Should,وجيها: epithet of Jesus (3:45) and Moses (33:69) [Quran surface count: 2],drop,
+1816,وحده,sens-a,Should,"وحده: God alone, tawhid formula (وحده لا شريك له) [Quran surface count: 6]",drop,
+1819,وخر,attached-form,Consider,وخر carries the conjunction و; the bare خر is attested [Quran surface count: 2],replace,خر
+1823,ورتل,sens-e,Must,ورتل (73:4 ورتل القرآن ترتيلا; 25:32): Quran recitation; قرا and تلا are excluded | suggested backfill (no semantic link): وتشاور [Quran surface count: 1],replace,وتشاور
+1828,وزيرا,sens-b,Consider,وزيرا is Moses' request for Haroun (20:29) and 25:35 [Quran surface count: 2],keep-note,
+1830,وسعر,sens-c,Should,"وسعر (54:24, 54:47) 'blaze', same root as excluded سعير; modern 'price' [Quran surface count: 2]",drop,
+1831,وسعها,sens-h,Should,وسعها: the formula لا يكلف الله نفسا إلا وسعها [Quran surface count: 5],drop,
+1833,وسيدا,sens-b,Should,وسيدا (3:39) John the Baptist as sayyid; attached و [Quran surface count: 1],drop,
+1836,وصوركم,sens-g,Should,وصوركم (40:64; 64:3) God shaping humans; مصور is excluded [Quran surface count: 2],drop,
+1837,وصى,sens-b,Consider,وصى occurs only in 42:13 (وصى به نوحا) [Quran surface count: 1],keep-note,
+1839,وطفقا,sens-b,Should,وطفقا occurs only in 7:22 and 20:121 (Adam and Hawwa covering themselves) [Quran surface count: 2],drop,
+1844,وفاقا,sens-c,Should,وفاقا occurs only in 78:26 (hell: جزاء وفاقا) [Quran surface count: 1],drop,
+1845,وفدا,sens-c,Should,وفدا occurs only in 19:85 (the God-fearing gathered to al-Rahman on the Last Day) [Quran surface count: 1],drop,
+1849,وقفوا,sens-c,Should,وقفوا (6:27 وقفوا على النار; 6:30 وقفوا على ربهم) the Last Day standing [Quran surface count: 2],drop,
+1850,وقفينا,sens-b,Should,وقفينا (2:87; 5:46; 57:27) follows the prophets with Jesus [Quran surface count: 3],drop,
+1851,وكأين,other,Should,وكأين is a compound particle 'how many' not a content word (rule A1) with attached و [Quran surface count: 6],drop,
+1852,وكل,a11-meaning,Should,وكل: bare spelling is both 'and every' (و+كل) and the verb 'he delegated'; vakil (excluded) family [Quran surface count: 14],drop,
+1853,وكهلا,sens-b,Should,وكهلا occurs only in 3:46 and 5:110 (Jesus speaks 'in the cradle and as a grown man') [Quran surface count: 2],drop,
+1856,ولدان,sens-c,Should,ولدان (56:17; 76:19) the immortal youths of paradise [Quran surface count: 2],drop,
+1858,ومأواهم,sens-c,Must,ومأواهم: ومأواهم النار / ومأواهم جهنم (hell formula); attached و | suggested backfill (no semantic link): وتفاخر [Quran surface count: 6],replace,وتفاخر
+1859,ونقر,attached-form,Consider,ونقر carries the conjunction و; the bare نقر is attested [Quran surface count: 1],replace,نقر
+1861,وهب,sens-a,Should,وهب (14:39 Ibrahim's thanks for Ishmael and Isaac; 19:53; root وهب of excluded وهاب) [Quran surface count: 3],drop,
+1862,ويثبت,attached-form,Consider,ويثبت carries the conjunction و; the bare يثبت is attested [Quran surface count: 3],replace,يثبت
+1864,ويدرءون,spelling,Should,ويدرءون is the Uthmani spelling (hamza on the line); modern ويدرؤون; attached و [Quran surface count: 2],replace,ويدرؤون
+1867,ويكأن,other,Must,ويكأن occurs only in 28:82 (the Qarun story); a compound interjection not a content word | suggested backfill (no semantic link): وتكاثر [Quran surface count: 1],replace,وتكاثر
+1871,يامعشر,spelling,Must,"يامعشر is the Uthmani joined vocative يا معشر (6:128, 6:130, 55:33 to jinn and mankind); like the excluded ياايها | suggested backfill (no semantic link): وشفتين [Quran surface count: 3]",replace,وشفتين
+1873,يبدله,near-duplicate,Consider,يبدله is يبدل with an attached pronoun (A5) [Quran surface count: 1],drop,
+1874,يبدؤا,spelling,Should,يبدؤا is the Uthmani spelling (modern يبدؤوا / يبدأوا) [Quran surface count: 6],replace,يبدؤوا
+1875,يبسط,sens-g,Should,يبسط is God expanding provision (الله يبسط الرزق); الباسط and رزق family excluded [Quran surface count: 9],drop,
+1877,يبلس,sens-c,Should,يبلس occurs only in 30:12 (Last Day); root of إبليس [Quran surface count: 1],drop,
+1880,يتدبرون,sens-e,Should,يتدبرون (4:82; 47:24) the instruction to ponder the Quran [Quran surface count: 2],drop,
+1883,يتسنه,spelling,Must,يتسنه is the pausal ha (هاء السكت) form (2:259 لم يتسنه): not a normal word | suggested backfill (no semantic link): وقبائل [Quran surface count: 1],replace,وقبائل
+1885,يتطهرون,sens-d,Consider,يتطهرون (7:82; 27:56): Lot's people mocking 'they pose as pure'; purification root [Quran surface count: 2],keep-note,
+1886,يتعد,sens-h,Should,يتعد (4:14; 65:1) is the formula ومن يتعد حدود الله [Quran surface count: 2],drop,
+1890,يتفكرون,sens-h,Consider,"يتفكرون: mostly لآيات لقوم يتفكرون, the formula after signs [Quran surface count: 10]",keep-note,
+1891,يتفيؤا,spelling,Should,يتفيؤا is the Uthmani spelling; modern يتفيأ [Quran surface count: 1],replace,يتفيأ
+1893,يتلقى,sens-c,Should,يتلقى occurs only in 50:17 (the two recording angels) [Quran surface count: 1],drop,
+1896,يتوفى,sens-g,Should,يتوفى (8:50; 22:5; 39:42; 40:67): God taking souls; death is a divine act in the Quran [Quran surface count: 4],drop,
+1897,يتوكل,sens-h,Should,يتوكل (65:3 ومن يتوكل على الله فهو حسبه); وكيل is excluded [Quran surface count: 3],drop,
+1898,يثخن,sens-b,Should,يثخن occurs only in 8:67 (the prisoners of Badr) [Quran surface count: 1],drop,
+1901,يجتبى,spelling,Should,"Final ى for ي (Uthmani): modern يجتبي; 12:6, 42:13 God choosing prophets [Quran surface count: 2]",replace,يجتبي
+1903,يجرمنكم,sens-f,Consider,"يجرمنكم: the root جرم of excluded مجرم; 5:2, 5:8, 11:89 [Quran surface count: 3]",keep-note,
+1905,يحاسب,sens-c,Should,يحاسب occurs only in 84:8 (Last Day reckoning) [Quran surface count: 1],drop,
+1906,يحافظون,sens-d,Should,يحافظون: the guarding of prayers (6:92; 23:9; 70:34) [Quran surface count: 3],drop,
+1907,يحب,sens-a,Should,يحب: الله يحب المحسنين / المتقين / التوابين; divine attribute (wording of the verse endings) [Quran surface count: 39],drop,
+1911,يحرفون,sens-e,Should,يحرفون: the corruption of the scriptures (2:75; 4:46; 5:13) [Quran surface count: 3],drop,
+1912,يحكم,sens-a,Consider,يحكم: the judgement of God (الله يحكم بينكم يوم القيامة) ; حكيم excluded [Quran surface count: 17],keep-note,
+1914,يحلون,sens-c,Should,يحلون (18:31; 22:23; 35:33; 43:? ) adornment of the people of paradise [Quran surface count: 4],drop,
+1915,يحموم,sens-c,Must,يحموم occurs only in 56:43 (the black smoke of hell) | suggested backfill (no semantic link): يجمحون [Quran surface count: 1],replace,يجمحون
+1916,يحمى,sens-c,Should,يحمى occurs only in 9:35 (heated in the fire of jahannam) [Quran surface count: 1],drop,
+1927,يدع,a11-meaning,Should,يدع: 107:2 'pushes away' but يدع is also 'he calls/leaves' (jussive of دعا/ودع); du'a family [Quran surface count: 3],drop,
+1928,يدعوا,sens-d+spelling,Should,"يدعوا carries the silent alef of the Uthmani singular (يدعوا إلى الجنة, 2:221; 22:12); modern يدعو | يدعوا: du'a root دعو; 'invoke' [Quran surface count: 8]",replace,يدعو
+1929,يربوا,sens-d+spelling,Should,يربوا occurs only in 30:39 (riba); the usury verse | يربوا carries the silent alef of the Uthmani singular (30:39); modern يربو [Quran surface count: 1],drop,
+1932,يرجوا,spelling,Should,يرجوا carries the silent alef of the Uthmani singular (18:110 من كان يرجوا لقاء ربه); modern يرجو [Quran surface count: 4],replace,يرجو
+1937,يزال,other,Consider,"يزال occurs only in the auxiliary ولا يزالون / لا يزال (to keep doing), a function verb (A1) [Quran surface count: 3]",keep-note,
+1938,يزجى,spelling,Should,Final ى for ي (Uthmani): modern يزجي [Quran surface count: 2],replace,يزجي
+1940,يستجيب,sens-a,Consider,يستجيب: God answering (42:26); مجيب is excluded [Quran surface count: 2],keep-note,
+1941,يستحى,spelling,Should,Final ى for ي (Uthmani): modern يستحيي / يستحي; 2:26 and 33:53 God does not shy [Quran surface count: 2],replace,يستحيي
+1946,يستنكف,sens-b,Should,يستنكف occurs only in 4:172 (Jesus and the angels do not disdain being servants of God) [Quran surface count: 2],drop,
+1947,يستوى,spelling,Should,Final ى for ي (Uthmani): modern يستوي [Quran surface count: 12],replace,يستوي
+1954,يشاء,sens-a,Should,"يشاء: mostly the formula من يشاء / ما يشاء, God's will, in verse endings such as يغفر لمن يشاء [Quran surface count: 116]",drop,
+1955,يشاقق,sens-f,Should,"يشاقق (4:115; 8:13; 59:4) opposing God and the Messenger, threat of punishment [Quran surface count: 2]",drop,
+1957,يشعرن,near-duplicate,Should,يشعرن is one letter from يشعرون; two forms of one verb (A5) [Quran surface count: 1],drop,
+1959,يشفع,sens-c,Should,يشفع: intercession (2:255; 4:85) [Quran surface count: 3],drop,
+1962,يشوى,spelling,Should,Final ى for ي (Uthmani): modern يشوي; occurs only in 18:29 (hell) [Quran surface count: 1],replace,يشوي
+1965,يصدون,sens-h,Should,يصدون: يصدون عن سبيل الله [Quran surface count: 6],drop,
+1966,يصلى,sens-c,Must,يصلى (87:12; 84:12 يصلى سعيرا) burning in hell; bare spelling is also يصلي 'he prays' (A11) and صلي is excluded | suggested backfill (no semantic link): يخربون [Quran surface count: 3],replace,يخربون
+1967,يصهر,sens-c,Should,يصهر occurs only in 22:20 (melted by hell water) [Quran surface count: 1],drop,
+1970,يضلل,sens-g,Should,"يضلل: من يضلل الله فما له من هاد, God causing to err [Quran surface count: 12]",drop,
+1974,يطعمه,near-duplicate,Consider,يطعمه is يطعم with an attached pronoun (A5) [Quran surface count: 2],drop,
+1975,يطوف,sens-d,Must,يطوف (2:158 أن يطوف بهما Safa and Marwa; 56:17) is the tawaf verb; طواف is excluded | suggested backfill (no semantic link): يصحبون [Quran surface count: 2],replace,يصحبون
+1978,يعبؤا,spelling,Should,يعبؤا is the Uthmani spelling (25:77 قل ما يعبأ بكم ربي); modern يعبأ [Quran surface count: 1],replace,يعبأ
+1982,يعص,sens-f,Must,"يعص: the corpus lemma is عصا (staff) but the uses (4:14; 33:36; 72:23) are ومن يعص الله ورسوله, the disobedience-to-God threat of hell; the glossed meaning is wrong | suggested backfill (no semantic link): يقتروا [Quran surface count: 3]",replace,يقتروا
+1984,يعلم,sens-a,Should,يعلم: mostly الله يعلم / والله يعلم; عليم is excluded [Quran surface count: 71],drop,
+1997,يقدر,sens-g,Should,يقدر: God measuring out provision (يبسط الرزق لمن يشاء ويقدر) [Quran surface count: 4],drop,
+1998,يقرض,sens-h,Should,"يقرض (2:245; 57:11) من ذا الذي يقرض الله قرضا حسنا, the loan to God [Quran surface count: 2]",drop,
+1999,يقطين,sens-b,Should,يقطين occurs only in 37:146 (Yunus under the plant) [Quran surface count: 1],drop,
+2002,يكاد,other,Consider,"يكاد is the auxiliary 'almost' (يكاد البرق يخطف أبصارهم), a function verb (A1) [Quran surface count: 6]",keep-note,
+2004,يلاقوا,sens-c,Should,يلاقوا (43:83; 52:45; 70:42) meeting their Day [Quran surface count: 3],drop,
+2007,يلحدون,sens-f,Should,"يلحدون (7:180, 16:103, 41:40) deviating in His names; modern إلحاد 'atheism' [Quran surface count: 3]",drop,
+2009,يلفظ,sens-c,Should,يلفظ occurs only in 50:18 (the recording angel) [Quran surface count: 1],drop,
+2010,يلق,sens-f,Should,"يلق occurs only in 25:68 (يلق أثاما, punishment in hell); bare form is also jussive of لقي [Quran surface count: 1]",drop,
+2013,يلهث,sens-f,Should,يلهث (7:176 twice): the simile of the dog for the one who denied the signs [Quran surface count: 2],drop,
+2014,يلون,spelling,Must,يلون: the Quran writes يلوون with a small waw (3:78 يلوون ألسنتهم بالكتاب) which the build dropped; modern is يلوون; also scripture distortion; ambiguous with 'they follow' [Quran surface count: 1],replace,يلوون
+2016,يمحوا,spelling,Should,يمحوا is the Uthmani spelling (13:39 يمحو الله ما يشاء); modern يمحو [Quran surface count: 1],replace,يمحو
+2018,يمل,a11-meaning,Should,يمل in modern Arabic is 'he gets bored'; Quranic V 'he dictates' (2:282 يملل) [Quran surface count: 1],drop,
+2021,ينبغى,spelling,Should,Final ى for ي (Uthmani): modern ينبغي [Quran surface count: 6],replace,ينبغي
+2025,ينشؤا,spelling,Should,ينشؤا is the Uthmani spelling (43:18); modern ينشأ [Quran surface count: 1],replace,ينشأ
+2028,ينظرون,a11-meaning,Consider,ينظرون: 'they look' and 'they are given respite' [Quran surface count: 25],keep-note,
+2030,ينفخ,sens-c,Should,"ينفخ: ينفخ في الصور, the trumpet of the Last Day [Quran surface count: 4]",drop,
+2033,ينكح,sens-f,Should,ينكح (24:3 الزاني لا ينكح إلا زانية; 4:22); zina excluded; 'نكح' is also vulgar in colloquial Arabic [Quran surface count: 2],drop,
+2037,يؤاخذ,sens-a,Consider,"يؤاخذ: God holding people to account (يؤاخذكم الله, 2:225; 16:61); found by the neighbour-word check [Quran surface count: 2]",keep-note,
+2038,يوارى,spelling,Should,Final ى for ي (Uthmani): modern يواري; 5:31 and 7:26 concern سوءة [Quran surface count: 2],replace,يواري
+2046,يولج,sens-g,Should,يولج (22:61; 31:29; 35:13; 57:6): God inserting night into day [Quran surface count: 4],drop,
