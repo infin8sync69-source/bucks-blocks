@@ -16,7 +16,7 @@ item under "Open" is closed and the owner gives the go-ahead.
 1. **Mainnet genesis inscription** (ASCII, at most 96 bytes) and the **launch time**, chosen shortly before launch (a dated line or a news headline of the day). Then mine it with `bucks-mine-genesis --network=main --time=<unix time> --inscription="..."`, verify the hash independently (see the Python check in the commit that re-mined testnet), and put the values in `src/chainparams.cpp`.
 2. **Seed nodes**: at least one reachable host per network, added to `ChainParams::seedNodes` (or announced for `--seed`).
 3. **Release checkpoints and `minimumChainWork`** for the first release (both are empty today).
-4. **Final word lists**: scholar review of `ar-quran-draft`, translator review of `en-draft`, then freeze (list id, version, SHA-256) and make the Arabic list the default.
+4. **Final word lists**: scholar review of `ar-quran-draft` (questions and the 137 words kept on purpose, with reasons: `docs/SCHOLAR_REVIEW_PACKET.md`), translator review of `en-draft`, then freeze (list id, version, SHA-256) and make the Arabic list the default.
 5. **External audit** of consensus, wallet and API (internal findings: `reports/audit-2026-10-14/`; scope for an outside firm: `docs/AUDIT_SCOPE.md`).
 6. **Public testnet soak** of several weeks with real peers on more than one machine.
 7. **Legal and regulatory advice** (and a Shariah review if marketed as Islamic), trademark and domain checks.

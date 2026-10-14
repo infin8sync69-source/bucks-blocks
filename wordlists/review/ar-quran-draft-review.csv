@@ -71,14 +71,14 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 69,أركسهم,اركسهم,أَرْكَسَ,V,ركس,2,,overturn
 70,أزا,ازا,أَزّ,N,أزز,1,,incite
 71,أزرى,ازري,أَزْر,N,أزر,1,,vigor
-72,أزفت,ازفت,أَزِفَتِ,V,أزف,1,,approach
+72,أزفت,ازفت,أَزِفَتِ,V,أزف,1,"FOR THE SCHOLAR (c): أزفت is the verb of الآزفة (the Hour drew near, 53:57); last-day term",approach
 73,أزلفت,ازلفت,أُزْلِفَتْ,V,زلف,1,,closer
 74,أزواجا,ازواجا,زَوْج,N,زوج,33,,spouse
 75,أساطير,اساطير,أَساطِير,N,سطر,9,,legends
 76,أساور,اساور,أَساوِر,N,سور,5,,bracelets
 77,أسباطا,اسباطا,أَسْباط,N,سبط,1,,tribes
 78,استبدال,استبدال,اسْتِبْدال,N,بدل,1,,replacement
-79,إستبرق,استبرق,إِسْتَبْرَق,N,,1,,brocade
+79,إستبرق,استبرق,إِسْتَبْرَق,N,,1,"FOR THE SCHOLAR (c): إستبرق is paradise-garment vocabulary (18:31, 44:53, 55:54, 76:21: every Quranic use)",brocade
 80,استحبوا,استحبوا,اسْتَحَبُّ,V,حبب,3,,favor
 81,استحق,استحق,اسْتَحَقَّ,V,حقق,1,,deserve
 82,استحياء,استحياء,اسْتِحْياء,N,حيي,1,,shyness
@@ -152,7 +152,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 150,اغترف,اغترف,اغْتَرَفَ,V,غرف,1,,scoop
 151,أغرقنا,اغرقنا,أُغْرِقُ,V,غرق,12,,drown
 152,أغنى,اغني,أَغْنَى,V,غني,10,,enrich
-153,أغويتنى,اغويتني,أَغْوَيْ,V,غوي,4,,mislead
+153,أغويتنى,اغويتني,أَغْوَيْ,V,غوي,4,FOR THE SCHOLAR (c): أغويتنى is Iblis' accusation to God (7:16; 15:39 رب بما أغويتني); final ى for ي and attached pronoun; excluded Iblis context,mislead
 154,أفاض,افاض,أَفاضَ,V,فيض,1,,overflow
 155,افتدت,افتدت,افْتَدَى,V,فدي,3,,ransom
 156,افتراء,افتراء,افْتِراء,N,فري,2,,forgery
@@ -163,7 +163,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 161,إفك,افك,إِفْك,N,أفك,5,,falsehood
 162,أفنان,افنان,أَفْنان,N,فنن,1,,branches
 163,أفواههم,افواههم,أَفْواه,N,فوه,4,,mouth
-164,أقتت,اقتت,أُقِّتَتْ,V,وقت,1,,appointed
+164,أقتت,اقتت,أُقِّتَتْ,V,وقت,1,FOR THE SCHOLAR (c): أقتت is the time-fixing of the messengers in the Last Day sura al-Mursalat (77:11); eschatological,appointed
 165,اقتتل,اقتتل,اقْتَتَلَ,V,قتل,1,,fight
 166,اقتحم,اقتحم,اقْتَحَمَ,V,قحم,1,,plunge
 167,اقتده,اقتده,اقْتَدِهْ,V,قدو,1,,imitate
@@ -206,7 +206,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 204,إنسيا,انسيا,إِنسِيّ,N,أنس,1,,mortal
 205,أنشأ,انشا,أَنشَأَ,V,نشأ,3,,raise
 206,إنشاء,انشاء,إِنشاء,N,نشأ,1,,origination
-207,أنشره,انشره,أَنشَرَ,V,نشر,3,,revive
+207,أنشره,انشره,أَنشَرَ,V,نشر,3,FOR THE SCHOLAR (c): أنشره is the resurrection verb (80:22 ثم إذا شاء أنشره); نشور and بعث excluded,revive
 208,انشزوا,انشزوا,انشُزُ,V,نشز,2,,rise
 209,انشقت,انشقت,انشَقَّ,V,شقق,2,,split
 210,أنصتوا,انصتوا,أَنصِتُ,V,نصت,2,,silent
@@ -219,14 +219,14 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 217,أنكاثا,انكاثا,أَنكاث,N,نكث,1,,unraveled
 218,أنكالا,انكالا,أَنكال,N,نكل,1,,shackles
 219,أنكحك,انكحك,تُنكِحُ,V,نكح,3,,marry
-220,انكدرت,انكدرت,انكَدَرَتْ,V,كدر,1,,dimmed
+220,انكدرت,انكدرت,انكَدَرَتْ,V,كدر,1,"FOR THE SCHOLAR (c): انكدرت occurs only in 81:2 (إذا النجوم انكدرت), a Takwir last-day sign",dimmed
 221,أنهارا,انهارا,نَهَر,N,نهر,4,,river
 222,آنية,انيه,آنِيَة,N,أني,1,,vessel
 223,اهتدى,اهتدي,اهْتَدَى,V,هدي,11,,guided
 224,أهدى,اهدي,أَهْدَى,N,هدي,6,,wiser
 225,أهواء,اهواء,أَهْواء,N,هوي,3,,whims
 226,أهون,اهون,أَهْوَن,N,هون,1,,easier
-227,أواه,اواه,أَوّاه,N,أوه,1,,tender
+227,أواه,اواه,أَوّاه,N,أوه,1,FOR THE SCHOLAR (b): أواه is the epithet of Ibrahim (9:114، 11:75); also an interjection in Arabic (A11),tender
 228,أوتادا,اوتادا,أَوْتاد,N,وتد,1,,pegs
 229,اؤتمن,اوتمن,اؤْتُمِنَ,V,أمن,1,,entrusted
 230,أوتي,اوتي,آتَى,V,أتي,28,,grant
@@ -270,8 +270,8 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 268,براءة,براءه,بَراءَة,N,برأ,2,,discharge
 269,برادى,برادي,رادِّي,N,ردد,1,,returner
 270,بردا,بردا,بَرْد,N,برد,2,,chill
-271,بررة,برره,بَرّ,N,برر,1,,virtuous
-272,برزخ,برزخ,بَرْزَخ,N,برزخ,3,,barrier
+271,بررة,برره,بَرّ,N,برر,1,"FOR THE SCHOLAR (c): بررة occurs only in 80:16 (كرام بررة), the angelic scribes; with سفرة (825) it forms one angel phrase",virtuous
+272,برزخ,برزخ,بَرْزَخ,N,برزخ,3,FOR THE SCHOLAR (c): برزخ (barzakh) is the intermediate state after death (23:100) as well as the barrier of 55:20; eschatological term,barrier
 273,برزوا,برزوا,بَرَزَ,V,برز,5,,emerge
 274,برق,برق,بَرْق,N,برق,2,,lightning
 275,بركات,بركات,بَرَكَة,N,برك,1,,boon
@@ -296,7 +296,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 294,بطرت,بطرت,بَطِرَتْ,V,بطر,1,,insolent
 295,بطشا,بطشا,بَطْش,N,بطش,3,,seizure
 296,بطن,بطن,بَطَنَ,V,بطن,2,,inner
-297,بعثر,بعثر,بُعْثِرَ,V,بعثر,2,,unearthed
+297,بعثر,بعثر,بُعْثِرَ,V,بعثر,2,"FOR THE SCHOLAR (c): بعثر upheaved: بعثرت القبور (82:4، 100:9), resurrection day; بعث family excluded",unearthed
 298,بعصم,بعصم,عِصَم,N,عصم,1,,bonds
 299,بعوضة,بعوضه,بَعُوضَة,N,بعض,1,,gnat
 300,بعيد,بعيد,بَعِيد,N,بعد,20,,far
@@ -568,7 +568,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 566,حافظات,حافظات,حافِظَة,N,حفظ,1,,guardian
 567,حافظين,حافظين,حافِظ,N,حفظ,7,,keeper
 568,حافين,حافين,حافّ,N,حفف,1,,surrounding
-569,حامية,حاميه,حامِيَة,N,حمي,2,,scalding
+569,حامية,حاميه,حامِيَة,N,حمي,2,FOR THE SCHOLAR (c): حامية is hellfire (88:4 نارا حامية; 101:11 نار حامية) [Quran surface count: 2],scalding
 570,حبطت,حبطت,حَبِطَ,V,حبط,8,,void
 571,حبة,حبه,حَبَّة,N,حبب,5,,kernel
 572,حثيثا,حثيثا,حَثِيث,N,حثث,1,,hastily
@@ -616,9 +616,9 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 614,خاصة,خاصه,خاصَّة,N,خصص,1,,especially
 615,خاضعين,خاضعين,خاضِع,N,خضع,1,,bowing
 616,خاطئة,خاطيه,خاطِئَة,N,خطأ,1,,erring
-617,خافضة,خافضه,خافِضَة,N,خفض,1,,lowering
+617,خافضة,خافضه,خافِضَة,N,خفض,1,"FOR THE SCHOLAR (c): خافضة is from 56:3 (خافضة رافعة), the Event (الواقعة, excluded) sura [Quran surface count: 1]",lowering
 618,خالاتك,خالاتك,خالَة,N,خول,2,,auntie
-619,خالدين,خالدين,خالِد,N,خلد,72,,everlasting
+619,خالدين,خالدين,خالِد,N,خلد,72,FOR THE SCHOLAR (c): خالدين is nearly always خالدين فيها: abiding for ever in hell/paradise; eschatological formula [Quran surface count: 44],everlasting
 620,خالصا,خالصا,خالِص,N,خلص,1,,pure
 621,خالصة,خالصه,خالِصَة,N,خلص,4,,exclusive
 622,خالك,خالك,خال,N,خول,2,,uncle
@@ -640,7 +640,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 638,خردل,خردل,خَرْدَل,N,خردل,2,,mustard
 639,خروج,خروج,خُرُوج,N,خرج,1,,exit
 640,خزائن,خزاين,خَزائِن,N,خزن,7,,treasuries
-641,خزنتها,خزنتها,خَزَنَت,N,خزن,4,,wardens
+641,خزنتها,خزنتها,خَزَنَت,N,خزن,4,"FOR THE SCHOLAR (c): خزنتها (39:71, 39:73, 67:8) are the keepers of hell/paradise, the angelic wardens [Quran surface count: 3]",wardens
 642,خسارا,خسارا,خَسار,N,خسر,3,,forfeit
 643,خسر,خسر,خَسِرَ,V,خسر,6,,bankrupt
 644,خسرانا,خسرانا,خُسْران,N,خسر,1,,damage
@@ -730,11 +730,11 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 728,ردف,ردف,رَدِفَ,V,ردف,1,,tail
 729,ردها,ردها,رَدّ,N,ردد,2,,restitution
 730,رشدا,رشدا,رَشَد,N,رشد,5,,integrity
-731,رضوان,رضوان,رِضْوان,N,رضو,3,,goodwill
+731,رضوان,رضوان,رِضْوان,N,رضو,3,FOR THE SCHOLAR (c): رضوان (3:162; 3:174; 57:27) divine pleasure; Ridwan is also the name of paradise's keeper in tradition and a common name [Quran surface count: 3],goodwill
 732,رطب,رطب,رَطْب,N,رطب,1,,moist
 733,رعوها,رعوها,رَعَ,V,رعي,2,,graze
 734,رغبا,رغبا,رَغَب,N,رغب,1,,yearning
-735,رفرف,رفرف,رَفْرَف,N,رفرف,1,,cushion
+735,رفرف,رفرف,رَفْرَف,N,رفرف,1,FOR THE SCHOLAR (c): رفرف (55:76) is paradise upholstery [Quran surface count: 1],cushion
 736,رفع,رفع,رَفَعَ,V,رفع,8,,lift
 737,رفيقا,رفيقا,رَفِيق,N,رفق,1,,comrade
 738,رقود,رقود,رُقُود,N,رقد,1,,slumbering
@@ -759,25 +759,25 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 757,زاهق,زاهق,زاهِق,N,زهق,1,,perishing
 758,زبد,زبد,زَبَد,N,زبد,2,,foam
 759,زجاجة,زجاجه,زُجاجَة,N,زجج,1,,glass
-760,زجرة,زجره,زَجْرَة,N,زجر,2,,blast
+760,زجرة,زجره,زَجْرَة,N,زجر,2,"FOR THE SCHOLAR (c): زجرة (37:19, 79:13) is the Last Day blast [Quran surface count: 2]",blast
 761,زحزح,زحزح,زُحْزِحَ,V,زحزح,1,,distanced
 762,زحفا,زحفا,زَحْف,N,زحف,1,,marching
 763,زخرف,زخرف,زُخْرُف,N,زخرف,2,,ornament
 764,زرتم,زرتم,زُرْ,V,زور,1,,tour
 765,زرعا,زرعا,زَرْع,N,زرع,4,,crops
 766,زعيم,زعيم,زَعِيم,N,زعم,2,,sponsor
-767,زفير,زفير,زَفِير,N,زفر,2,,sighing
+767,زفير,زفير,زَفِير,N,زفر,2,"FOR THE SCHOLAR (c): زفير (11:106, 25:12) is the sound of the damned in hell [Quran surface count: 2]",sighing
 768,زلزالا,زلزالا,زِلْزال,N,زلزل,1,,earthquake
-769,زلزلت,زلزلت,زُلْزِلُ,V,زلزل,1,,convulsed
-770,زلزلة,زلزله,زَلْزَلَة,N,زلزل,1,,tremor
+769,زلزلت,زلزلت,زُلْزِلُ,V,زلزل,1,"FOR THE SCHOLAR (c): زلزلت occurs in 99:1 (إذا زلزلت الأرض زلزالها), the Last Day sura [Quran surface count: 1]",convulsed
+770,زلزلة,زلزله,زَلْزَلَة,N,زلزل,1,FOR THE SCHOLAR (c): زلزلة occurs in 22:1 (إن زلزلة الساعة شيء عظيم); الساعة is excluded [Quran surface count: 1],tremor
 771,زلفى,زلفي,زُلْفَى,N,زلف,2,,proximity
 772,زلقا,زلقا,زَلَق,N,زلق,1,,slippery
-773,زمرا,زمرا,زُمَر,N,زمر,2,,throngs
-774,زمهريرا,زمهريرا,زَمْهَرِير,N,زمهر,1,,frost
+773,زمرا,زمرا,زُمَر,N,زمر,2,"FOR THE SCHOLAR (c): زمرا occurs only in 39:71,73 (hell and paradise groups) [Quran surface count: 2]",throngs
+774,زمهريرا,زمهريرا,زَمْهَرِير,N,زمهر,1,"FOR THE SCHOLAR (c): زمهريرا (76:13) is bitter cold, hell in tradition [Quran surface count: 1]",frost
 775,زنجبيلا,زنجبيلا,زَنجَبِيل,N,,1,,ginger
 776,زهوقا,زهوقا,زَهُوق,N,زهق,1,,transient
 777,زوال,زوال,زَوال,N,زول,1,,decline
-778,زوجت,زوجت,زُوِّجَتْ,V,زوج,1,,paired
+778,زوجت,زوجت,زُوِّجَتْ,V,زوج,1,"FOR THE SCHOLAR (c): زوجت occurs in 81:7 (وإذا النفوس زوجت), the Takwir last-day verse; also modern 'I married' [Quran surface count: 1]",paired
 779,زيادة,زياده,زِيادَة,N,زيد,1,,addition
 780,زيتها,زيتها,زَيْت,N,زيت,1,,oil
 781,زيتونة,زيتونه,زَيْتُونَة,N,زيت,1,,olive
@@ -813,14 +813,14 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 811,سرابا,سرابا,سَراب,N,سرب,1,,mirage
 812,سرابيل,سرابيل,سَرابِيل,N,سربل,1,,garments
 813,سراجا,سراجا,سِراج,N,سرج,3,,lamp
-814,سراعا,سراعا,سِراع,N,سرع,2,,hurrying
+814,سراعا,سراعا,سِراع,N,سرع,2,"FOR THE SCHOLAR (c): سراعا is in the same one-letter cluster as سرابا, سراجا, سراحا, ترابا, غرابا, سحابا",hurrying
 815,سرحوهن,سرحوهن,سَرِّحُ,V,سرح,3,,dismiss
-816,سرر,سرر,سُرُر,N,سرر,5,,divans
+816,سرر,سرر,سُرُر,N,سرر,5,FOR THE SCHOLAR (c): سرر: couches of paradise (every use) [Quran surface count: 5],divans
 817,سرمدا,سرمدا,سَرْمَد,N,سرمد,2,,unending
 818,سريع,سريع,سَرِيع,N,سرع,9,,rapid
 819,سطحت,سطحت,سُطِحَتْ,V,سطح,1,,flattened
 820,سفاهة,سفاهه,سَفاهَة,N,سفه,2,,foolishness
-821,سفرة,سفره,سَفَرَة,N,سفر,1,,scribes
+821,سفرة,سفره,سَفَرَة,N,سفر,1,"FOR THE SCHOLAR (c): سفرة occurs only in 80:15, the angelic scribes [Quran surface count: 1]",scribes
 822,سفها,سفها,سَفَه,N,سفه,1,,folly
 823,سفينة,سفينه,سَفِينَة,N,سفن,1,,ship
 824,سفيها,سفيها,سَفِيه,N,سفه,1,,reckless
@@ -844,7 +844,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 842,سميا,سميا,سَمِيّ,N,سمو,2,,namesake
 843,سنبلات,سنبلات,سُنبُلَة,N,سنبل,4,,spike
 844,سنبله,سنبله,سُنبُل,N,سنبل,1,,spikelet
-845,سندس,سندس,سُندُس,N,,3,,silk
+845,سندس,سندس,سُندُس,N,,3,"FOR THE SCHOLAR (c): سندس is the paradise silk (18:31, 44:53, 76:21 only) [Quran surface count: 3]",silk
 846,سنسمه,سنسمه,نَسِمُ,V,وسم,1,,stigmatize
 847,سنقتل,سنقتل,قُتِّلُ,V,قتل,4,,massacre
 848,سواء,سواء,سَواء,N,سوي,26,,alike
@@ -852,11 +852,11 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 850,سوقه,سوقه,سُوق,N,سوق,2,,stalk
 851,سولت,سولت,سَوَّلَ,V,سول,4,,beguile
 852,سيارة,سياره,سَيّارَة,N,سير,1,,caravan
-853,سيرت,سيرت,سُيِّرَتْ,V,سير,3,,propelled
+853,سيرت,سيرت,سُيِّرَتْ,V,سير,3,"FOR THE SCHOLAR (c): سيرت (78:20, 81:3) the mountains set moving on the Last Day [Quran surface count: 2]",propelled
 854,سيهزم,سيهزم,هَزَمُ,V,هزم,2,,rout
 855,شاخصة,شاخصه,شاخِصَة,N,شخص,1,,fixed
 856,شاعر,شاعر,شاعِر,N,شعر,3,,poet
-857,شافعين,شافعين,شافِع,N,شفع,1,,intercessor
+857,شافعين,شافعين,شافِع,N,شفع,1,FOR THE SCHOLAR (c): شافعين (26:100) intercession (Last Day) [Quran surface count: 1],intercessor
 858,شامخات,شامخات,شامِخَة,N,شمخ,1,,high
 859,شأن,شان,شَأْن,N,شأن,3,,concern
 860,شانئك,شانيك,شانِئ,N,شنأ,1,,hater
@@ -874,16 +874,16 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 872,شغفها,شغفها,شَغَفَ,V,شغف,1,,infatuate
 873,شغل,شغل,شُغُل,N,شغل,1,,occupation
 874,شفا,شفا,شَفا,N,شفو,2,,brink
-875,شفاعة,شفاعه,شَفاعَة,N,شفع,6,,intercession
-876,شفيع,شفيع,شَفِيع,N,شفع,8,,mediator
+875,شفاعة,شفاعه,شَفاعَة,N,شفع,6,FOR THE SCHOLAR (c): شفاعة is intercession on the Day of Judgement [Quran surface count: 6],intercession
+876,شفيع,شفيع,شَفِيع,N,شفع,8,FOR THE SCHOLAR (c): شفيع is the intercessor of the Last Day [Quran surface count: 5],mediator
 877,شقاق,شقاق,شِقاق,N,شقق,5,,dissension
 878,شكرا,شكرا,شُكْر,N,شكر,1,,gratitude
 879,شكله,شكله,شَكْل,N,شكل,1,,kind
 880,شمسا,شمسا,شَمْس,N,شمس,1,,sun
 881,شهادة,شهاده,شَهادَة,N,شهد,7,,testimony
 882,شهوة,شهوه,شَهْوَة,N,شهو,2,,appetite
-883,شهيقا,شهيقا,شَهِيق,N,شهق,1,,gasping
-884,شواظ,شواظ,شُواظ,N,شوظ,1,,flame
+883,شهيقا,شهيقا,شَهِيق,N,شهق,1,FOR THE SCHOLAR (c): شهيقا (67:7) the sound of the damned in hell (with زفير in 11:106) [Quran surface count: 1],gasping
+884,شواظ,شواظ,شُواظ,N,شوظ,1,FOR THE SCHOLAR (c): شواظ (55:35) is hellfire flame [Quran surface count: 1],flame
 885,شورى,شوري,شُورَى,N,شور,1,,consultation
 886,شيعا,شيعا,شِيعَة,N,شيع,6,,sects
 887,صابرا,صابرا,صابِر,N,صبر,3,,patient
@@ -904,8 +904,8 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 902,صدودا,صدودا,صُدُود,N,صدد,1,,revulsion
 903,صدور,صدور,صَدْر,N,صدر,5,,chest
 904,صديق,صديق,صَدِيق,N,صدق,1,,friend
-905,صديقا,صديقا,صِدِّيق,N,صدق,2,,sincere
-906,صديقة,صديقه,صِدِّيقَة,N,صدق,1,,candid
+905,صديقا,صديقا,صِدِّيق,N,صدق,2,"FOR THE SCHOLAR (b): صديقا: epithet of prophets Ibrahim, Idris (19:41, 19:56); siddiq [Quran surface count: 2]",sincere
+906,صديقة,صديقه,صِدِّيقَة,N,صدق,1,FOR THE SCHOLAR (b): صديقة: epithet of Mary (5:75) [Quran surface count: 1],candid
 907,صرصرا,صرصرا,صَرْصَر,N,صرصر,3,,howling
 908,صرفا,صرفا,صَرْف,N,صرف,1,,deflection
 909,صريخ,صريخ,صَرِيخ,N,صرخ,1,,crier
@@ -920,7 +920,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 918,صفراء,صفراء,صَفْراء,N,صفر,1,,golden
 919,صفصفا,صفصفا,صَفْصَف,N,صفصف,1,,plain
 920,صفوان,صفوان,صَفْوان,N,صفو,1,,slab
-921,صلبوه,صلبوه,صَلَبُ,V,صلب,2,,crucify
+921,صلبوه,صلبوه,صَلَبُ,V,صلب,2,FOR THE SCHOLAR (b): صلبوه (4:157) is the crucifixion of Jesus; doctrinally sensitive [Quran surface count: 1],crucify
 922,صلح,صلح,صَلَحَ,V,صلح,2,,fitting
 923,صلدا,صلدا,صَلْد,N,صلد,1,,bald
 924,صلصال,صلصال,صَلْصال,N,صلصل,4,,clay
@@ -987,7 +987,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 985,عاقرا,عاقرا,عاقِر,N,عقر,3,,infertile
 986,عالم,عالم,عالِم,N,علم,15,,scholar
 987,عاليا,عاليا,عالِي,N,علو,1,,elevated
-988,عاملة,عامله,عامِلَة,N,عمل,1,,laboring
+988,عاملة,عامله,عامِلَة,N,عمل,1,"FOR THE SCHOLAR (c): عاملة occurs only in 88:3 (عاملة ناصبة), where ناصبة is excluded [Quran surface count: 1]",laboring
 989,عائدون,عايدون,عائِد,N,عود,1,,homecoming
 990,عائلا,عايلا,عائِل,N,عيل,1,,needy
 991,عباد,عباد,عَبْد,N,عبد,24,,retainer
@@ -1045,7 +1045,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1043,غثاء,غثاء,غُثاء,N,غثو,2,,froth
 1044,غدوت,غدوت,غَدَ,V,غدو,3,,forenoon
 1045,غرابا,غرابا,غُراب,N,غرب,1,,raven
-1046,غراما,غراما,غَرام,N,غرم,1,,affliction
+1046,غراما,غراما,غَرام,N,غرم,1,FOR THE SCHOLAR (c): غراما is the punishment of hell (25:65); modern 'passion / gram' (A11) [Quran surface count: 1],affliction
 1047,غربية,غربيه,غَرْبِيَّة,N,غرب,1,,western
 1048,غرف,غرف,غُرْفَة,N,غرف,4,,chamber
 1049,غرقا,غرقا,غَرْق,N,غرق,1,,plunging
@@ -1065,7 +1065,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1063,غمرة,غمره,غَمْرَة,N,غمر,2,,flood
 1064,غنم,غنم,غَنَم,N,غنم,1,,sheep
 1065,غنمتم,غنمتم,غَنِمْ,V,غنم,2,,acquire
-1066,غواش,غواش,غاشِيَة,N,غشو,2,,overwhelming
+1066,غواش,غواش,غاشِيَة,N,غشو,2,FOR THE SCHOLAR (c): غواش (7:41) is the covering of hellfire above the damned [Quran surface count: 1],overwhelming
 1067,غورا,غورا,غَوْر,N,غور,2,,sunken
 1068,غوى,غوي,غَوَى,V,غوي,1,,misstep
 1069,غيابت,غيابت,غَيابَت,N,غيب,2,,bottom
@@ -1084,11 +1084,11 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1082,فاصفح,فاصفح,يَصْفَحُ,V,صفح,5,,overlook
 1083,فاعلين,فاعلين,فاعِل,N,فعل,8,,doer
 1084,فأغرينا,فاغرينا,أَغْرَيْ,V,غرو,2,,instigate
-1085,فاقرة,فاقره,فاقِرَة,N,فقر,1,,calamity
+1085,فاقرة,فاقره,فاقِرَة,N,فقر,1,FOR THE SCHOLAR (c): فاقرة (75:25) is a calamity of the Last Day sura (القيامة) [Quran surface count: 1],calamity
 1086,فاقع,فاقع,فاقِع,N,فقع,1,,vivid
 1087,فأكثرت,فاكثرت,أَكْثَرُ,V,كثر,2,,abound
 1088,فاكهة,فاكهه,فاكِهَة,N,فكه,6,,delicacy
-1089,فاكهين,فاكهين,فاكِه,N,فكه,3,,merry
+1089,فاكهين,فاكهين,فاكِه,N,فكه,3,"FOR THE SCHOLAR (c): فاكهين (44:27; 52:18): delighted, said of the people of paradise [Quran surface count: 2]",merry
 1090,فالتقى,فالتقي,الْتَقَى,V,لقي,2,,converge
 1091,فأمكن,فامكن,أَمْكَنَ,V,مكن,1,,afford
 1092,فأنساهم,فانساهم,أَنسَى,V,نسي,7,,obliterate
@@ -1136,7 +1136,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1134,فشرد,فشرد,شَرِّدْ,V,شرد,1,,stampede
 1135,فصالا,فصالا,فِصال,N,فصل,1,,weaning
 1136,فصرهن,فصرهن,صُرْ,V,صور,1,,chop
-1137,فصعق,فصعق,صَعِقَ,V,صعق,2,,stupefied
+1137,فصعق,فصعق,صَعِقَ,V,صعق,2,FOR THE SCHOLAR (c): فصعق is the trumpet blast of the Last Day (39:68) [Quran surface count: 1],stupefied
 1138,فصكت,فصكت,صَكَّتْ,V,صكك,1,,slap
 1139,فضة,فضه,فِضَّة,N,فضض,4,,silver
 1140,فطل,فطل,طَلّ,N,طلل,1,,drizzle
@@ -1145,7 +1145,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1143,فعقروها,فعقروها,عَقَرَ,V,عقر,5,,hamstring
 1144,فعلتك,فعلتك,فَعْلَت,N,فعل,1,,deed
 1145,فعميت,فعميت,عُمِّيَتْ,V,عمي,1,,obscure
-1146,ففزع,ففزع,فَزِعَ,V,فزع,3,,panic
+1146,ففزع,ففزع,فَزِعَ,V,فزع,3,FOR THE SCHOLAR (c): ففزع is the trumpet terror of the Last Day (27:87) [Quran surface count: 2],panic
 1147,فقير,فقير,فَقِير,N,فقر,5,,destitute
 1148,فكر,فكر,فَكَّرَ,V,فكر,1,,mull
 1149,فكهين,فكهين,فَكِه,N,فكه,1,,cheerful
@@ -1164,7 +1164,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1162,فينتقم,فينتقم,انتَقَمْ,V,نقم,2,,avenge
 1163,قاسية,قاسيه,قاسِيَة,N,قسو,1,,hardened
 1164,قاصدا,قاصدا,قاصِد,N,قصد,1,,moderate
-1165,قاصرات,قاصرات,قاصِرَة,N,قصر,3,,modest
+1165,قاصرات,قاصرات,قاصِرَة,N,قصر,3,"FOR THE SCHOLAR (c): قاصرات is the houris (قاصرات الطرف, 37:48; 38:52; 55:56) [Quran surface count: 3]",modest
 1166,قاصفا,قاصفا,قاصِف,N,قصف,1,,squall
 1167,قاض,قاض,قاض,N,قضي,1,,judge
 1168,قاطعة,قاطعه,قاطِعَة,N,قطع,1,,decisive
@@ -1189,7 +1189,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1187,قرضا,قرضا,قَرْض,N,قرض,6,,loan
 1188,قرطاس,قرطاس,قِرْطاس,N,قرطس,2,,document
 1189,قروء,قروء,قُرُوء,N,قرأ,1,,cycles
-1190,قرين,قرين,قَرِين,N,قرن,5,,associate
+1190,قرين,قرين,قَرِين,N,قرن,5,FOR THE SCHOLAR (c): قرين (43:36 a devil assigned as companion; 37:51) the jinn/devil companion [Quran surface count: 2],associate
 1191,قست,قست,قَسَتْ,V,قسو,2,,harden
 1192,قسمنا,قسمنا,قَسَمْ,V,قسم,2,,apportion
 1193,قسمة,قسمه,قِسْمَة,N,قسم,2,,distribution
@@ -1200,7 +1200,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1198,قصورا,قصورا,قَصْر,N,قصر,2,,castle
 1199,قضى,قضي,قَضَى,V,قضي,25,,decide
 1200,قطرا,قطرا,قِطْر,N,قطر,1,,copper
-1201,قطران,قطران,قَطِران,N,قطر,1,,tar
+1201,قطران,قطران,قَطِران,N,قطر,1,FOR THE SCHOLAR (c): قطران (14:50) is the tar garments of hell [Quran surface count: 1],tar
 1202,قطعت,قطعت,قَطَّعَ,V,قطع,3,,sever
 1203,قطمير,قطمير,قِطْمِير,N,قطمر,1,,membrane
 1204,قطوفها,قطوفها,قُطُوف,N,قطف,2,,pickings
@@ -1224,12 +1224,12 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1222,كاذبين,كاذبين,كاذِب,N,كذب,10,,liar
 1223,كارهون,كارهون,كارِه,N,كره,6,,averse
 1224,كأسا,كاسا,كَأْس,N,كأس,3,,chalice
-1225,كاشفة,كاشفه,كاشِفَة,N,كشف,2,,unveiler
+1225,كاشفة,كاشفه,كاشِفَة,N,كشف,2,FOR THE SCHOLAR (c): كاشفة (53:58) the Hour has none to remove it besides God [Quran surface count: 1],unveiler
 1226,كاظمين,كاظمين,كاظِم,N,كظم,1,,suppressing
 1227,كافة,كافه,كافَّة,N,كفف,5,,entirely
-1228,كالحون,كالحون,كالِح,N,كلح,1,,glowering
+1228,كالحون,كالحون,كالِح,N,كلح,1,FOR THE SCHOLAR (c): كالحون (23:104) the disfigured faces of the damned [Quran surface count: 1],glowering
 1229,كالعهن,كالعهن,عِهْن,N,عهن,2,,wool
-1230,كالمهل,كالمهل,مُهْل,N,مهل,3,,molten
+1230,كالمهل,كالمهل,مُهْل,N,مهل,3,FOR THE SCHOLAR (c): كالمهل: molten brass of hell (18:29; 44:45; 70:8); attached ك and ال [Quran surface count: 3],molten
 1231,كاملة,كامله,كامِلَة,N,كمل,2,,full
 1232,كاملين,كاملين,كامِلَيْن,N,كمل,1,,entire
 1233,كبارا,كبارا,كُبّار,N,كبر,1,,enormous
@@ -1248,7 +1248,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1246,كسبت,كسبت,كَسَبَ,V,كسب,24,,gain
 1247,كسفا,كسفا,كِسَف,N,كسف,4,,chunks
 1248,كسوتهم,كسوتهم,كِسْوَت,N,كسو,2,,attire
-1249,كشطت,كشطت,كُشِطَتْ,V,كشط,1,,stripped
+1249,كشطت,كشطت,كُشِطَتْ,V,كشط,1,FOR THE SCHOLAR (c): كشطت (81:11) is a Takwir last-day verse [Quran surface count: 1],stripped
 1250,كشف,كشف,كَشَفَ,V,كشف,3,,uncover
 1251,كصيب,كصيب,صَيِّب,N,صوب,1,,downpour
 1252,كطى,كطي,طَىّ,N,طوي,1,,folding
@@ -1266,10 +1266,10 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1264,كهفهم,كهفهم,كَهْف,N,كهف,2,,cave
 1265,كوكبا,كوكبا,كَوْكَب,N,كوكب,3,,planet
 1266,كيل,كيل,كَيْل,N,كيل,3,,bushel
-1267,لابثين,لابثين,لابِث,N,لبث,1,,abiding
+1267,لابثين,لابثين,لابِث,N,لبث,1,"FOR THE SCHOLAR (c): لابثين occurs only in 78:23 (لابثين فيها أحقابا), hell [Quran surface count: 1]",abiding
 1268,لازب,لازب,لازِب,N,لزب,1,,sticky
 1269,لاعبين,لاعبين,لاعِب,N,لعب,2,,player
-1270,لاغية,لاغيه,لاغِيَة,N,لغو,1,,idle
+1270,لاغية,لاغيه,لاغِيَة,N,لغو,1,FOR THE SCHOLAR (c): لاغية (88:11) is the paradise description [Quran surface count: 1],idle
 1271,لاقيه,لاقيه,لاقِي,N,لقي,1,,confronting
 1272,لآكلون,لاكلون,آكِل,N,أكل,3,,eaters
 1273,لاهية,لاهيه,لاهِيَة,N,لهو,1,,diverted
@@ -1295,7 +1295,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1293,لفتاه,لفتاه,فَتَى,N,فتي,3,,youth
 1294,لفسدت,لفسدت,فَسَدَتِ,V,فسد,3,,rot
 1295,لفيفا,لفيفا,لَفِيف,N,لفف,1,,motley
-1296,لقاء,لقاء,لِقاء,N,لقي,8,,encounter
+1296,لقاء,لقاء,لِقاء,N,لقي,8,"FOR THE SCHOLAR (c): لقاء: لقاء ربهم / لقاء الله / لقاء الآخرة, meeting God on the Last Day [Quran surface count: 8]",encounter
 1297,لكنود,لكنود,كَنُود,N,كند,1,,ungrateful
 1298,للأذقان,للاذقان,أَذْقان,N,ذقن,2,,chins
 1299,للسحت,للسحت,سُحْت,N,سحت,1,,illicit
@@ -1310,8 +1310,8 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1308,ليقطع,ليقطع,قُطِعَ,V,قطع,12,,cut
 1309,لينا,لينا,لَيِّن,N,لين,1,,supple
 1310,مأتيا,ماتيا,مَأْتِيّ,N,أتي,1,,approached
-1311,مارج,مارج,مارِج,N,مرج,1,,fire
-1312,ماكثين,ماكثين,ماكِث,N,مكث,2,,staying
+1311,مارج,مارج,مارِج,N,مرج,1,FOR THE SCHOLAR (c): مارج (55:15) is the jinn's fire; jinn excluded [Quran surface count: 1],fire
+1312,ماكثين,ماكثين,ماكِث,N,مكث,2,FOR THE SCHOLAR (c): ماكثين (18:3): abiding for ever in paradise; 43:77 has the hell counterpart ماكثون [Quran surface count: 1],staying
 1313,مأكول,ماكول,مَأْكُول,N,أكل,1,,devoured
 1314,مالا,مالا,مال,N,مول,20,,wealth
 1315,مأمنه,مامنه,مَأْمَن,N,أمن,1,,stronghold
@@ -1331,7 +1331,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1329,مبصرة,مبصره,مُبْصِرَة,N,بصر,3,,visible
 1330,مبطلون,مبطلون,مُبْطِل,N,بطل,1,,falsifier
 1331,مبعدون,مبعدون,مُبْعَد,N,بعد,1,,banished
-1332,مبلسون,مبلسون,مُبْلِس,N,بلس,3,,forlorn
+1332,مبلسون,مبلسون,مُبْلِس,N,بلس,3,"FOR THE SCHOLAR (c): مبلسون (6:44; 23:77; 43:75) the despairing, the root of إبليس (excluded) [Quran surface count: 3]",forlorn
 1333,مبنية,مبنيه,مَبْنِيَّة,N,بني,1,,built
 1334,مبوأ,مبوا,مُبَوَّأ,N,بوأ,1,,habitation
 1335,مبينة,مبينه,مُبَيِّنَة,N,بين,6,,explicit
@@ -1353,14 +1353,14 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1351,متعنا,متعنا,مَتَّعْ,V,متع,16,,indulge
 1352,متفرقة,متفرقه,مُتَفَرِّقَة,N,فرق,1,,dispersed
 1353,متفرقون,متفرقون,مُتَفَرِّق,N,فرق,1,,varied
-1354,مثابة,مثابه,مَثابَة,N,ثوب,1,,resort
+1354,مثابة,مثابه,مَثابَة,N,ثوب,1,FOR THE SCHOLAR (b): مثابة occurs only in 2:125 (the Ka'ba as a resort); holy place [Quran surface count: 1],resort
 1355,مثبورا,مثبورا,مَثْبُور,N,ثبر,1,,undone
 1356,مثقال,مثقال,مِثْقال,N,ثقل,8,,weight
 1357,مثقلة,مثقله,مُثْقَلَة,N,ثقل,1,,laden
 1358,مثقلون,مثقلون,مُثْقَل,N,ثقل,2,,encumbered
 1359,مثل,مثل,مَثَل,N,مثل,42,,parable
 1360,مثوبة,مثوبه,مَثُوبَة,N,ثوب,1,,requital
-1361,مثوى,مثوي,مَثْوًى,N,ثوي,9,,lodging
+1361,مثوى,مثوي,مَثْوًى,N,ثوي,9,FOR THE SCHOLAR (c): مثوى: mostly the abode in hell (النار مثواكم) [Quran surface count: 9],lodging
 1362,مجتمعون,مجتمعون,مُجْتَمِع,N,جمع,1,,assembled
 1363,مجذوذ,مجذوذ,مَجْذُوذ,N,جذذ,1,,clipped
 1364,مجموع,مجموع,مَجْمُوع,N,جمع,1,,collected
@@ -1373,9 +1373,9 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1371,محسورا,محسورا,مَحْسُور,N,حسر,1,,exhausted
 1372,محشورة,محشوره,مَحْشُورَة,N,حشر,1,,mustered
 1373,محصنة,محصنه,مُحَصَّنَة,N,حصن,1,,fortified
-1374,محضرون,محضرون,مُحْضَر,N,حضر,6,,brought
+1374,محضرون,محضرون,مُحْضَر,N,حضر,6,FOR THE SCHOLAR (c): محضرون: mostly those brought to the punishment/Reckoning [Quran surface count: 5],brought
 1375,محله,محله,مَحِلّ,N,حلل,3,,locale
-1376,محمودا,محمودا,مَحْمُود,N,حمد,1,,commendable
+1376,محمودا,محمودا,مَحْمُود,N,حمد,1,FOR THE SCHOLAR (b): محمودا: 17:79 مقاما محمودا (the Prophet's station); from the root of excluded محمد/احمد [Quran surface count: 1],commendable
 1377,محيص,محيص,مَحِيص,N,حيص,5,,loophole
 1378,مختال,مختال,مُخْتال,N,خيل,3,,conceited
 1379,مختلف,مختلف,مُخْتَلِف,N,خلف,10,,diverging
@@ -1384,14 +1384,14 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1382,مخرجا,مخرجا,مَخْرَج,N,خرج,1,,outlet
 1383,مخزى,مخزي,مُخْزِي,N,خزي,1,,shaming
 1384,مخضرة,مخضره,مُخْضَرَّة,N,خضر,1,,verdant
-1385,مخضود,مخضود,مَخْضُود,N,خضد,1,,thornless
-1386,مخلدون,مخلدون,مُخَلَّد,N,خلد,2,,immortal
+1385,مخضود,مخضود,مَخْضُود,N,خضد,1,FOR THE SCHOLAR (c): مخضود (56:28) paradise [Quran surface count: 1],thornless
+1386,مخلدون,مخلدون,مُخَلَّد,N,خلد,2,FOR THE SCHOLAR (c): مخلدون (56:17; 76:19) the immortal youths of paradise [Quran surface count: 2],immortal
 1387,مخلقة,مخلقه,مُخَلَّقَة,N,خلق,2,,formed
 1388,مخمصة,مخمصه,مَخْمَصَة,N,خمص,2,,famine
 1389,مدادا,مدادا,مِداد,N,مدد,1,,ink
 1390,مدبرين,مدبرين,مُدْبِر,N,دبر,8,,fleeing
 1391,مدتهم,مدتهم,مُدَّت,N,مدد,1,,duration
-1392,مدحورا,مدحورا,مَدْحُور,N,دحر,3,,expelled
+1392,مدحورا,مدحورا,مَدْحُور,N,دحر,3,"FOR THE SCHOLAR (c): مدحورا (7:18; 17:18, 39): Iblis' expulsion, hell [Quran surface count: 3]",expelled
 1393,مدخلا,مدخلا,مُدْخَل,N,دخل,3,,entrance
 1394,مدرارا,مدرارا,مِدْرار,N,درر,3,,copious
 1395,مدهنون,مدهنون,مُدْهِن,N,دهن,1,,appeaser
@@ -1404,16 +1404,16 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1402,مرتاب,مرتاب,مُرْتاب,N,ريب,1,,skeptical
 1403,مرتفقا,مرتفقا,مُرْتَفَق,N,رفق,2,,rest
 1404,مرتقبون,مرتقبون,مُرْتَقِب,N,رقب,1,,expectant
-1405,مرجعكم,مرجعكم,مَرْجِع,N,رجع,16,,destination
+1405,مرجعكم,مرجعكم,مَرْجِع,N,رجع,16,"FOR THE SCHOLAR (c): مرجعكم: إلى الله مرجعكم / إلى ربكم مرجعكم, return to God [Quran surface count: 11]",destination
 1406,مرجوا,مرجوا,مَرْجُوّ,N,رجو,1,,anticipated
 1407,مرجون,مرجون,مُرْجَوْن,N,رجو,1,,deferred
 1408,مرحبا,مرحبا,مَرْحَب,N,رحب,2,,welcome
-1409,مردفين,مردفين,مُرْدِف,N,ردف,1,,successive
+1409,مردفين,مردفين,مُرْدِف,N,ردف,1,FOR THE SCHOLAR (b): مردفين (8:9) is the thousand angels at Badr; Badr excluded [Quran surface count: 1],successive
 1410,مردوا,مردوا,مَرَدُ,V,مرد,1,,habituated
 1411,مردود,مردود,مَرْدُود,N,ردد,1,,rejected
-1412,مرساها,مرساها,مُرْسَى,N,رسو,3,,anchorage
+1412,مرساها,مرساها,مُرْسَى,N,رسو,3,FOR THE SCHOLAR (c): مرساها (7:187; 79:42) are the questions about the Hour; الساعة excluded [Quran surface count: 2],anchorage
 1413,مرشدا,مرشدا,مُرْشِد,N,رشد,1,,mentor
-1414,مرصادا,مرصادا,مِرْصاد,N,رصد,1,,ambush
+1414,مرصادا,مرصادا,مِرْصاد,N,رصد,1,FOR THE SCHOLAR (c): مرصادا occurs only in 78:21 (إن جهنم كانت مرصادا) [Quran surface count: 1],ambush
 1415,مرصد,مرصد,مَرْصَد,N,رصد,1,,lookout
 1416,مرصوص,مرصوص,مَرْصُوص,N,رصص,1,,compact
 1417,مرض,مرض,مَرَض,N,مرض,13,,illness
@@ -1422,14 +1422,14 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1420,مرضية,مرضيه,مَرْضِيَّة,N,رضو,1,,gratified
 1421,مرفقا,مرفقا,مِرْفَق,N,رفق,1,,comfort
 1422,مرفوعة,مرفوعه,مَرْفُوعَة,N,رفع,3,,exalted
-1423,مرقوم,مرقوم,مَرْقُوم,N,رقم,2,,inscribed
+1423,مرقوم,مرقوم,مَرْقُوم,N,رقم,2,"FOR THE SCHOLAR (c): مرقوم (83:9,20) the record of deeds (كتاب مرقوم) [Quran surface count: 2]",inscribed
 1424,مركوم,مركوم,مَرْكُوم,N,ركم,1,,piled
 1425,مريب,مريب,مُرِيب,N,ريب,7,,dubious
 1426,مزاجها,مزاجها,مِزاج,N,مزج,3,,blend
 1427,مزجاة,مزجاه,مُزْجاة,N,زجو,1,,paltry
 1428,مزدجر,مزدجر,مُزْدَجَر,N,زجر,1,,warning
 1429,مزقتم,مزقتم,مُزِّقْ,V,مزق,1,,tattered
-1430,مزيد,مزيد,مَزِيد,N,زيد,2,,additional
+1430,مزيد,مزيد,مَزِيد,N,زيد,2,"FOR THE SCHOLAR (c): مزيد: 50:30, 50:35 the dialogue of hell/paradise (هل من مزيد) [Quran surface count: 2]",additional
 1431,مساس,مساس,مِساس,N,مسس,1,,contact
 1432,مساكن,مساكن,مَسْكَن,N,سكن,1,,residence
 1433,مستبشرة,مستبشره,مُسْتَبْشِرَة,N,بشر,1,,rejoicing
@@ -1444,7 +1444,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1442,مستنفرة,مستنفره,مُسْتَنفِرَة,N,نفر,1,,alarmed
 1443,مستورا,مستورا,مَسْتُور,N,ستر,1,,screened
 1444,مسحا,مسحا,مَسْح,N,مسح,1,,stroking
-1445,مسحورا,مسحورا,مَسْحُور,N,سحر,4,,enchanted
+1445,مسحورا,مسحورا,مَسْحُور,N,سحر,4,"FOR THE SCHOLAR (b): مسحورا belongs to the cluster مستورا, مسحورا, مسرورا, مسطورا, محسورا",enchanted
 1446,مسخرات,مسخرات,مُسَخَّرَة,N,سخر,3,,subjected
 1447,مسرف,مسرف,مُسْرِف,N,سرف,5,,prodigal
 1448,مسرورا,مسرورا,مَسْرُور,N,سرر,2,,pleased
@@ -1458,7 +1458,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1456,مسندة,مسنده,مُسَنَّدَة,N,سند,1,,propped
 1457,مسنون,مسنون,مَسْنُون,N,سنن,3,,molded
 1458,مسومة,مسومه,مُسَوَّمَة,N,سوم,2,,branded
-1459,مسومين,مسومين,مُسَوِّم,N,سوم,1,,insignia
+1459,مسومين,مسومين,مُسَوِّم,N,سوم,1,FOR THE SCHOLAR (b): مسومين (3:125) are the five thousand angels at Badr; attached [Quran surface count: 1],insignia
 1460,مشارق,مشارق,مَشْرِق,N,شرق,1,,east
 1461,مشتبها,مشتبها,مُشْتَبِه,N,شبه,1,,resembling
 1462,مشربهم,مشربهم,مَشْرَب,N,شرب,3,,watering
@@ -1488,8 +1488,8 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1486,مطلعون,مطلعون,مُطَّلِع,N,طلع,1,,overlooking
 1487,مطمئن,مطمين,مُطْمَئِنّ,N,طمأن,2,,reassured
 1488,مطمئنة,مطمينه,مُطْمَئِنَّة,N,طمأن,1,,peaceful
-1489,مطهرة,مطهره,مُطَهَّرَة,N,طهر,5,,cleansed
-1490,مطويات,مطويات,مَطْوِيَّة,N,طوي,1,,rolled
+1489,مطهرة,مطهره,مُطَهَّرَة,N,طهر,5,FOR THE SCHOLAR (c): مطهرة: purified spouses of paradise (2:25; 3:15; 4:57); 80:14 and 98:2 the pure scrolls [Quran surface count: 5],cleansed
+1490,مطويات,مطويات,مَطْوِيَّة,N,طوي,1,FOR THE SCHOLAR (c): مطويات (39:67) the heavens rolled up in His right hand on the Last Day [Quran surface count: 1],rolled
 1491,معاجزين,معاجزين,مُعاجِز,N,عجز,3,,thwarting
 1492,معاشا,معاشا,مَعاش,N,عيش,1,,subsistence
 1493,معايش,معايش,مَعايِش,N,عيش,2,,sustenance
@@ -1506,23 +1506,23 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1504,معشار,معشار,مِعْشار,N,عشر,1,,tenth
 1505,معطلة,معطله,مُعَطَّلَة,N,عطل,1,,deserted
 1506,معقب,معقب,مُعَقِّب,N,عقب,1,,reverser
-1507,معقبات,معقبات,مُعَقِّبَة,N,عقب,1,,attendants
+1507,معقبات,معقبات,مُعَقِّبَة,N,عقب,1,FOR THE SCHOLAR (c): معقبات (13:11) are angels who guard [Quran surface count: 1],attendants
 1508,معلم,معلم,مُعَلَّم,N,علم,1,,tutored
 1509,معلوم,معلوم,مَعْلُوم,N,علم,9,,determinate
 1510,معمر,معمر,مُعَمَّر,N,عمر,1,,centenarian
 1511,معيشة,معيشه,مَعِيشَة,N,عيش,1,,living
 1512,مغارات,مغارات,مَغارَة,N,غور,1,,hideaways
-1513,مغاضبا,مغاضبا,مُغاضِب,N,غضب,1,,resentful
+1513,مغاضبا,مغاضبا,مُغاضِب,N,غضب,1,"FOR THE SCHOLAR (b): مغاضبا occurs only in 21:87 (Yunus, ذا النون) [Quran surface count: 1]",resentful
 1514,مغانم,مغانم,مَغانِم,N,غنم,3,,spoils
 1515,مغتسل,مغتسل,مُغْتَسَل,N,غسل,1,,bath
 1516,مغرب,مغرب,مَغْرِب,N,غرب,1,,west
 1517,مغرقون,مغرقون,مُغْرَق,N,غرق,3,,submerged
 1518,مغلوب,مغلوب,مَغْلُوب,N,غلب,1,,vanquished
-1519,مغنون,مغنون,مُغْني,N,غني,2,,availing
+1519,مغنون,مغنون,مُغْني,N,غني,2,"FOR THE SCHOLAR (c): مغنون belongs to the cluster مجنون, مسنون, مغنون, مكنون, ممنون",availing
 1520,مغيرا,مغيرا,مُغَيِّر,N,غير,1,,modifier
 1521,مفاتح,مفاتح,مَفاتِح,N,فتح,1,,keys
-1522,مفازا,مفازا,مَفاز,N,فوز,1,,success
-1523,مفتحة,مفتحه,مُفَتَّحَة,N,فتح,1,,ajar
+1522,مفازا,مفازا,مَفاز,N,فوز,1,FOR THE SCHOLAR (c): مفازا (78:31) paradise for the God-fearing [Quran surface count: 1],success
+1523,مفتحة,مفتحه,مُفَتَّحَة,N,فتح,1,FOR THE SCHOLAR (c): مفتحة (38:50) the opened gates of the gardens of Eden [Quran surface count: 1],ajar
 1524,مفرطون,مفرطون,مُفْرَط,N,فرط,1,,forgotten
 1525,مفروضا,مفروضا,مَفْرُوض,N,فرض,2,,binding
 1526,مفسدين,مفسدين,مُفْسِد,N,فسد,6,,corrupter
@@ -1530,22 +1530,22 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1528,مفعولا,مفعولا,مَفْعُول,N,فعل,6,,accomplished
 1529,مقاعد,مقاعد,مَقْعَد,N,قعد,3,,seat
 1530,مقاليد,مقاليد,مَقالِيد,N,قلد,2,,vaults
-1531,مقام,مقام,مَقام,N,قوم,8,,station
-1532,مقامع,مقامع,مَقامِع,N,قمع,1,,rods
+1531,مقام,مقام,مَقام,N,قوم,8,FOR THE SCHOLAR (b): مقام: مقام إبراهيم (2:125; 3:97) and مقام ربه [Quran surface count: 7],station
+1532,مقامع,مقامع,مَقامِع,N,قمع,1,FOR THE SCHOLAR (c): مقامع (22:21) the iron rods of hell [Quran surface count: 1],rods
 1533,مقبوضة,مقبوضه,مَقْبُوضَة,N,قبض,1,,taken
 1534,مقتا,مقتا,مَقْت,N,مقت,3,,loathing
-1535,مقتحم,مقتحم,مُقْتَحِم,N,قحم,1,,rushing
+1535,مقتحم,مقتحم,مُقْتَحِم,N,قحم,1,FOR THE SCHOLAR (c): مقتحم (38:59) the damned troop in hell [Quran surface count: 1],rushing
 1536,مقتدون,مقتدون,مُقْتَدي,N,قدو,1,,emulator
 1537,مقترفون,مقترفون,مُقْتَرِف,N,قرف,1,,perpetrating
 1538,مقترنين,مقترنين,مُقْتَرِن,N,قرن,1,,accompanying
 1539,مقتصد,مقتصد,مُقْتَصِد,N,قصد,2,,temperate
 1540,مقتصدة,مقتصده,مُقْتَصِدَة,N,قصد,1,,balanced
-1541,مقداره,مقداره,مِقْدار,N,قدر,3,,extent
+1541,مقداره,مقداره,مِقْدار,N,قدر,3,FOR THE SCHOLAR (c): مقداره (32:5; 70:4) the length of the Day [Quran surface count: 2],extent
 1542,مقدورا,مقدورا,مَقْدُور,N,قدر,1,,predestined
 1543,مقربة,مقربه,مَقْرَبَة,N,قرب,1,,kinship
 1544,مقرنين,مقرنين,مُقَرَّن,N,قرن,3,,coupled
 1545,مقسوم,مقسوم,مَقْسُوم,N,قسم,1,,portioned
-1546,مقصورات,مقصورات,مَقْصُورَة,N,قصر,1,,sequestered
+1546,مقصورات,مقصورات,مَقْصُورَة,N,قصر,1,FOR THE SCHOLAR (c): مقصورات (55:72) the houris in the tents [Quran surface count: 1],sequestered
 1547,مقضيا,مقضيا,مَقْضِيّ,N,قضي,2,,decreed
 1548,مقطوع,مقطوع,مَقْطُوع,N,قطع,1,,truncated
 1549,مقطوعة,مقطوعه,مَقْطُوعَة,N,قطع,1,,interrupted
@@ -1557,14 +1557,14 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1555,مكذبين,مكذبين,مُكَذِّب,N,كذب,1,,denier
 1556,مكذوب,مكذوب,مَكْذُوب,N,كذب,1,,untrue
 1557,مكرم,مكرم,مُكْرِم,N,كرم,1,,honoring
-1558,مكرمون,مكرمون,مُكْرَم,N,كرم,3,,venerated
+1558,مكرمون,مكرمون,مُكْرَم,N,كرم,3,FOR THE SCHOLAR (c): مكرمون (21:26 angels; 37:42 and 70:35 paradise) [Quran surface count: 3],venerated
 1559,مكروها,مكروها,مَكْرُوه,N,كره,1,,odious
-1560,مكظوم,مكظوم,مَكْظُوم,N,كظم,1,,sorrowful
+1560,مكظوم,مكظوم,مَكْظُوم,N,كظم,1,FOR THE SCHOLAR (b): مكظوم occurs only in 68:48 (Yunus and the whale) [Quran surface count: 1],sorrowful
 1561,مكلبين,مكلبين,مُكَلِّب,N,كلب,1,,huntsman
 1562,مكين,مكين,مَكِين,N,مكن,4,,entrenched
 1563,ملء,ملء,مِلْء,N,ملأ,1,,fullness
-1564,ملاق,ملاق,مُلاق,N,لقي,1,,meeting
-1565,ملاقوا,ملاقوا,مُلاقُوا,N,لقي,3,,encountering
+1564,ملاق,ملاق,مُلاق,N,لقي,1,FOR THE SCHOLAR (c): ملاق occurs in 69:20 (meeting my reckoning); meeting God/Reckoning [Quran surface count: 1],meeting
+1565,ملاقوا,ملاقوا,مُلاقُوا,N,لقي,3,FOR THE SCHOLAR (c): ملاقوا (2:46 ملاقوا ربهم; 2:249) meeting the Lord [Quran surface count: 3],encountering
 1566,ملاقيكم,ملاقيكم,مُلاقِي,N,لقي,2,,confronter
 1567,ملتحدا,ملتحدا,مُلْتَحَد,N,لحد,2,,hideout
 1568,ملجأ,ملجا,مَلْجَإ,N,لجأ,2,,recourse
@@ -1579,7 +1579,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1577,ممسكات,ممسكات,مُمْسِكَة,N,مسك,1,,holders
 1578,مملوكا,مملوكا,مَمْلُوك,N,ملك,1,,owned
 1579,ممنوعة,ممنوعه,مَمْنُوعَة,N,منع,1,,withheld
-1580,ممنون,ممنون,مَمْنُون,N,منن,4,,uninterrupted
+1580,ممنون,ممنون,مَمْنُون,N,منن,4,"FOR THE SCHOLAR (c): ممنون belongs to the cluster مجنون, مسنون, مغنون, مكنون, ممنون (five words one letter apart)",uninterrupted
 1581,مناديا,مناديا,مُنادِي,N,ندي,1,,proclaimer
 1582,منازل,منازل,مَنازِل,N,نزل,2,,mansions
 1583,مناص,مناص,مَناص,N,نوص,1,,evasion
@@ -1592,14 +1592,14 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1590,منتهون,منتهون,مُنتَهي,N,نهي,1,,abstaining
 1591,منثورا,منثورا,مَنثُور,N,نثر,2,,sprinkled
 1592,منجوك,منجوك,مُنَجُّو,N,نجو,2,,savior
-1593,منذر,منذر,مُنذِر,N,نذر,9,,warner
+1593,منذر,منذر,مُنذِر,N,نذر,9,FOR THE SCHOLAR (b): منذر is the Prophet's role (إنما أنت منذر) [Quran surface count: 5],warner
 1594,منزلا,منزلا,مُنزَل,N,نزل,2,,landing
 1595,منزلون,منزلون,مُنزِل,N,نزل,2,,sender
 1596,منسيا,منسيا,مَنسِيّ,N,نسي,1,,oblivion
 1597,منصورا,منصورا,مَنصُور,N,نصر,1,,aided
-1598,منضود,منضود,مَنضُود,N,نضد,2,,tiered
+1598,منضود,منضود,مَنضُود,N,نضد,2,"FOR THE SCHOLAR (c): منضود (11:82 stones of sijjil, excluded; 56:29 paradise) [Quran surface count: 2]",tiered
 1599,منظرين,منظرين,مُنظَر,N,نظر,3,,reprieved
-1600,منفطر,منفطر,مُنفَطِر,N,فطر,1,,sundered
+1600,منفطر,منفطر,مُنفَطِر,N,فطر,1,FOR THE SCHOLAR (c): منفطر occurs only in 73:18 (the heaven rent on the Last Day) [Quran surface count: 1],sundered
 1601,منقعر,منقعر,مُنقَعِر,N,قعر,1,,toppled
 1602,منقلب,منقلب,مُنقَلَب,N,قلب,2,,final
 1603,منقلبون,منقلبون,مُنقَلِب,N,قلب,2,,reverting
@@ -1608,32 +1608,32 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1606,منكرون,منكرون,مُنكَر,N,نكر,4,,strange
 1607,منهمر,منهمر,مُنْهَمِر,N,همر,1,,streaming
 1608,منوعا,منوعا,مَنُوع,N,منع,1,,grudging
-1609,مهاجر,مهاجر,مُهاجِر,N,هجر,2,,emigrant
-1610,مهاجرات,مهاجرات,مُهاجِرَة,N,هجر,1,,newcomer
-1611,مهانا,مهانا,مُهان,N,هون,1,,degraded
+1609,مهاجر,مهاجر,مُهاجِر,N,هجر,2,FOR THE SCHOLAR (b): مهاجر: the Hijra (29:26 Ibrahim; 4:100); a historic religious term [Quran surface count: 1],emigrant
+1610,مهاجرات,مهاجرات,مُهاجِرَة,N,هجر,1,FOR THE SCHOLAR (b): مهاجرات (60:10) the women emigrants of the Hijra [Quran surface count: 1],newcomer
+1611,مهانا,مهانا,مُهان,N,هون,1,"FOR THE SCHOLAR (c): مهانا occurs only in 25:69 (hell, يخلد فيه مهانا) [Quran surface count: 1]",degraded
 1612,مهتدون,مهتدون,مُهْتَدي,N,هدي,8,,enlightened
 1613,مهدا,مهدا,مَهْد,N,مهد,2,,crib
 1614,مهزوم,مهزوم,مَهْزُوم,N,هزم,1,,routed
-1615,مهطعين,مهطعين,مُهْطِع,N,هطع,3,,scurrying
+1615,مهطعين,مهطعين,مُهْطِع,N,هطع,3,FOR THE SCHOLAR (c): مهطعين (14:43; 54:8; 70:36) the Last Day [Quran surface count: 3],scurrying
 1616,مهيلا,مهيلا,مَهِيل,N,هيل,1,,sliding
 1617,مواخر,مواخر,مَواخِر,N,مخر,2,,ploughing
 1618,مواطن,مواطن,مَواطِن,N,وطن,1,,arenas
-1619,موبقا,موبقا,مَوْبِق,N,وبق,1,,doom
+1619,موبقا,موبقا,مَوْبِق,N,وبق,1,FOR THE SCHOLAR (c): موبقا occurs only in 18:52 (the abyss between idols and their worshippers on the Last Day) [Quran surface count: 1],doom
 1620,موتتنا,موتتنا,مَوْتَت,N,موت,2,,demise
 1621,موثقا,موثقا,مَوْثِق,N,وثق,2,,oath
 1622,مؤجلا,موجلا,مُؤَجَّل,N,أجل,1,,postponed
 1623,مودة,موده,مَوَدَّة,N,ودد,5,,affection
 1624,موزون,موزون,مَوْزُون,N,وزن,1,,calibrated
 1625,موص,موص,مُوص,N,وصي,1,,testator
-1626,مؤصدة,موصده,مُؤْصَدَة,N,وصد,2,,enclosed
+1626,مؤصدة,موصده,مُؤْصَدَة,N,وصد,2,FOR THE SCHOLAR (c): مؤصدة (90:20; 104:8) the sealed fire of hell [Quran surface count: 2],enclosed
 1627,موضوعة,موضوعه,مَوْضُوعَة,N,وضع,1,,placed
-1628,موضونة,موضونه,مَوْضُونَة,N,وضن,1,,woven
+1628,موضونة,موضونه,مَوْضُونَة,N,وضن,1,FOR THE SCHOLAR (c): موضونة occurs only in 56:15 (paradise couches) [Quran surface count: 1],woven
 1629,موطئا,موطيا,مَوْطِئ,N,وطأ,1,,foothold
 1630,موعدا,موعدا,مَوْعِد,N,وعد,5,,appointment
 1631,موعدة,موعده,مَوْعِدَة,N,وعد,1,,promise
-1632,موفورا,موفورا,مَوْفُور,N,وفر,1,,bountiful
+1632,موفورا,موفورا,مَوْفُور,N,وفر,1,"FOR THE SCHOLAR (c): موفورا occurs only in 17:63 (to Iblis, jahannam as ample recompense) [Quran surface count: 1]",bountiful
 1633,موقنين,موقنين,مُوقِن,N,يقن,3,,convinced
-1634,موقوفون,موقوفون,مَوْقُوف,N,وقف,1,,detained
+1634,موقوفون,موقوفون,مَوْقُوف,N,وقف,1,FOR THE SCHOLAR (c): موقوفون (34:31) the wrongdoers standing before their Lord [Quran surface count: 1],detained
 1635,مولود,مولود,مَوْلُود,N,ولد,2,,newborn
 1636,موهن,موهن,مُوهِن,N,وهن,1,,weakener
 1637,موئلا,مويلا,مَوْئِل,N,وأل,1,,bolthole
@@ -1653,7 +1653,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1651,ناصية,ناصيه,ناصِيَة,N,نصي,1,,forelock
 1652,ناظرين,ناظرين,ناظِر,N,نظر,1,,onlooker
 1653,ناعمة,ناعمه,ناعِمَة,N,نعم,1,,blissful
-1654,ناقة,ناقه,ناقَة,N,نوق,4,,camel
+1654,ناقة,ناقه,ناقَة,N,نوق,4,"FOR THE SCHOLAR (b): ناقة: the she-camel of Salih (ناقة الله, 7:73; 11:64; 26:155) [Quran surface count: 4]",camel
 1655,ناكسوا,ناكسوا,ناكِسُوا,N,نكس,1,,drooping
 1656,نائمون,نايمون,نائِم,N,نوم,2,,sleeper
 1657,نبات,نبات,نَبات,N,نبت,6,,vegetation
@@ -1669,16 +1669,16 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1667,نخوض,نخوض,خاضُ,V,خوض,2,,wade
 1668,نذرا,نذرا,نُذْر,N,نذر,1,,forewarning
 1669,نذل,نذل,نَذِلَّ,V,ذلل,1,,mortified
-1670,نذير,نذير,نَذِير,N,نذر,32,,harbinger
+1670,نذير,نذير,نَذِير,N,نذر,32,FOR THE SCHOLAR (b): نذير is the Prophet's role (إنما أنا نذير مبين); epithet of messengers [Quran surface count: 29],harbinger
 1671,نربك,نربك,رَبَّيَ,V,ربو,2,,rear
-1672,نزاعة,نزاعه,نَزّاعَة,N,نزع,1,,peeler
+1672,نزاعة,نزاعه,نَزّاعَة,N,نزع,1,FOR THE SCHOLAR (c): نزاعة occurs only in 70:16 (hell) [Quran surface count: 1],peeler
 1673,نساء,نساء,نِساء,N,نسو,5,,ladies
 1674,نسارع,نسارع,يُسارِعُ,V,سرع,1,,rush
 1675,نسبا,نسبا,نَسَب,N,نسب,3,,lineage
 1676,نستبق,نستبق,اسْتَبَقَ,V,سبق,1,,race
 1677,نستحوذ,نستحوذ,اسْتَحْوَذَ,V,حوذ,2,,dominate
 1678,نستنسخ,نستنسخ,نَسْتَنسِخُ,V,نسخ,1,,transcribe
-1679,نسفت,نسفت,نُسِفَتْ,V,نسف,1,,blasted
+1679,نسفت,نسفت,نُسِفَتْ,V,نسف,1,FOR THE SCHOLAR (c): نسفت occurs only in 77:10 (Last Day sura) [Quran surface count: 1],blasted
 1680,نسقيكم,نسقيكم,أَسْقَيْ,V,سقي,5,,water
 1681,نسلخ,نسلخ,نَسْلَخُ,V,سلخ,1,,peel
 1682,نسوق,نسوق,سِيقَ,V,سوق,1,,herded
@@ -1687,14 +1687,14 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1685,نشوزا,نشوزا,نُشُوز,N,نشز,1,,recalcitrance
 1686,نصبت,نصبت,نُصِبَتْ,V,نصب,1,,planted
 1687,نصرف,نصرف,صَرَّفْ,V,صرف,4,,vary
-1688,نضاختان,نضاختان,نَضّاخَتان,N,نضخ,1,,welling
-1689,نضرة,نضره,نَضْرَة,N,نضر,2,,brightness
+1688,نضاختان,نضاختان,نَضّاخَتان,N,نضخ,1,FOR THE SCHOLAR (c): نضاختان occurs only in 55:66 (paradise springs) [Quran surface count: 1],welling
+1689,نضرة,نضره,نَضْرَة,N,نضر,2,FOR THE SCHOLAR (c): نضرة (76:11; 83:24) the glow of paradise; نعيم excluded [Quran surface count: 2],brightness
 1690,نضيد,نضيد,نَضِيد,N,نضد,1,,ordered
 1691,نطفة,نطفه,نُطْفَة,N,نطف,11,,droplet
 1692,نطمس,نطمس,طُمِسَتْ,V,طمس,3,,effaced
 1693,نعاسا,نعاسا,نُعاس,N,نعس,1,,drowsiness
 1694,نعجة,نعجه,نَعْجَة,N,نعج,2,,ewe
-1695,نعقل,نعقل,عَقَلُ,V,عقل,1,,comprehend
+1695,نعقل,نعقل,عَقَلُ,V,عقل,1,FOR THE SCHOLAR (c): نعقل occurs only in 67:10 (the dialogue of the dwellers of the blaze) [Quran surface count: 1],comprehend
 1696,نعلن,نعلن,أَعْلَن,V,علن,1,,declare
 1697,نعليك,نعليك,نَعْلَي,N,نعل,1,,sandals
 1698,نعماء,نعماء,نَعْماء,N,نعم,1,,prosperity
@@ -1708,13 +1708,13 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1706,نفورا,نفورا,نُفُور,N,نفر,4,,shying
 1707,نفيرا,نفيرا,نَفِير,N,نفر,1,,contingent
 1708,نقاتل,نقاتل,قاتَلَ,V,قتل,5,,battle
-1709,نقتبس,نقتبس,نَقْتَبِسْ,V,قبس,1,,borrow
+1709,نقتبس,نقتبس,نَقْتَبِسْ,V,قبس,1,"FOR THE SCHOLAR (c): نقتبس occurs only in 57:13 (Last Day, 'let us take light'; نور excluded) [Quran surface count: 1]",borrow
 1710,نقذف,نقذف,قَذَفَ,V,قذف,2,,hurl
 1711,نقر,نقر,أَقْرَرْ,V,قرر,4,,fix
 1712,نقضت,نقضت,نَقَضَتْ,V,نقض,1,,breach
 1713,نقضهم,نقضهم,نَقْض,N,نقض,2,,violation
 1714,نقيبا,نقيبا,نَقِيب,N,نقب,1,,chieftain
-1715,نقيض,نقيض,قَيَّضْ,V,قيض,1,,allot
+1715,نقيض,نقيض,قَيَّضْ,V,قيض,1,FOR THE SCHOLAR (c): نقيض (43:36 نقيض له شيطانا) assigns a devil; modern 'opposite' [Quran surface count: 1],allot
 1716,نكاحا,نكاحا,نِكاح,N,نكح,2,,wedlock
 1717,نكتل,نكتل,اكْتالُ,V,كيل,1,,gauge
 1718,نكدا,نكدا,نَكِد,N,نكد,1,,barely
@@ -1722,14 +1722,14 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1720,نكروا,نكروا,نَكِّرُ,V,نكر,1,,disguise
 1721,نكسوا,نكسوا,نُكِسُ,V,نكس,1,,reversed
 1722,نكسوها,نكسوها,كَسَوْ,V,كسو,3,,clothe
-1723,نكص,نكص,نَكَصَ,V,نكص,1,,recede
+1723,نكص,نكص,نَكَصَ,V,نكص,1,FOR THE SCHOLAR (c): نكص occurs only in 8:48 (Iblis at Badr) [Quran surface count: 1],recede
 1724,نكلف,نكلف,يُكَلِّفُ,V,كلف,7,,impose
 1725,نمد,نمد,أَمَدَّ,V,مدد,1,,supply
 1726,نمكن,نمكن,مَكَّ,V,مكن,2,,establish
 1727,نملي,نملي,أَمْلَى,V,ملو,3,,prolong
 1728,ننجي,ننجي,أَنجَى,V,نجو,1,,save
 1729,ننكسه,ننكسه,نُنَكِّسْ,V,نكس,1,,regress
-1730,نورث,نورث,أَوْرَثَ,V,ورث,1,,transmit
+1730,نورث,نورث,أَوْرَثَ,V,ورث,1,FOR THE SCHOLAR (c): نورث occurs only in 19:63 (the inheritance of paradise) [Quran surface count: 1],transmit
 1731,نوم,نوم,نَوْم,N,نوم,1,,sleep
 1732,هاتوا,هاتوا,هاتُ,V,هات,4,,fetch
 1733,هاد,هاد,هاد,N,هدي,5,,guide
@@ -1743,23 +1743,23 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1741,هلم,هلم,هَلُمّ,N,هلم,2,,hither
 1742,هلوعا,هلوعا,هَلُوع,N,هلع,1,,fretful
 1743,هماز,هماز,هَمّاز,N,همز,1,,slanderer
-1744,همزات,همزات,هَمَزَة,N,همز,1,,taunter
+1744,همزات,همزات,هَمَزَة,N,همز,1,FOR THE SCHOLAR (c): همزات occurs only in 23:97 (همزات الشياطين); shayatin excluded [Quran surface count: 1],taunter
 1745,همزة,همزه,هُمَزَة,N,همز,1,,scoffer
 1746,هنيئا,هنييا,هَنِيئ,N,هنأ,4,,pleasant
 1747,هونا,هونا,هَوْن,N,هون,1,,humbly
-1748,هيهات,هيهات,هَيْهات,N,,2,,improbable
+1748,هيهات,هيهات,هَيْهات,N,,2,FOR THE SCHOLAR (c): هيهات (23:36) is the interjection of the disbelievers disbelieving the Resurrection; not a content word [Quran surface count: 2],improbable
 1749,وأبا,وابا,أَبّ,N,أبب,1,,fodder
 1750,وأبكى,وابكي,أَبْكَى,V,بكي,1,,sadden
 1751,وأثل,واثل,أَثْل,N,أثل,1,,tamarisk
 1752,وأجدر,واجدر,أَجْدَر,N,جدر,1,,likelier
-1753,واجفة,واجفه,واجِفَة,N,وجف,1,,throbbing
+1753,واجفة,واجفه,واجِفَة,N,وجف,1,FOR THE SCHOLAR (c): واجفة occurs only in 79:8 (Last Day hearts) [Quran surface count: 1],throbbing
 1754,واختار,واختار,اخْتارَ,V,خير,3,,elect
 1755,واخفض,واخفض,اخْفِضْ,V,خفض,3,,stoop
 1756,وأخفى,واخفي,أَخْفَى,N,خفي,1,,subtler
 1757,وأداء,واداء,أَداء,N,أدي,1,,settlement
 1758,وادكر,وادكر,ادَّكَرَ,V,ذكر,1,,recollected
 1759,واديا,واديا,وادِي,N,ودي,1,,ravine
-1760,واردون,واردون,وارِد,N,ورد,1,,arriving
+1760,واردون,واردون,وارِد,N,ورد,1,FOR THE SCHOLAR (c): واردون occurs only in 21:98 (you shall enter it: hell) [Quran surface count: 1],arriving
 1761,وازرة,وازره,وازِرَة,N,وزر,5,,carrying
 1762,وأسبغ,واسبغ,أَسْبَغَ,V,سبغ,1,,lavished
 1763,واستفزز,واستفزز,يَسْتَفِزَّ,V,فزز,2,,rouse
@@ -1776,14 +1776,14 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1774,واق,واق,واق,N,وقي,3,,protector
 1775,واقصد,واقصد,اقْصِدْ,V,قصد,1,,pace
 1776,وأكدى,واكدي,أَكْدَى,V,كدي,1,,skimped
-1777,وأكواب,واكواب,أَكْواب,N,كوب,4,,beakers
+1777,وأكواب,واكواب,أَكْواب,N,كوب,4,FOR THE SCHOLAR (c): وأكواب (43:71; 76:15; 88:14) the goblets of paradise; attached و [Quran surface count: 3],beakers
 1778,والأبرص,والابرص,أَبْرَص,N,برص,2,,leper
 1779,والأنف,والانف,أَنف,N,أنف,2,,nose
 1780,والجسم,والجسم,جِسْم,N,جسم,2,,build
 1781,والد,والد,والِد,N,ولد,1,,father
 1782,والدة,والده,والِدَة,N,ولد,1,,mama
 1783,والرمان,والرمان,رُمّان,N,رمن,3,,pomegranate
-1784,والسلوى,والسلوي,سَلْوَى,N,سلو,3,,quail
+1784,والسلوى,والسلوي,سَلْوَى,N,سلو,3,FOR THE SCHOLAR (b): والسلوى (2:57; 7:160; 20:80) the quails of the Israelites; attached و+ال [Quran surface count: 3],quail
 1785,والفلك,والفلك,فُلْك,N,فلك,2,,boat
 1786,والقمر,والقمر,قَمَر,N,قمر,22,,moon
 1787,وألنا,والنا,أَلَ,V,لين,1,,mellowed
@@ -1791,7 +1791,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1789,وأمر,وامر,أَمَرّ,N,مرر,1,,bitterer
 1790,وأهش,واهش,أَهُشُّ,V,هشش,1,,thrash
 1791,واهية,واهيه,واهِيَة,N,وهي,1,,flimsy
-1792,وبرزت,وبرزت,بُرِّزَتِ,V,برز,2,,unveiled
+1792,وبرزت,وبرزت,بُرِّزَتِ,V,برز,2,FOR THE SCHOLAR (c): وبرزت (26:91; 79:36) 'hell was brought into view' [Quran surface count: 2],unveiled
 1793,وبست,وبست,بُسَّتِ,V,بسس,1,,disintegrated
 1794,وبطل,وبطل,بَطَلَ,V,بطل,1,,worthless
 1795,وبئر,وبير,بِئْر,N,بأر,1,,borehole
@@ -1807,7 +1807,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1805,وجلون,وجلون,وَجِل,N,وجل,1,,cowering
 1806,وجنى,وجني,جَنَى,N,جني,1,,ripened
 1807,وجهة,وجهه,وِجْهَة,N,وجه,1,,bearing
-1808,وجيها,وجيها,وَجِيه,N,وجه,2,,distinguished
+1808,وجيها,وجيها,وَجِيه,N,وجه,2,FOR THE SCHOLAR (b): وجيها: epithet of Jesus (3:45) and Moses (33:69) [Quran surface count: 2],distinguished
 1809,وحزنى,وحزني,حُزْن,N,حزن,1,,grief
 1810,وحصل,وحصل,حُصِّلَ,V,حصل,1,,extracted
 1811,وحفدة,وحفده,حَفَدَة,N,حفد,1,,grandsons
@@ -1830,7 +1830,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1828,وسارب,وسارب,سارِب,N,سرب,1,,wanderer
 1829,وسطا,وسطا,وَسَط,N,وسط,1,,center
 1830,وسع,وسع,وَسِعَ,V,وسع,5,,span
-1831,وسيدا,وسيدا,سَيِّد,N,سود,3,,master
+1831,وسيدا,وسيدا,سَيِّد,N,سود,3,FOR THE SCHOLAR (b): وسيدا (3:39) John the Baptist as sayyid; attached و [Quran surface count: 1],master
 1832,وشمال,وشمال,شِمال,N,شمل,2,,left
 1833,وشهبا,وشهبا,شُهُب,N,شهب,1,,meteors
 1834,وشيبة,وشيبه,شَيْبَة,N,شيب,1,,graying
@@ -1843,7 +1843,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1841,وصيلة,وصيله,وَصِيلَة,N,وصل,1,,connected
 1842,وضائق,وضايق,ضائِق,N,ضيق,1,,pinched
 1843,وطعنا,وطعنا,طَعْن,N,طعن,1,,jab
-1844,وطفقا,وطفقا,طَفِقَ,V,طفق,3,,commence
+1844,وطفقا,وطفقا,طَفِقَ,V,طفق,3,FOR THE SCHOLAR (b): وطفقا occurs only in 7:22 and 20:121 (Adam and Hawwa covering themselves) [Quran surface count: 2],commence
 1845,وطلح,وطلح,طَلْح,N,طلح,1,,acacia
 1846,وطمعا,وطمعا,طَمَع,N,طمع,4,,craving
 1847,وعاء,وعاء,وِعاء,N,وعي,2,,container
@@ -1856,20 +1856,20 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1854,وعنت,وعنت,عَنَتِ,V,عنو,1,,submit
 1855,وغرتهم,وغرتهم,غَرَّ,V,غرر,14,,delude
 1856,وغواص,وغواص,غَوّاص,N,غوص,1,,diver
-1857,وفاقا,وفاقا,وِفاق,N,وفق,1,,concord
-1858,وفدا,وفدا,وَفْد,N,وفد,1,,delegation
+1857,وفاقا,وفاقا,وِفاق,N,وفق,1,FOR THE SCHOLAR (c): وفاقا occurs only in 78:26 (hell: جزاء وفاقا) [Quran surface count: 1],concord
+1858,وفدا,وفدا,وَفْد,N,وفد,1,FOR THE SCHOLAR (c): وفدا occurs only in 19:85 (the God-fearing gathered to al-Rahman on the Last Day) [Quran surface count: 1],delegation
 1859,وفرشا,وفرشا,فَرْش,N,فرش,1,,mattress
 1860,وقارا,وقارا,وَقار,N,وقر,1,,dignity
 1861,وقب,وقب,وَقَبَ,V,وقب,1,,descending
 1862,وقدور,وقدور,قُدُور,N,قدر,1,,cauldrons
 1863,وقرا,وقرا,وَقْر,N,وقر,6,,heaviness
 1864,وقضبا,وقضبا,قَضْب,N,قضب,1,,greens
-1865,وقفوا,وقفوا,وُقِفُ,V,وقف,3,,halted
-1866,وقفينا,وقفينا,قَفَّيْ,V,قفو,4,,trail
+1865,وقفوا,وقفوا,وُقِفُ,V,وقف,3,FOR THE SCHOLAR (c): وقفوا (6:27 وقفوا على النار; 6:30 وقفوا على ربهم) the Last Day standing [Quran surface count: 2],halted
+1866,وقفينا,وقفينا,قَفَّيْ,V,قفو,4,FOR THE SCHOLAR (b): وقفينا (2:87; 5:46; 57:27) follows the prophets with Jesus [Quran surface count: 3],trail
 1867,وكره,وكره,كَرَّهَ,V,كره,1,,detest
-1868,وكهلا,وكهلا,كَهْل,N,كهل,2,,mature
+1868,وكهلا,وكهلا,كَهْل,N,كهل,2,FOR THE SCHOLAR (b): وكهلا occurs only in 3:46 and 5:110 (Jesus speaks 'in the cradle and as a grown man') [Quran surface count: 2],mature
 1869,ولأمة,ولامه,أَمَة,N,أمو,2,,maidservant
-1870,ولدان,ولدان,وَلِيد,N,ولد,3,,youngster
+1870,ولدان,ولدان,وَلِيد,N,ولد,3,FOR THE SCHOLAR (c): ولدان (56:17; 76:19) the immortal youths of paradise [Quran surface count: 2],youngster
 1871,وليجة,وليجه,وَلِيجَة,N,ولج,1,,insider
 1872,وليمحص,وليمحص,يُمَحِّصَ,V,محص,2,,purge
 1873,ومهدت,ومهدت,مَهَّد,V,مهد,1,,smoothed
@@ -1902,7 +1902,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1900,يتفكرون,يتفكرون,يَتَفَكَّرُ,V,فكر,16,,think
 1901,يتفيأ,يتفيا,يَتَفَيَّؤُا۟,V,فيأ,1,,shift
 1902,يتقبل,يتقبل,تَقَبَّلَ,V,قبل,6,,accept
-1903,يتلقى,يتلقي,تَلَقَّى,V,لقي,1,,receive
+1903,يتلقى,يتلقي,تَلَقَّى,V,لقي,1,FOR THE SCHOLAR (c): يتلقى occurs only in 50:17 (the two recording angels) [Quran surface count: 1],receive
 1904,يتماسا,يتماسا,يَتَماسَّ,V,مسس,2,,abutting
 1905,يتمطى,يتمطي,يَتَمَطَّى,V,مطو,1,,strut
 1906,يجادل,يجادل,جادَلُ,V,جدل,7,,argue
@@ -1911,7 +1911,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1909,يجحد,يجحد,جَحَدُ,V,جحد,3,,renounce
 1910,يجرمنكم,يجرمنكم,يَجْرِمَ,V,جرم,3,,provoke
 1911,يجمع,يجمع,جَمَعَ,V,جمع,5,,amass
-1912,يحاسب,يحاسب,حاسَبْ,V,حسب,1,,audit
+1912,يحاسب,يحاسب,حاسَبْ,V,حسب,1,FOR THE SCHOLAR (c): يحاسب occurs only in 84:8 (Last Day reckoning) [Quran surface count: 1],audit
 1913,يحاوره,يحاوره,يُحاوِرُ,V,حور,2,,dialogue
 1914,يحتسب,يحتسب,يَحْتَسِبُ,V,حسب,1,,reckon
 1915,يحدث,يحدث,يُحْدِثُ,V,حدث,3,,originate
@@ -1921,8 +1921,8 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1919,يحكم,يحكم,حَكَمَ,V,حكم,20,,adjudicate
 1920,يحكموك,يحكموك,يُحَكِّمُ,V,حكم,2,,appoint
 1921,يحلفون,يحلفون,حَلَفْ,V,حلف,11,,avow
-1922,يحلون,يحلون,حُلُّ,V,حلي,4,,adorn
-1923,يحمى,يحمي,يُحْمَى,V,حمي,1,,heated
+1922,يحلون,يحلون,حُلُّ,V,حلي,4,FOR THE SCHOLAR (c): يحلون (18:31; 22:23; 35:33; 43:? ) adornment of the people of paradise [Quran surface count: 4],adorn
+1923,يحمى,يحمي,يُحْمَى,V,حمي,1,FOR THE SCHOLAR (c): يحمى occurs only in 9:35 (heated in the fire of jahannam) [Quran surface count: 1],heated
 1924,يحول,يحول,حالَ,V,حول,1,,intervene
 1925,يحيف,يحيف,يَحِيفَ,V,حيف,1,,unfair
 1926,يختص,يختص,يَخْتَصُّ,V,خصص,2,,distinguish
@@ -1956,7 +1956,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1954,يستعجل,يستعجل,اسْتَعْجَلَ,V,عجل,3,,hurry
 1955,يستقيم,يستقيم,اسْتَقامُ,V,قوم,1,,stand
 1956,يستمع,يستمع,اسْتَمَعَ,V,سمع,4,,listen
-1957,يستنكف,يستنكف,اسْتَنكَفُ,V,نكف,2,,scorn
+1957,يستنكف,يستنكف,اسْتَنكَفُ,V,نكف,2,FOR THE SCHOLAR (b): يستنكف occurs only in 4:172 (Jesus and the angels do not disdain being servants of God) [Quran surface count: 2],scorn
 1958,يستوي,يستوي,اسْتَوَى,V,سوي,23,,level
 1959,يسجن,يسجن,يُسْجَنَ,V,سجن,1,,imprisoned
 1960,يسرا,يسرا,يُسْر,N,يسر,6,,facility
@@ -1966,7 +1966,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1964,يسيروا,يسيروا,سارَ,V,سير,16,,journey
 1965,يشرب,يشرب,شَرِبَ,V,شرب,3,,drink
 1966,يشعرون,يشعرون,يَشْعُرُ,V,شعر,25,,notice
-1967,يشفع,يشفع,يَشْفَعُ,V,شفع,3,,intercede
+1967,يشفع,يشفع,يَشْفَعُ,V,شفع,3,FOR THE SCHOLAR (c): يشفع: intercession (2:255; 4:85) [Quran surface count: 3],intercede
 1968,يشكر,يشكر,شَكَرَ,V,شكر,9,,thank
 1969,يشهد,يشهد,شَهِدَ,V,شهد,14,,attest
 1970,يشوي,يشوي,يَشْوِي,V,شوي,1,,grill
@@ -2001,18 +2001,18 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 1999,يفلح,يفلح,أَفْلَحَ,V,فلح,13,,prosper
 2000,يقبل,يقبل,يَقْبَلُ,V,قبل,8,,embrace
 2001,يقترف,يقترف,اقْتَرَفْ,V,قرف,1,,commit
-2002,يقطين,يقطين,يَقْطِين,N,,1,,gourd
+2002,يقطين,يقطين,يَقْطِين,N,,1,FOR THE SCHOLAR (b): يقطين occurs only in 37:146 (Yunus under the plant) [Quran surface count: 1],gourd
 2003,يقنط,يقنط,قَنَطُ,V,قنط,1,,dejected
 2004,يكاد,يكاد,كادَ,V,كود,14,,almost
 2005,يكفل,يكفل,يَكْفُلُ,V,كفل,1,,nurture
-2006,يلاقوا,يلاقوا,يُلاقُ,V,لقي,3,,meet
+2006,يلاقوا,يلاقوا,يُلاقُ,V,لقي,3,FOR THE SCHOLAR (c): يلاقوا (43:83; 52:45; 70:42) meeting their Day [Quran surface count: 3],meet
 2007,يلبسون,يلبسون,لَبَسْ,V,لبس,8,,muddle
 2008,يلتفت,يلتفت,يَلْتَفِتْ,V,لفت,2,,glance
 2009,يلتقطه,يلتقطه,الْتَقَطَ,V,لقط,2,,retrieve
 2010,يلج,يلج,يَلِجَ,V,ولج,3,,enter
 2011,يلحقوا,يلحقوا,يَلْحَقُ,V,لحق,2,,join
 2012,يلعبون,يلعبون,يَلْعَبْ,V,لعب,9,,sport
-2013,يلفظ,يلفظ,يَلْفِظُ,V,لفظ,1,,articulate
+2013,يلفظ,يلفظ,يَلْفِظُ,V,لفظ,1,FOR THE SCHOLAR (c): يلفظ occurs only in 50:18 (the recording angel) [Quran surface count: 1],articulate
 2014,يلقاها,يلقاها,لَقَّى,V,لقي,6,,impart
 2015,يلمزك,يلمزك,يَلْمِزُ,V,لمز,3,,defame
 2016,يلوون,يلوون,يَلْ,V,لوي,3,,twist
@@ -2029,7 +2029,7 @@ index,word,folded,corpus_lemma,pos,root,quran_occurrences,reviewer_notes,english
 2027,ينطلق,ينطلق,انطَلَقَ,V,طلق,1,,proceed
 2028,ينظرون,ينظرون,يُنظَرُ,V,نظر,12,,adjourn
 2029,ينعق,ينعق,يَنْعِقُ,V,نعق,1,,shriek
-2030,ينفخ,ينفخ,نَفَخَ,V,نفخ,7,,blow
+2030,ينفخ,ينفخ,نَفَخَ,V,نفخ,7,"FOR THE SCHOLAR (c): ينفخ: ينفخ في الصور, the trumpet of the Last Day [Quran surface count: 4]",blow
 2031,ينقص,ينقص,يُنقَصُ,V,نقص,3,,diminish
 2032,ينقلب,ينقلب,انقَلَبَ,V,قلب,5,,flip
 2033,يهبط,يهبط,يَهْبِطُ,V,هبط,2,,descend
