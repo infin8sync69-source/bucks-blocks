@@ -46,15 +46,18 @@ ChainParams makeTest() {
     p.defaultP2PPort = 18733;
     p.defaultApiPort = 18080;
     p.p2pkhAddressVersion = 0x41;
-    // Mined with: bucks-mine-genesis --network=test --time=1791504000
-    // (the nonce space was exhausted once, so the tool advanced time by 1).
-    p.genesisTime = 1791504001;
-    p.genesisNonce = 2492007344u;
+    // Testnet starts at a much lower difficulty than mainnet: 0x1e00ffff is about 2^24 hashes per block,
+    // so one laptop finds a block in seconds and coins mature within hours. The 4x-per-period retarget
+    // limit still applies, so the difficulty follows whatever hashrate shows up.
+    p.powLimitBits = 0x1e00ffff;
+    // Mined with: bucks-mine-genesis --network=test --time=1791958761 (about ten seconds on a laptop)
+    p.genesisTime = 1791958761;
+    p.genesisNonce = 35444257u;
     p.genesisInscription = "Bucks testnet genesis";
     p.genesisMerkleRoot =
         hexHash("4c9dabbe1c0b5a8c2bbdcc192d39fbfeed3f46ab1935c2d3e5b9026aa7a2afa7");
     p.genesisHash =
-        hexHash("00000000fe2553db1e6a81535bb2dc5d502c347edcc759bac7b3a9619389526e");
+        hexHash("000000dd046f0c82aa64ef2a740b9db0dca8ee27fe878adbdfd625507b5bc35d");
     return p;
 }
 

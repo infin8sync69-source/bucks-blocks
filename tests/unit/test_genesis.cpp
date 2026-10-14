@@ -29,10 +29,12 @@ TEST(Genesis, TestnetIsMinedAndConfigured) {
     EXPECT_TRUE(Genesis::check(p, err)) << err;
     Block g = Genesis::build(p);
     EXPECT_EQ(hex(g.getHash()),
-              "00000000fe2553db1e6a81535bb2dc5d502c347edcc759bac7b3a9619389526e");
-    // Real work went into it: at least 32 leading zero bits at 0x1d00ffff.
+              "000000dd046f0c82aa64ef2a740b9db0dca8ee27fe878adbdfd625507b5bc35d");
+    // Real work went into it: at least 24 leading zero bits at the testnet limit 0x1e00ffff.
+    EXPECT_EQ(p.powLimitBits, 0x1e00ffffu);
     EXPECT_EQ(g.getHash()[0], 0);
-    EXPECT_EQ(g.getHash()[3], 0);
+    EXPECT_EQ(g.getHash()[1], 0);
+    EXPECT_EQ(g.getHash()[2], 0);
 }
 
 TEST(Genesis, CreatesNoCoins) {
