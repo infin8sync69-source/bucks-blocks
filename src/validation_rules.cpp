@@ -217,6 +217,11 @@ bool CheckBlock(const Block& block, const ChainParams& params, ValidationState& 
         return state.invalid(R::MUTATED, "bad-txnmrklroot");
     if (mutated) return state.invalid(R::MUTATED, "bad-txns-duplicate");
 
+    // A transaction of exactly 64 bytes can be the concatenation of two txids: a forged body, not proof that the
+    // block is bad. Treat it as a mutation so the honest block is never marked failed (audit CON-2).
+    for (const Transaction& tx : block.transactions)
+        if (tx.serialize().size() == 64) return state.invalid(R::MUTATED, "bad-txns-size-64");
+
     if (block.transactions.empty()) return state.invalid(R::INVALID, "bad-blk-length");
     if (block.serialize().size() > Consensus::MAX_BLOCK_SIZE)
         return state.invalid(R::INVALID, "bad-blk-length");

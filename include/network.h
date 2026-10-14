@@ -266,6 +266,7 @@ private:
     void acceptNewConnection();
     void handleSocketIO();
     void pruneZombiePeers();
+    void reapDisconnectedPeers();
 };
 
 } // namespace Bucks

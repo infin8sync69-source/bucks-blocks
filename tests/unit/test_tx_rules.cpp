@@ -274,3 +274,31 @@ TEST(Subsidy, MainVectors) {
     EXPECT_EQ(Subsidy(13'440'000, p), 0ull);
     EXPECT_EQ(Subsidy(4'294'967'295u, p), 0ull);  // no undefined shift
 }
+
+// Audit CON-2: a body holding a transaction of exactly 64 bytes (which can be the concatenation of two txids,
+// the classic merkle-tree forgery) is a mutation of the block, not a verdict on it, so the honest block with the
+// same header is never marked failed.
+TEST(BlockRules, SixtyFourByteTransactionIsMutatedNotInvalid) {
+    Transaction tiny;
+    tiny.version = Consensus::TX_VERSION;
+    TransactionInput in;
+    in.prevTxid = hashWith(0x11);
+    in.prevIndex = 0;
+    in.sequence = Consensus::SEQUENCE_FINAL;
+    tiny.inputs.push_back(in);
+    TransactionOutput out;
+    out.amount = 1;
+    out.scriptPubKey = Script{0x51, 0x51, 0x51, 0x51};
+    tiny.outputs.push_back(out);
+    tiny.lockTime = 0;
+    ASSERT_EQ(tiny.serialize().size(), 64u);
+
+    Block block;
+    block.header.version = Consensus::BLOCK_VERSION;
+    block.transactions.push_back(tiny);   // as the only transaction: no coinbase either
+    block.header.merkleRoot = merkleRoot({tiny.txid()});
+    ValidationState st;
+    EXPECT_FALSE(CheckBlock(block, chainParams(NetworkId::REGTEST), st));
+    EXPECT_EQ(st.result, ValidationResult::MUTATED);
+    EXPECT_EQ(st.code, "bad-txns-size-64");
+}

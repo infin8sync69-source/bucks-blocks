@@ -48,7 +48,7 @@ TEST_F(FullNodeSystemTest, StartupAndMineBlock) {
     Bucks::Wallet minerWallet;
     minerWallet.generateKeys();
     EXPECT_TRUE(server.addWallet(minerWallet));
-    EXPECT_TRUE(fs::exists(config.dataDir + "/wallets.json"));
+    EXPECT_TRUE(fs::exists(config.dataDir + "/regtest/wallets.json"));
 
     // 5. Simulate Mining (if API allows internal call or we simulate via generic method)
     // Server has private `mineBlock` but exposed via API.

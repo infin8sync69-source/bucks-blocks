@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstring>
+#include <future>
+#include <poll.h>
 #include <thread>
 
 #include <arpa/inet.h>
@@ -236,4 +239,113 @@ TEST(Network, PersistentPeerIsRedialled) {
         << "B did not dial A again";
     netB.stop();
     netA->stop();
+}
+
+// ---------------------------------------------------------------------------
+// Audit findings NET-1, NET-2, NET-3 (reports/audit-2026-10-14/network.md): each was proven against a live
+// node by the auditor; these tests replay the same attacks.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+int rawConnect(uint16_t port) {
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    a.sin_port = htons(port);
+    if (connect(s, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0) { close(s); return -1; }
+    return s;
+}
+
+// Bytes received within `ms`, up to `want`.
+size_t readSome(int s, size_t want, int ms) {
+    size_t got = 0;
+    const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+    char buf[512];
+    while (got < want && std::chrono::steady_clock::now() < end) {
+        pollfd p{s, POLLIN, 0};
+        if (poll(&p, 1, 100) > 0) {
+            ssize_t n = recv(s, buf, sizeof(buf), 0);
+            if (n <= 0) break;
+            got += size_t(n);
+        }
+    }
+    return got;
+}
+
+std::vector<uint8_t> frameHeader(const Network& net, const char* cmd, uint32_t len) {
+    std::vector<uint8_t> h(24, 0);
+    std::copy(net.magic().begin(), net.magic().end(), h.begin());
+    std::memcpy(h.data() + 4, cmd, std::min<size_t>(std::strlen(cmd), 12));
+    for (int i = 0; i < 4; ++i) h[16 + i] = uint8_t(len >> (8 * i));
+    return h;
+}
+
+} // namespace
+
+// NET-1: one oversized frame header used to leave a closed descriptor in the peer table, so select() failed
+// forever and the network thread spun at 100% CPU, deaf to every peer and unable to stop.
+TEST(P2pAudit, OversizedFrameDoesNotWedgeTheNetworkThread) {
+    NodeHarness h;
+    ASSERT_TRUE(h.node) << h.error;
+    Network net(*h.node);
+    const uint16_t port = freePort();
+    net.start(port);
+
+    int attacker = rawConnect(port);
+    ASSERT_GE(attacker, 0);
+    auto hdr = frameHeader(net, "ping", 5'000'000);
+    ASSERT_EQ(send(attacker, hdr.data(), hdr.size(), 0), ssize_t(hdr.size()));
+    // Connections from one address closer than 5 s apart are throttled, so wait that out before the honest one.
+    std::this_thread::sleep_for(std::chrono::milliseconds(5500));
+
+    // A well-behaved client is still served: the node sends its key-exchange frame at once.
+    int honest = rawConnect(port);
+    ASSERT_GE(honest, 0);
+    EXPECT_GE(readSome(honest, 24, 3000), 24u) << "the network thread is wedged";
+    close(honest);
+    close(attacker);
+
+    // And it still stops promptly.
+    auto stopper = std::async(std::launch::async, [&] { net.stop(); });
+    EXPECT_EQ(stopper.wait_for(std::chrono::seconds(5)), std::future_status::ready) << "stop() hangs";
+    stopper.wait();
+}
+
+// NET-2: a peer-supplied address with a bad port used to throw out of std::stoi and terminate the node.
+TEST(P2pAudit, BadAddressesFromAPeerDoNotThrow) {
+    NodeHarness h;
+    ASSERT_TRUE(h.node) << h.error;
+    Network net(*h.node);
+    EXPECT_NO_THROW(net.handleAddrMessage({"1.2.3.4:notaport", "1.2.3.4:99999", "1.2.3.4:", ":80", "1.2.3.4:-5",
+                                           "no-colon", std::string(400, 'a') + ":80", "1.2.3.4:99999999999999999999"}));
+}
+
+// NET-3: a peer that never does the key exchange used to be served in plaintext for the whole session.
+TEST(P2pAudit, PlaintextWithoutKeyExchangeIsRefused) {
+    NodeHarness h;
+    ASSERT_TRUE(h.node) << h.error;
+    Network net(*h.node);
+    const uint16_t port = freePort();
+    net.start(port);
+
+    int s = rawConnect(port);
+    ASSERT_GE(s, 0);
+    ASSERT_GE(readSome(s, 24, 3000), 24u);   // the node's own ENCINIT; we never answer it
+    NetMessage version(MessageType::VERSION, std::vector<uint8_t>{0, 0, 0, 0});
+    auto frame = version.serialize(net.magic());
+    ASSERT_EQ(send(s, frame.data(), frame.size(), 0), ssize_t(frame.size()));
+
+    // The node must drop us: the next read ends with EOF and the peer table empties.
+    char c;
+    bool closed = false;
+    for (int i = 0; i < 30 && !closed; ++i) {
+        pollfd p{s, POLLIN, 0};
+        if (poll(&p, 1, 100) > 0) closed = recv(s, &c, 1, 0) == 0;
+    }
+    EXPECT_TRUE(closed) << "plaintext was accepted";
+    EXPECT_TRUE(waitFor([&] { return net.peerCount() == 0; }, 5));
+    close(s);
+    net.stop();
 }

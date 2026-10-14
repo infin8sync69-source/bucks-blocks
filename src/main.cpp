@@ -32,6 +32,7 @@ static void printUsage() {
         "  --connect <host:port>     keep a connection to this peer (repeatable)\n"
         "  --seed <host:port>        seed node, dialled while there are fewer than 3 peers (repeatable)\n"
         "  --web-root <dir>          static UI directory (default: web/ next to the sources)\n"
+        "  --import-legacy-wallets <file>  read an old wallets.json once (never written)\n"
         "  --datadir <dir>           wallets, API cookie and <network>/chain.sqlite (default ~/.bucks)\n"
         "  --checkblocks <n>         verify the last n blocks at start (default 24, 0 = all)\n"
         "  --checkdb[=full]          heavier database checks at start\n"
@@ -77,6 +78,7 @@ int main(int argc, char* argv[]) {
     std::string apiToken;
     std::string apiTokenFile;
     std::string dataDir;
+    std::string legacyWallets;      // --import-legacy-wallets <file>: read-only import of an old wallets.json
     std::vector<std::string> corsOrigins;
     std::vector<std::string> allowedHosts;
     bool trustProxy = false;
@@ -125,6 +127,8 @@ int main(int argc, char* argv[]) {
              apiTokenFile = argv[++i];
         } else if (arg == "--datadir" && i + 1 < argc) {
              dataDir = argv[++i];
+        } else if (arg == "--import-legacy-wallets" && i + 1 < argc) {
+            legacyWallets = argv[++i];
         } else if (arg == "--api-cors-origin" && i + 1 < argc) {
              corsOrigins.push_back(argv[++i]);
         } else if (arg == "--api-allowed-host" && i + 1 < argc) {
@@ -239,6 +243,7 @@ int main(int argc, char* argv[]) {
         serverConfig.apiToken = apiToken;
         serverConfig.apiTokenFile = apiTokenFile;
         serverConfig.dataDir = dataDir;
+        serverConfig.legacyWalletFile = legacyWallets;
         serverConfig.corsOrigins = corsOrigins;
         serverConfig.allowedHosts = allowedHosts;
         serverConfig.trustProxy = trustProxy;

@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <ctime>
+#include <chrono>
+#include <thread>
 
 #include "consensus.h"
 #include "fsutil.h"
@@ -340,6 +342,13 @@ std::optional<Transaction> Node::mempoolTransaction(const Hash256& txid) const {
 MineResult Node::mine(const Script& minerScript, const AssemblerOptions& options,
                       const std::atomic<bool>& stop, std::string& err, Hash256* found,
                       int64_t timeLimitSeconds) {
+    // The API's "mine one block" and the auto-miner share one Miner; serialize them, and give up if asked to stop
+    // while waiting (audit CON-5).
+    std::unique_lock<std::mutex> mineLock(mineMu_, std::defer_lock);
+    while (!mineLock.try_lock()) {
+        if (stop.load()) return MineResult::STOPPED;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
     uint64_t before;
     {
         std::lock_guard<std::mutex> lock(mu_);

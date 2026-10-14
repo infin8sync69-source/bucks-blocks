@@ -103,9 +103,15 @@ std::string ChainState::miningBlockedReason() const {
     for (const Hash256& h : skipped_) {
         if (const BlockIndex* e = index_.find(h)) parked.push_back(e);
     }
+    // A header whose block never arrives must not hold mining forever: ten minutes after a header was first
+    // stored without its data it no longer counts (audit CON-1). Honest sync keeps getting bodies and so keeps
+    // the gate closed through the tip moving forward.
+    constexpr int64_t kHeaderOnlyGateSeconds = 600;
+    const int64_t now = clock_();
     bool better = false;
     index_.forEach([&](const BlockIndex& e) {
         if (better || e.failed() || !(e.chainWork > tip->chainWork)) return;
+        if (!(e.status & HAVE_DATA) && now - e.firstSeen > kHeaderOnlyGateSeconds) return;
         for (const BlockIndex* s : parked) {
             const BlockIndex* lca = lastCommonAncestor(&e, s);
             if (lca == &e || lca == s) return;   // on (or beyond) a branch under fork alert
@@ -136,6 +142,7 @@ BlockIndex* ChainState::acceptHeader(const BlockHeader& header, ValidationState&
 
     BlockIndex* e = index_.insert(header, parent);
     e->status = HEADER_VALID;
+    e->firstSeen = clock_();
     persistStatus(e);
     return e;
 }
@@ -243,6 +250,11 @@ void ChainState::raiseForkAlert(const ForkAlert& a, uint64_t depth) {
 }
 
 bool ChainState::approveReorg(const Hash256& tipHash, std::string& err) {
+    // Only a branch the node actually parked behind a fork alert can be approved (audit WAL-10).
+    if (!skipped_.count(tipHash) && !(alert_.active && alert_.otherTip == tipHash)) {
+        err = "no parked branch with that tip";
+        return false;
+    }
     approved_.insert(tipHash);
     skipped_.erase(tipHash);
     return activateBestChain(err);
@@ -520,6 +532,7 @@ bool ChainState::loadIndexFromStore(const StoredState& state, int tier, std::str
                 return corrupt(bst.code);
         }
         BlockIndex* e = index_.insert(row.header, parent);
+        e->firstSeen = clock_();
         if (e->chainWork != row.chainWork) return corrupt("stored chain work differs from the recomputed value");
         loaded.emplace_back(e, &row);
     }

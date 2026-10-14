@@ -124,6 +124,7 @@ private:
     std::unique_ptr<Miner> miner_;
 
     mutable std::mutex mu_;                  // the chain lock
+    std::mutex mineMu_;                      // one mine() at a time: the Miner object is not reentrant
     mutable bool ibdDone_ = false;           // once false, stays false until restart
     bool shutDown_ = false;
 

@@ -39,7 +39,7 @@ TEST_F(WalletPersistenceTest, SaveAndLoadWallets) {
     config.dataDir = testDir + "/data";
     config.legacyWalletFile.clear();
     config.apiToken = "wallet-db-test-token";
-    const std::string walletFile = config.dataDir + "/wallets.json";
+    const std::string walletFile = config.dataDir + "/regtest/wallets.json";
     std::string address;
 
     {

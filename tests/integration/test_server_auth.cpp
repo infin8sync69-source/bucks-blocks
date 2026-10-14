@@ -53,6 +53,8 @@ std::string readFile(const std::string& path) {
 }
 
 void writeFile(const std::string& path, const std::string& text) {
+    std::error_code ec;
+    fs::create_directories(fs::path(path).parent_path(), ec);
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out << text;
 }
@@ -375,11 +377,14 @@ TEST_F(ServerAuthTest, CookieFileIsWrittenWhenNoTokenConfigured) {
     ASSERT_TRUE(r);
     EXPECT_EQ(r->status, 401);
 
-    // The UI learns where the token is, but never the token
+    // Where the token is stored is told only to an authenticated caller (audit WAL-7), and never the token itself.
     r = cli.Get("/api/auth/status");
     ASSERT_TRUE(r);
-    json st = json::parse(r->body);
-    EXPECT_EQ(st["cookieFile"], server.cookieFile());
+    EXPECT_FALSE(json::parse(r->body).contains("cookieFile"));
+    EXPECT_EQ(r->body.find(generated), std::string::npos);
+    r = cli.Get("/api/auth/status", {{"X-API-Token", generated}});
+    ASSERT_TRUE(r);
+    EXPECT_EQ(json::parse(r->body)["cookieFile"], server.cookieFile());
     EXPECT_EQ(r->body.find(generated), std::string::npos);
 
     std::string path = server.cookieFile();
@@ -658,7 +663,7 @@ TEST_F(ServerAuthTest, WalletFileIsPrivateAndCorruptFileIsNeverOverwritten) {
         httplib::Client cli("127.0.0.1", server.port());
         firstAddress = createWallet(cli)["wallet"]["address"];
         walletPath = server.walletFile();
-        EXPECT_EQ(walletPath, cfg.dataDir + "/wallets.json");
+        EXPECT_EQ(walletPath, cfg.dataDir + "/regtest/wallets.json");
         ASSERT_TRUE(fs::exists(walletPath));
 #ifndef _WIN32
         EXPECT_EQ(fileMode(walletPath), 0600u);
@@ -719,7 +724,7 @@ TEST_F(ServerAuthTest, WalletFileIsPrivateAndCorruptFileIsNeverOverwritten) {
 
 TEST_F(ServerAuthTest, UnknownFieldsSurviveRewriteAndMnemonicsAreDropped) {
     fs::create_directories(cfg.dataDir);
-    std::string walletPath = cfg.dataDir + "/wallets.json";
+    std::string walletPath = cfg.dataDir + "/regtest/wallets.json";
     Bucks::Wallet w1 = Bucks::Wallet::createNew(nullptr);
     json doc = {
         {"version", 2},
@@ -759,7 +764,7 @@ TEST_F(ServerAuthTest, TamperedPublicKeyIsNotLoaded) {
     json doc = {{"version", 2}, {"wallets", json::array({
         {{"privKeyHex", victim.getPrivateKeyHex()}, {"pubKeyHex", attacker.getPublicKeyHex()}}
     })}};
-    writeFile(cfg.dataDir + "/wallets.json", doc.dump());
+    writeFile(cfg.dataDir + "/regtest/wallets.json", doc.dump());
 
     Bucks::Server server(*chain, nullptr, cfg);
     EXPECT_TRUE(server.walletsEnabled());
@@ -865,4 +870,50 @@ TEST(RateLimiterTest, EvictsIdleKeys) {
     EXPECT_LE(many.trackedKeys(), 601u);
     for (int i = 0; i < 512; ++i) many.allowRequest("fresh");
     EXPECT_LE(many.trackedKeys(), 2u);
+}
+
+// ---------------------------------------------------------------------------
+// Audit findings WAL-1, 3, 4, 9, 10 (reports/audit-2026-10-14/wallet-api-web.md)
+// ---------------------------------------------------------------------------
+
+// WAL-1: a wallets.json in the working directory is never read unless the operator asks for it.
+TEST_F(ServerAuthTest, DefaultConfigNeverReadsAWalletsJsonFromTheWorkingDirectory) {
+    Bucks::ServerConfig fresh;
+    EXPECT_TRUE(fresh.legacyWalletFile.empty());
+}
+
+// WAL-9: a guessable token is refused at start.
+TEST_F(ServerAuthTest, ShortApiTokenIsRefused) {
+    cfg.apiToken = "short";
+    Bucks::Server server(*chain, nullptr, cfg);
+    EXPECT_FALSE(server.start(0));
+}
+
+// WAL-3 and WAL-4: no language means a shipped list, not the placeholder; a bad flag is refused BEFORE the wallet is saved.
+TEST_F(ServerAuthTest, CreateWalletDefaultsAndValidatesBeforeSaving) {
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+
+    auto r = cli.Post("/api/wallets/create", tokenHeader, R"({"includeCanonical":"yes"})", "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400);
+    r = cli.Get("/api/wallets", tokenHeader);
+    ASSERT_TRUE(r);
+    EXPECT_EQ(json::parse(r->body)["wallets"].size(), 0u) << "a wallet was saved although the request was refused";
+
+    json made = createWallet(cli);
+    EXPECT_NE(made["language"], "ar-dev");
+    server.stop();
+}
+
+// WAL-10: only a branch the node actually parked can be approved.
+TEST_F(ServerAuthTest, ApproveReorgRefusesAnUnknownTip) {
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+    auto r = cli.Post("/api/node/approve-reorg", tokenHeader, "{\"tipHash\":\"" + std::string(64, 'a') + "\"}", "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 409) << r->body;
+    server.stop();
 }

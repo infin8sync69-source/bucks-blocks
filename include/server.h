@@ -52,7 +52,7 @@ private:
 // ------------------------------------------------------------
 struct ServerConfig {
     uint16_t port = 8080;                 // 0 = any free port (see Server::port())
-    size_t maxWorkers = 0;                // 0 = httplib default thread pool
+    size_t maxWorkers = 32;               // worker threads (0 = httplib default); slow clients are cut off by the read timeout
     size_t maxRequestSize = 1024 * 1024;  // request body limit (bytes)
     bool enableRateLimit = true;
     size_t rateLimitRequests = 300;
@@ -65,7 +65,7 @@ struct ServerConfig {
     // "" = Server::defaultDataDir() (~/.bucks). Created with mode 0700.
     std::string dataDir;
     // Pre-datadir wallet file. Read once, never written (see loadWallets()).
-    std::string legacyWalletFile = "wallets.json";
+    std::string legacyWalletFile;           // empty: never read a wallets.json from the working directory (audit WAL-1); --import-legacy-wallets sets it
 
     // ---- Authentication ----
     // Token precedence: apiToken (argv) > apiTokenFile > $BUCKS_API_TOKEN >

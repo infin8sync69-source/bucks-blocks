@@ -192,11 +192,11 @@ const ChainParams& chainParams(NetworkId id);
 
 | Field | main | test | regtest |
 |---|---|---|---|
-| `netMagic` (wire bytes) | `B7 C5 E3 A9` | `B7 C5 E3 7E` | `B7 C5 E3 5D` |
+| `netMagic` (wire bytes) | `B7 C5 E3 A9` | `B7 C5 E3 7F` | `B7 C5 E3 5D` |
 | `defaultP2PPort` | 8733 | 18733 | 18744 |
 | `defaultApiPort` | 8080 | 18080 | 18090 |
 | `p2pkhAddressVersion` | 0x1A (addresses start with `B`) | 0x41 (`T`) | 0x7F (`t`) |
-| `powLimitBits` = genesis bits | `0x1d00ffff` | `0x1d00ffff` | `0x207fffff` |
+| `powLimitBits` = genesis bits | `0x1d00ffff` | `0x1e00ffff` (about 2^24 hashes; changed 2026-10-14 so one laptop mines testnet in seconds) | `0x207fffff` |
 | `powNoRetargeting` | false | false | true |
 | `halvingInterval` | 210,000 | 210,000 | 150 |
 | `maxAutoReorgDepth` | 100 | 100 | 100 (tests may override) |

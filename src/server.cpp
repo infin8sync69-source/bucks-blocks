@@ -349,10 +349,13 @@ Server::Server(Node& n, Network* net, const ServerConfig& cfg)
       svr(new httplib::Server()) {
 
     dataDirPath = config.dataDir.empty() ? defaultDataDir() : config.dataDir;
-    walletFilePath = (fs::path(dataDirPath) / "wallets.json").string();
+    // One wallet file per network, next to that network's chain (and its process lock): two nodes can no longer
+    // overwrite each other's keys through a shared file (audit WAL-2).
+    const std::string walletDir = (fs::path(dataDirPath) / node.params().name).string();
+    walletFilePath = (fs::path(walletDir) / "wallets.json").string();
 
     std::string err;
-    if (!ensurePrivateDir(dataDirPath, &err)) {
+    if (!ensurePrivateDir(dataDirPath, &err) || !ensurePrivateDir(walletDir, &err)) {
         startupError = "cannot create data directory " + dataDirPath + ": " + err;
         walletErr = startupError;
         Bucks::logErr() << "✗ " << startupError << "\n";
@@ -387,8 +390,14 @@ Server::~Server() {
 
 bool Server::resolveApiToken() {
     tokenGenerated = false;
+    constexpr size_t kMinToken = 16;   // a one-character token is a guessable password (audit WAL-9)
     if (!config.apiToken.empty()) {
         apiToken = config.apiToken;
+        if (apiToken.size() < kMinToken) {
+            startupError = "the API token must be at least 16 characters";
+            Bucks::logErr() << "✗ " << startupError << "\n";
+            return false;
+        }
         return true;
     }
     if (!config.apiTokenFile.empty()) {
@@ -399,8 +408,8 @@ bool Server::resolveApiToken() {
             return false;
         }
         apiToken = trimWs(t);
-        if (apiToken.empty()) {
-            startupError = "API token file " + config.apiTokenFile + " is empty";
+        if (apiToken.size() < kMinToken) {
+            startupError = "API token file " + config.apiTokenFile + " must hold a token of at least 16 characters";
             Bucks::logErr() << "✗ " << startupError << "\n";
             return false;
         }
@@ -460,8 +469,8 @@ bool Server::start(int port) {
 
     // Resource limits (API-9)
     s->set_payload_max_length(config.maxRequestSize);
-    s->set_read_timeout(15, 0);
-    s->set_write_timeout(15, 0);
+    s->set_read_timeout(5, 0);    // a half-sent request frees its worker after 5 s (audit WAL-5)
+    s->set_write_timeout(10, 0);
     s->set_keep_alive_timeout(5);
     s->set_keep_alive_max_count(100);
     if (config.maxWorkers > 0) {
@@ -497,9 +506,10 @@ bool Server::start(int port) {
         if (config.enableRateLimit && rateLimiter) {
             std::string key = req.remote_addr;
             if (config.trustProxy && req.has_header("X-Forwarded-For")) {
+                // The proxy appends the address it saw, so the LAST entry is the one a client cannot forge (audit WAL-6).
                 std::string xff = req.get_header_value("X-Forwarded-For");
-                std::string first = trimWs(xff.substr(0, xff.find(',')));
-                if (!first.empty()) key = first;
+                std::string last = trimWs(xff.substr(xff.rfind(',') == std::string::npos ? 0 : xff.rfind(',') + 1));
+                if (!last.empty()) key = last;
             }
             if (!rateLimiter->allowRequest(key)) {
                 res.set_header("Retry-After", std::to_string(config.rateLimitWindow.count()));
@@ -882,8 +892,8 @@ void Server::setupRoutes() {
             {"walletsEnabled", walletOk},
             {"walletError", walletErr}
         };
-        // Where the generated token lives (a 0600 file); never the token itself.
-        if (!cookieFilePath.empty()) j["cookieFile"] = cookieFilePath;
+        // The location of the token file is not published to unauthenticated callers (audit WAL-7).
+        if (!cookieFilePath.empty() && kind != AuthKind::None) j["cookieFile"] = cookieFilePath;
         reply(res, 200, j);
     });
 
@@ -1053,6 +1063,12 @@ void Server::setupRoutes() {
         json body;
         if (!parseBody(req, res, body)) return;
         std::string lang = body.contains("language") && body["language"].is_string() ? body["language"].get<std::string>() : "";
+        if (body.contains("includeCanonical") && !body["includeCanonical"].is_boolean()) {
+            reply(res, 400, errorJson("includeCanonical must be true or false"));   // before anything is saved (audit WAL-4)
+            return;
+        }
+        // No language given: use the best list we ship, never the development placeholder (audit WAL-3).
+        if (lang.empty()) lang = canonicalMnemonicLanguage();
         size_t entropyBits = Wallet::DEFAULT_ENTROPY_BITS;
         if (body.contains("words")) {
             if (!body["words"].is_number_unsigned()) {
@@ -1114,6 +1130,10 @@ void Server::setupRoutes() {
         if (!parseBody(req, res, body)) return;
         std::string restoreMnemonic = body.contains("mnemonic") && body["mnemonic"].is_string() ? body["mnemonic"].get<std::string>() : "";
         std::string pass = body.contains("passphrase") && body["passphrase"].is_string() ? body["passphrase"].get<std::string>() : "";
+        if (body.contains("includeCanonical") && !body["includeCanonical"].is_boolean()) {
+            reply(res, 400, errorJson("includeCanonical must be true or false"));
+            return;
+        }
         if (trimWs(restoreMnemonic).empty()) {
             reply(res, 400, errorJson("Mnemonic required"));
             return;

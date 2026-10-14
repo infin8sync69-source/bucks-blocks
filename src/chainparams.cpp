@@ -42,7 +42,7 @@ ChainParams makeTest() {
     ChainParams p = makeMain();
     p.id = NetworkId::TEST;
     p.name = "test";
-    p.netMagic = {0xB7, 0xC5, 0xE3, 0x7E};
+    p.netMagic = {0xB7, 0xC5, 0xE3, 0x7F};   // changed with the 2026-10-14 genesis so old-testnet peers cannot connect
     p.defaultP2PPort = 18733;
     p.defaultApiPort = 18080;
     p.p2pkhAddressVersion = 0x41;

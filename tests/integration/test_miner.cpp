@@ -340,3 +340,23 @@ TEST(Miner, StopRequestEndsTheLoop) {
     EXPECT_EQ(r.mine(err), MineResult::STOPPED);
     EXPECT_EQ(r.chain.tip()->height, 0u);
 }
+
+// Audit CON-1: a header whose block never arrives must not hold mining forever.
+TEST(Miner, HeaderWithoutABlockStopsGatingAfterTenMinutes) {
+    ChainParams p = chainParams(NetworkId::REGTEST);
+    p.id = NetworkId::TEST;
+    Rig r(p);
+    ASSERT_TRUE(r.chain.ok());
+    BlockTemplate t;
+    std::string err;
+
+    Block phantom = r.chain.build(r.chain.tip());
+    ASSERT_TRUE(r.chain.state().ProcessNewBlockHeaders({phantom.header}).valid());   // its body never comes
+    EXPECT_EQ(r.chain.state().miningBlockedReason(), "node is syncing");
+
+    r.chain.now() += 599;
+    EXPECT_EQ(r.chain.state().miningBlockedReason(), "node is syncing");
+    r.chain.now() += 2;   // 601 s after the header was first stored
+    EXPECT_EQ(r.chain.state().miningBlockedReason(), "");
+    EXPECT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
+}

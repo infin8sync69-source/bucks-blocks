@@ -305,7 +305,7 @@ bool Peer::sendMsg(const NetMessage& msg) {
 #else
     constexpr int kSendFlags = MSG_DONTWAIT;
 #endif
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     size_t off = 0;
     while (off < data.size()) {
         const ssize_t n = ::send(socket_fd, reinterpret_cast<const char*>(data.data()) + off,
@@ -418,6 +418,15 @@ static int penaltyFor(ValidationResult r) {
 void Peer::handleMessage(const NetMessage& msg) {
     Node& node = network.getNode();
 
+    // Everything except the key exchange itself must be encrypted: a peer that skips ENCINIT is refused
+    // instead of being served in plaintext (audit NET-3).
+    if (!encryptionNegotiated && msg.type != MessageType::ENCINIT) {
+        Bucks::logErr() << "DEBUG: Peer " << ip << " sent a message before the encryption handshake; dropping it" << std::endl;
+        network.banIP(ip);
+        disconnect();
+        return;
+    }
+
     NetMessage decrypted = msg;
     if (encryptionNegotiated && msg.type != MessageType::ENCINIT) {
         std::vector<uint8_t> clear;
@@ -433,6 +442,10 @@ void Peer::handleMessage(const NetMessage& msg) {
 
     switch (decrypted.type) {
         case MessageType::ENCINIT: {
+            if (encryptionNegotiated) {   // a second key exchange is never legitimate
+                misbehavior(20);
+                break;
+            }
             if (decrypted.payload.size() >= 33) {
                  PublicKey peerPub(decrypted.payload.begin(), decrypted.payload.begin() + 33);
                  if (encryption->establishSharedSecret(peerPub)) {
@@ -770,6 +783,11 @@ bool Network::connectToPeer(const std::string& host, uint16_t port) {
     std::string ip;
     if (!resolveIPv4(host, ip)) return false;
 
+    {
+        std::lock_guard<std::mutex> lock(peersMutex);
+        if (peers.size() >= MAX_PEERS) return false;   // outbound dials respect the same cap (audit NET-6)
+    }
+
     int s = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
     if (s == -1) return false;
 
@@ -778,20 +796,31 @@ bool Network::connectToPeer(const std::string& host, uint16_t port) {
     addr.sin_port = htons(port);
     inet_pton(AF_INET, ip.c_str(), &addr.sin_addr);
 
+#ifndef _WIN32
+    // Non-blocking connect with a 3 s bound, so an unreachable host cannot hold the network thread (audit NET-4).
+    fcntl(s, F_SETFL, fcntl(s, F_GETFL, 0) | O_NONBLOCK);
     if (connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1) {
-#ifdef _WIN32
+        if (errno != EINPROGRESS) {
+            close(s);
+            return false;
+        }
+        struct pollfd pfd = {s, POLLOUT, 0};
+        int soErr = 0;
+        socklen_t soLen = sizeof(soErr);
+        if (::poll(&pfd, 1, 3000) <= 0 || getsockopt(s, SOL_SOCKET, SO_ERROR, &soErr, &soLen) != 0 || soErr != 0) {
+            close(s);
+            return false;
+        }
+    }
+#else
+    if (connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1) {
         int err = WSAGetLastError();
         if (err != WSAEWOULDBLOCK) {
             closesocket(s);
             return false;
         }
-#else
-        if (errno != EINPROGRESS) {
-            close(s);
-            return false;
-        }
-#endif
     }
+#endif
 
     std::lock_guard<std::mutex> lock(peersMutex);
     peers[s] = std::make_unique<Peer>(*this, s, ip, port);
@@ -864,8 +893,19 @@ void Network::maintainConnections() {
     }
 }
 
+// A peer that was disconnected from inside one of its own handlers (oversized frame, write timeout) still
+// has an entry here with a closed descriptor. Remove those before the next select() (audit NET-1).
+void Network::reapDisconnectedPeers() {
+    std::lock_guard<std::mutex> lock(peersMutex);
+    for (auto it = peers.begin(); it != peers.end();) {
+        if (it->second->getState() == PeerState::DISCONNECTED) it = peers.erase(it);
+        else ++it;
+    }
+}
+
 void Network::run() {
     while (running) {
+        reapDisconnectedPeers();
         fd_set readFds;
         FD_ZERO(&readFds);
         FD_SET(listenSocket, &readFds);
@@ -888,6 +928,9 @@ void Network::run() {
 #else
             if (errno == EINTR) continue;
 #endif
+            // Any other error (EBADF from a stale descriptor, ...): clean up and back off, never spin.
+            reapDisconnectedPeers();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
 
@@ -1212,7 +1255,11 @@ void Network::handleAddrMessage(const std::vector<std::string>& addresses) {
             if (colonPos == std::string::npos) continue;
 
             std::string ip  = addr.substr(0, colonPos);
-            uint16_t   port = static_cast<uint16_t>(std::stoi(addr.substr(colonPos + 1)));
+            int portNum = 0;
+            // The address comes from a peer: never let a bad port throw out of the network thread (audit NET-2).
+            try { portNum = std::stoi(addr.substr(colonPos + 1)); } catch (...) { continue; }
+            if (portNum < 1 || portNum > 65535 || ip.empty() || ip.size() > 253) continue;
+            uint16_t port = static_cast<uint16_t>(portNum);
 
             bool alreadyConnected = false;
             for (const auto& [fd, peer] : peers) {
