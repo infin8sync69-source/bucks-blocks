@@ -1,0 +1,487 @@
+index,arabic_word,corpus_lemma,current_english,issue_type,severity,reason,proposed_english
+10,ءامنة,آمِنَة,secure,arabic-duplicate,Consider,"آمنة/آمن (10, 11) are gender variants with the same meaning; secure/safe is near-synonym",
+12,ءامين,آمّ,heading,vague,Consider,آمّ = those heading to (the Sacred House); heading is vague,
+17,ابتغاء,ابْتِغاء,seeking,inflection-pair,Should-fix,"seeking/seek (17 vs 338): same root, one gloss is an inflection of the other; easy to confuse when written",search
+25,اتباع,اتِّباع,adherence,inflection-pair,Should-fix,adherence (25) and adhere (1758),allegiance
+34,أثاما,أَثام,guilt,wrong-gloss,Consider,أثام in 25:68 is penalty; guilt vs sin(37) vs sinful(3) vs wicked(40),penalty
+39,اثنين,اثْنَيْن,twain,archaic,Should-fix,twain is archaic and forced; two/twain are confusable to a reader,dual
+51,أحصرتم,أُحْصِرُ,restrained,inflection-pair,Should-fix,restrained (51) and restrain (1988),besieged
+55,أحق,أَحَقّ,deserving,inflection-pair,Should-fix,"deserving/deserve (55 vs 100): same word family; 55 is comparative ""more entitled""",entitled
+60,اختلاف,اخْتِلاف,difference,inflection-pair,Consider,difference/differ (60 vs 63): same word family,variation
+64,أخدان,أَخْدان,companions,plural-pair,Must-fix,companions (64) is the plural of companion (1272),partners
+65,إخراج,إِخْراج,expulsion,wrong-gloss,Consider,أخرج = bring out; extract is too narrow (66 vs 65 expulsion),
+68,أخطأنا,أَخْطَأْ,err,inflection-pair,Should-fix,error/err (948 vs 68): same word family; 949 ضلالة has identical meaning to 948,mistake
+72,ادارك,ادّارَكَ,overtake,vague,Consider,ادّارك = reach/exhaust; overtake is loose,
+92,أزلفت,أُزْلِفَتْ,closer,vague,Consider,أزلفت = brought near; closer is a comparative,
+99,استحبوا,اسْتَحَبُّ,favor,vague,Consider,استحب = preferred/loved; favor is vague and clashes with prefer (2),
+118,أسس,أَسَّسَ,found,confusable,Consider,found is also the past tense of find,
+127,أشتاتا,أَشْتات,scattered,inflection-pair,Should-fix,scattered/scatter (127 vs 219): same word family,separately
+131,أشحة,شُحّ,stingy,forced-synonym,Consider,stingy/miserliness (131 vs 272) near-synonyms,
+140,أصغر,أَصْغَر,smaller,inflection-pair,Should-fix,smaller (140) and small (919),lesser
+141,إصلاح,إِصْلاح,reform,inflection-pair,Should-fix,reformer/reform (1477 vs 141),improvement
+142,أصناما,أَصْنام,idols,forced-synonym,Consider,idols/effigies (142 vs 252): same Arabic sense; effigies is odd,
+145,اضطر,اضْطُرَّ,compelled,inflection-pair,Consider,compelled/compulsion (145 vs 193),
+149,إطعام,إِطْعام,feeding,inflection-pair,Should-fix,feed/feeding (1973 vs 149),catering
+157,إعراضا,إِعْراض,aversion,inflection-pair,Should-fix,"aversion (157), averse (1213), averting (1501), avert (1864): four forms",indifference
+172,افتراء,افْتِراء,slander,wrong-gloss,Should-fix,افتراء is fabricating a lie (esp. against God); slander is defamation of a person,hoax
+174,أفرغ,أَفْرِغْ,pour,inflection-pair,Should-fix,poured/pour (1450 vs 174),infuse
+180,أقتت,أُقِّتَتْ,appointed,inflection-pair,Should-fix,appointed (180) and appointment (1651),scheduled
+184,اقترب,اقْتَرَبَ,nigh,archaic,Should-fix,nigh is archaic and rhymes with high/sigh; اقترب = draw near,imminent
+186,أقسم,أَقْسَمُ,swear,sensitive,Consider,swear can read as profanity; أقسم = take an oath,
+195,أكلا,أَكْل,eating,inflection-pair,Should-fix,"eating/eat (195 vs 335): same word family, one letter-block apart",nourishment
+196,أكنانا,أَكْنان,shelters,plural-pair,Must-fix,shelters (196) is the plural of shelter (15),recesses
+209,أمطرت,أُمْطِرَتْ,rained,inflection-pair,Should-fix,rain/rained (1485 vs 209),showered
+216,أنباء,نَبَأ,tidings,archaic,Should-fix,tidings is archaic; نبأ means significant news/report,update
+221,انتقام,انتِقام,vengeance,sensitive,Consider,vengeance is violent-sounding,reprisal
+224,انسلخ,انسَلَخَ,slip,vague,Consider,انسلخ = shed/slip out of; slip is vague,
+227,إنشاء,إِنشاء,origination,inflection-pair,Should-fix,"origination (227), originator (1098), originate (1909): three forms",creation
+237,انفطرت,انفَطَرَتْ,cleave,wrong-gloss,Should-fix,cleave is a contronym (join/split) and duplicates split (230); انفطر = burst/split open,rupture
+238,أنقض,أَنقَضَ,weigh,wrong-gloss,Consider,أنقض = weighed down/broke; weigh loses the sense,
+245,أهدى,أَهْدَى,guidance,wrong-gloss,Should-fix,"أهدى is comparative ""better guided""; guidance is a different word (هدى) and loses the sense",wiser
+258,باخع,باخِع,grieving,inflection-pair,Should-fix,grieving (258) and grieve (334),heartbroken
+261,بارزة,بارِزَة,conspicuous,arabic-duplicate,Consider,"بارزة/بارز (261, 262) gender variants; conspicuous/emerging hide identical meaning",
+262,بارزون,بارِز,emerging,inflection-pair,Should-fix,"emerge (290), emerging (262), emergence (1486): three forms",prominent
+264,بازغة,بازِغَة,gleaming,arabic-duplicate,Should-fix,"بازغة is the feminine of بازغ (263): same meaning (rising, of sun/moon); gleaming is wrong",luminous
+269,باقية,باقِيَة,remaining,inflection-pair,Should-fix,remaining (269) and remain (980),residual
+274,بالغة,بالِغَة,conclusive,vague,Consider,بالغة = far-reaching; conclusive is loose,profound
+277,بتابع,تابِع,follower,inflection-pair,Should-fix,follow (26) and follower (277),disciple
+279,بحر,بَحْر,sea,homophone,Must-fix,"sea (279) and see (21) are homophones; the Arabic words (بحر, أبصر) are unrelated",ocean
+281,بحيرة,بَحِيرَة,dromedary,wrong-gloss,Consider,بحيرة = a camel with slit ear; dromedary loses the sense; dromedary (281) would clash with dromedaries if 548 is changed,notched
+286,براءة,بَراءَة,immunity,wrong-gloss,Consider,براءة = disavowal/discharge; immunity misleads,discharge
+291,بركات,بَرَكَة,boon,archaic,Consider,boon is dated; بركة = blessing,
+304,بطارد,طارِد,expeller,inflection-pair,Should-fix,"expeller (304) and expelled (1383), expulsion (65)",chaser
+307,بطشا,بَطْش,assault,sensitive,Consider,assault sounds violent in a random phrase,grip
+309,بعثر,بُعْثِرَ,upheaved,archaic,Consider,upheaved is dated,unearthed
+314,بغيا,بَغْي,aggression,inflection-pair,Should-fix,aggressor/aggression (1496 vs 314),oppression
+320,بنى,بُنَىّ,son,homophone,Must-fix,son (320) and sun (884) are homophones and one letter apart,junior
+322,بهتانا,بُهْتان,calumny,archaic,Should-fix,"calumny is rare/literary and overlaps slander cluster (172, 61, 177); بهتان = slanderous lie",libel
+327,بوالديه,والِدَي,sire,archaic,Should-fix,"sire is archaic, also a verb, and duplicates parents (24); والد = father/parent",begetter
+342,تبديلا,تَبْدِيل,alteration,inflection-pair,Should-fix,alter/alteration (1887 vs 342),conversion
+345,تبرج,تَبَرُّج,display,vague,Consider,تبرج = showing off adornment; display is vague,
+355,تتبيب,تَتْبِيب,perdition,forced-synonym,Consider,"perdition/annihilation (355, 356): both = destruction",
+360,تتكبر,يَتَكَبَّرُ,haughty,forced-synonym,Consider,"haughty/arrogant (360 vs 108): same root, near-synonyms",
+364,تثريب,تَثْرِيب,rebuke,forced-synonym,Consider,rebuke/scold (364 vs 497),
+368,تجهلون,يَجْهَلُ,ignorant,inflection-pair,Should-fix,ignorant/ignorance (368 vs 278): same word family,unaware
+372,تحصنا,تَحَصُّن,chastity,inflection-pair,Should-fix,chastity/chaste (372 vs 52): same word family; sexual-adjacent,propriety
+375,تحية,تَحِيَّة,greeting,inflection-pair,Should-fix,greeting (375) and greet (2010),salutation
+381,تخسير,تَخْسِير,loss,inflection-pair,Should-fix,"lose/loss/loser (380, 381, 619): three forms of one word family in one list; loss (381) with lose (380) and loser (619): one word family",shortfall
+384,تخفيف,تَخْفِيف,lightening,homophone,Must-fix,lightening (384) and lightning (1804): near-homophones one letter apart,reduction
+389,تدعون,يَدَّعُ,pretend,wrong-gloss,Consider,ادّعى = claim; pretend implies falsehood,
+393,تذهل,تَذْهَلُ,distracted,inflection-pair,Should-fix,distracted (393) and distract (481),dazed
+398,تراود,راوَدُ,solicit,sensitive,Consider,solicit reads as sexual/commercial; راود = try to persuade or seduce,
+400,ترتيلا,تَرْتِيل,measured,inflection-pair,Should-fix,measured (400) and measure (465),unhurried
+401,ترجف,تَرْجُفُ,quake,forced-synonym,Consider,"quake/quiver/shiver/shake/sway (401, 498, 469, 488, 487): one cluster of shaking verbs",
+405,ترى,رَأَى,behold,archaic,Should-fix,behold is archaic; رأى = see,observe
+411,تساقط,تُساقِطْ,drop,confusable,Consider,shed is a homograph (noun); 418 تسقط shed vs 411 drop same root,
+412,تسبوا,يَسُبُّ,revile,sensitive,Consider,revile is formal and insult-related,insult
+415,تستكثر,اسْتَكْثَرْ,multiply,vague,Consider,استكثر = take much/regard as much; multiply is loose,
+419,تسمع,أَسْمَعَ,proclaim,inflection-pair,Should-fix,proclaim (419) and proclaimer (1594),inform
+424,تشقق,يَشَّقَّقُ,fissure,odd-word,Consider,fissure used as a verb is unusual,crack
+427,تصدى,تَصَدَّى,attend,inflection-pair,Should-fix,"attend (427), attending (571), attended (1348), attendants (1510): four forms",tackle
+432,تضحى,تَضْحَى,sunned,odd-word,Consider,sunned is unusual; تضحى = be exposed to the sun,
+436,تطع,أَطاعَ,obey,inflection-pair,Should-fix,"obedience/obey (955 vs 436); obeyed (1972) joins obey, obedience, obedient: four forms",yield
+439,تظاهرا,تَظاهَرُ,collude,sensitive,Consider,collude has a criminal tone; تظاهر = support each other,
+444,تعثوا,تَعْثَ,corrupt,inflection-pair,Should-fix,corruption/corrupt (1136 vs 444),ravage
+451,تغيظا,تَغَيُّظ,raging,vague,Consider,تغيظ = raging/boiling; fine but intensity word,
+454,تفتؤا,تَفْتَؤُا۟,desist,forced-synonym,Consider,"desist/cease (454 vs 19): both are the ""never cease"" verbs",
+460,تفضيلا,تَفْضِيل,preference,inflection-pair,Should-fix,preference/prefer (460 vs 2): same word family,priority
+463,تقتيلا,تَقْتِيل,slaughter,sensitive,Consider,slaughter is violent,
+466,تقر,تَقَرَّ,delighted,inflection-pair,Should-fix,delight (323) and delighted (466),elated
+467,تقربوا,يَقْرَبُ,adjoin,wrong-gloss,Should-fix,يقرب = come near; adjoin means share a border,venture
+474,تكذيب,تَكْذِيب,denial,inflection-pair,Should-fix,denier/denial (1569 vs 474),refusal
+485,تمنى,تَمَنَّى,long,vague,Consider,تمنى = wish/long for; long is also an adjective,
+495,تنقذ,أَنقَذَ,deliver,vague,Consider,deliver is ambiguous (parcels),
+512,ثقلت,ثَقُلَتْ,weighty,forced-synonym,Consider,"ponderous (513) vs heavy (36) vs weighty (512): ثقل cluster, ponderous is negative",
+515,ثمانى,ثَمانِي,eight,confusable,Consider,eight (515) and eighty (516) differ by one letter,
+518,ثمرات,ثَمَرَة,produce,vague,Consider,produce is a noun/verb homograph; ثمرة = fruit,
+521,ثيبات,ثَيِّبَة,matron,archaic,Consider,matron is dated; ثيبة = previously married woman,
+527,جامع,جامِع,assembler,inflection-pair,Should-fix,"assembler (527), assembly (549), assembled (1342): three forms",compiler
+528,جاهلون,جاهِل,fool,sensitive,Should-fix,fool is an insult inside a random phrase; جاهل = ignorant person,uneducated
+529,جائر,جائِر,deviant,sensitive,Should-fix,"deviant carries a sexual/criminal tone; جائر = unjust, swerving from right; deviant (529) and deviate (764)",wrongful
+532,جدارا,جِدار,wall,arabic-duplicate,Consider,جدار wall / جدر rampart: same lemma singular/plural,
+548,جمالت,جِمالَت,camels,plural-pair,Must-fix,camels (548) is the plural of camel (1678),dromedaries
+550,جملة,جُمْلَة,entirety,inflection-pair,Should-fix,"entirety (550), entire (1222), entirely (1218): three forms",totality
+556,جهارا,جِهار,openly,arabic-duplicate,Consider,"جهار/جهرة openly/publicly: same root, identical meaning",
+560,جواب,جَواب,response,inflection-pair,Should-fix,respond/response (1940 vs 560),answer
+565,حارب,حارَبَ,war,vague,Consider,حارب = fight a war; war is a noun,
+566,حاسبين,حاسِب,reckoner,inflection-pair,Should-fix,reckoner (566) and reckon (1908),accountant
+568,حاش,حاش,absolutely,wrong-gloss,Consider,حاش = exclamation of dissociation (far be it); absolutely misleads,
+569,حاشرين,حاشِر,summoner,inflection-pair,Should-fix,summoner (569) and summon (1928),mobilizer
+570,حاصبا,حاصِب,storm,vague,Consider,حاصب = stone-pelting wind; storm is vague,
+573,حاضرى,حاضِرِي,dwellers,inflection-pair,Should-fix,"dwellers (573) belongs to the dwell/dwelling family (121, 1858)",locals
+574,حافظات,حافِظَة,guardian,inflection-pair,Should-fix,"guardian (574), guard (605), guarded (1576): family of the same word",steward
+577,حامية,حامِيَة,scalding,inflection-pair,Should-fix,scalding (577) and scald (1966),seething
+581,حجاب,حِجاب,veil,inflection-pair,Should-fix,veiled (500) and veil (581),curtain
+588,حرسا,حَرَس,guards,plural-pair,Must-fix,guards (588) is the plural of guard (605),sentinels
+590,حرمات,حُرُمَة,inviolability,long-word,Consider,"inviolability: 13 letters, hard to spell",sanctity
+592,حزب,حِزْب,party,vague,Consider,party is ambiguous (celebration/political),
+604,حطة,حِطَّة,absolution,vague,Consider,"حطة absolution: rare, religious",forgiveness
+608,حلالا,حَلال,permissible,inflection-pair,Should-fix,permission (260) and permissible (608),lawful
+610,حمولة,حَمُولَة,pack,vague,Consider,حمولة = pack animals; pack is vague,
+612,حنيذ,حَنِيذ,roasted,inflection-pair,Should-fix,roasted (612) and roast (1713),baked
+615,حيلة,حِيلَة,stratagem,archaic,Consider,stratagem is formal,trick
+618,خاسرة,خاسِرَة,ruinous,inflection-pair,Should-fix,ruin (337) and ruinous (618),unprofitable
+619,خاسرين,خاسِر,loser,inflection-pair,Should-fix,loser (619) with lose (380) and loss (381),bankrupt
+621,خاشعة,خاشِع,submissive,forced-synonym,Consider,"submissive/bowing/humble/lowly (621, 623, 78, 676): خشع/خضع/ذلل cluster",
+625,خافضة,خافِضَة,lowering,inflection-pair,Should-fix,lowering (625) and lower (1090),demoting
+626,خالاتك,خالَة,auntie,vague,Consider,"auntie is informal; خالة = maternal aunt; auntie (626, maternal aunt) vs aunt (1041, paternal aunt): near duplicates",
+627,خالدين,خالِد,everlasting,forced-synonym,Consider,everlasting/perpetual (627 vs 685),
+632,خاوية,خاوِيَة,collapsed,inflection-pair,Should-fix,collapsed (632) and collapse (1763),desolate
+636,خبالا,خَبال,mischief,wrong-gloss,Consider,خبال = ruin/corruption; mischief is mild,
+648,خسرانا,خُسْران,damage,wrong-gloss,Consider,"خسران = loss/ruin; damage is off, and loss is already used (381)",
+651,خصاصة,خَصاصَة,want,vague,Consider,want is ambiguous (verb); خصاصة = poverty/need,
+652,خصمان,خَصْم,adversary,forced-synonym,Consider,adversary/contentious/disputant (652-654): one root three words,
+654,خصيم,خَصِيم,disputant,inflection-pair,Should-fix,dispute (362) and disputant (654),litigant
+662,خفيفا,خَفِيف,slight,confusable,Consider,light (661) vs slight (662) vs lightening (384),
+665,خليلا,خَلِيل,intimate,sensitive,Consider,intimate can read sexual; خليل = close friend,
+669,خنزير,خِنزِير,swine,sensitive,Consider,swine is an insult and religiously loaded,pig
+671,خيانة,خِيانَة,betrayal,inflection-pair,Consider,betrayal/betray (671 vs 70): same word family,
+673,خيفة,خِيفَة,apprehension,inflection-pair,Should-fix,apprehend (511) and apprehension (673),misgiving
+695,دفء,دِفْء,warmth,inflection-pair,Should-fix,warm (429) and warmth (695),snugness
+703,ذبابا,ذُباب,fly,confusable,Consider,fly is also a verb,
+704,ذراعا,ذِراع,cubit,archaic,Consider,cubit is archaic; ذراع = arm/forearm length,
+708,ذللا,ذُلُل,tractable,arabic-duplicate,Should-fix,ذلل (plural) and ذلول (709) are the same lemma ذَلُول; tractable/tamed hide an identical meaning,
+709,ذلول,ذَلُول,tamed,arabic-duplicate,Consider,see 708,
+715,رابيا,رابِي,swelling,inflection-pair,Should-fix,swell/swelling (1929 vs 715),billowing
+717,راجعون,راجِع,returning,inflection-pair,Should-fix,return (461) and returning (717),recurring
+721,راغبون,راغِب,desirous,inflection-pair,Should-fix,desire (130) and desirous (721),zealous
+738,ردف,رَدِفَ,tail,vague,Consider,tail as a verb is informal; ردف = follow close behind,
+740,رشدا,رَشَد,rectitude,archaic,Consider,rectitude is formal/hard to spell,integrity
+741,رضوان,رِضْوان,approbation,archaic,Consider,approbation is rare; رضوان = approval/pleasure,goodwill
+748,رفيقا,رَفِيق,comrade,vague,Consider,comrade is political; رفيق = companion,
+749,رقود,رُقُود,slumbering,inflection-pair,Should-fix,slumber/slumbering (1598 vs 749),napping
+750,ركاب,رِكاب,mounts,plural-pair,Must-fix,mounts (750) is the plural of mount (974),steeds
+754,رهبة,رَهْبَة,trepidation,archaic,Consider,trepidation is long/formal,unease
+757,رهين,رَهِين,pledged,inflection-pair,Should-fix,pledge (276) and pledged (757),pawned
+759,رواسى,رَواسِي,anchors,wrong-gloss,Consider,رواسي = firm mountains; anchors is figurative,pillars
+765,زاهق,زاهِق,perishing,inflection-pair,Should-fix,perishing (765) and perish (1878),dwindling
+769,زحزح,زُحْزِحَ,distanced,inflection-pair,Should-fix,distance (268) and distanced (769),wrested
+775,زلزالا,زِلْزال,earthquake,arabic-duplicate,Consider,"زلزال/زلزلة earthquake/tremor: same root, same meaning",
+792,ساحر,ساحِر,sorcerer,sensitive,Consider,sorcerer is occult/religiously loaded,magician
+798,سامدون,سامِد,heedless,forced-synonym,Consider,"heedless/unmindful (798, 800) near-synonyms; heed (719)",
+799,سامرا,سامِر,nocturnal,vague,Consider,nocturnal is loose for سامر (night-talking),
+824,سفاهة,سَفاهَة,foolishness,sensitive,Consider,"simpleton (828) is an insult; foolishness/folly (824, 826) near-synonyms",
+828,سفيها,سَفِيه,simpleton,sensitive,Consider,simpleton is an insult,reckless
+834,سكينا,سِكِّين,knife,sensitive,Consider,knife is a weapon word,
+836,سلالة,سُلالَة,essence,wrong-gloss,Consider,سلالة = extract/strain; essence is loose,
+842,سماعون,سَمّاع,listener,inflection-pair,Should-fix,listen/listener (1945 vs 842),audience
+845,سموم,سَمُوم,simoom,odd-word,Consider,simoom is obscure,
+846,سنبلات,سُنبُلَة,spike,vague,Consider,spike is vague; سنبلة = ear of grain,
+848,سنقتل,قُتِّلُ,massacre,sensitive,Consider,massacre is violent,
+850,سوءة,سَوْءَة,nakedness,sensitive,Consider,nakedness is sexual-adjacent,
+857,سيهزم,هَزَمُ,rout,inflection-pair,Should-fix,routed/rout (1634 vs 857),crush
+871,شرعة,شِرْعَة,statute,arabic-duplicate,Consider,شرعة/شريعة statute/code: same root and meaning,
+872,شرقيا,شَرْقِيّ,eastern,inflection-pair,Consider,eastern (872) and east (1460),
+879,شفاعة,شَفاعَة,intercession,inflection-pair,Should-fix,intercessor/intercession (861 vs 879): same word family; also mediator (880) for same root; intercession (879) with intercessor (861) and intercede (1959),petition
+881,شقاق,شِقاق,schism,archaic,Consider,schism is formal,dissension
+883,شكرا,شُكْر,gratitude,inflection-pair,Should-fix,grateful/gratitude (862 vs 883): same word family; gratitude (883) with grateful (862) and thank (1960),indebtedness
+889,شورى,شُورَى,consultation,inflection-pair,Should-fix,consult (414) and consultation (889),parley
+891,صابرا,صابِر,patient,arabic-duplicate,Consider,صابر/صابرة patient/steadfast: gender variants,
+894,صادقين,صادِق,veracious,archaic,Consider,veracious is literary,honest
+898,صافات,صافَّة,ranks,plural-pair,Must-fix,ranks (898) is the plural of rank (690),lines
+909,صديقا,صِدِّيق,sincere,wrong-gloss,Should-fix,"صدّيق = truthful/righteous person; sincere is an adjective, and 910 sincerity is wrong POS and a gender variant",saint
+910,صديقة,صِدِّيقَة,sincerity,wrong-gloss,Should-fix,"صدّيقة = truthful woman; sincerity is an abstract noun (wrong), clashes with sincere (909)",candid
+917,صغار,صَغار,abasement,archaic,Consider,abasement is rare,indignity
+918,صغت,صَغَتْ,lend,wrong-gloss,Consider,صغا = incline (of hearts); lend is odd,
+919,صغيرا,صَغِير,small,arabic-duplicate,Consider,صغيرة minor/صغير small: gender variants,
+921,صفر,صُفْر,yellow,arabic-duplicate,Consider,صفراء golden/صفر yellow: gender variants; golden not literal,
+925,صلبوه,صَلَبُ,crucify,sensitive,Consider,crucify is religiously loaded and violent,
+926,صلح,صَلَحَ,fitting,wrong-gloss,Should-fix,صلح = be righteous/good; fitting is misleading,healthy
+927,صلدا,صَلْد,bare,homophone,Must-fix,bare (927) and bear (48) are homophones; صلد = hard bare rock,bald
+935,صيد,صَيْد,game,vague,Consider,game is ambiguous,prey
+936,ضاحكا,ضاحِك,laughing,inflection-pair,Should-fix,laugh/laughing (1969 vs 936),chuckling
+941,ضبحا,ضَبْح,panting,inflection-pair,Should-fix,pant/panting (2013 vs 941),snorting
+942,ضرا,ضَرّ,detriment,forced-synonym,Consider,"ضرر cluster: harm, detriment, injury, hardship, harmful (80, 942, 943, 200, 301)",
+945,ضعافا,ضِعاف,feeble,arabic-duplicate,Consider,ضعاف feeble (plural of ضعيف 947 frail),
+950,ضنكا,ضَنك,straitened,archaic,Consider,straitened is dated,cramped
+967,طغيانا,طُغْيان,tyranny,inflection-pair,Should-fix,"tyrant/tyranny (956 vs 967): same word family, close spelling",despotism
+970,طلعت,طَلَعَت,dawn,forced-synonym,Consider,dawn/sunrise (970 vs 972),
+975,طوعا,طَوْع,willingly,inflection-pair,Should-fix,willing/willingly (957 vs 975),voluntarily
+977,طيبة,طَيِّبَة,agreeable,inflection-pair,Should-fix,agree (397) and agreeable (977),benign
+982,ظمأ,ظَمَأ,parch,vague,Consider,parch is a verb; ظمأ = thirst,
+988,عابدون,عابِد,servitor,archaic,Should-fix,servitor is archaic; عابد = worshipper; 987/988 are gender variants of one lemma,believer
+991,عاصف,عاصِف,gale,arabic-duplicate,Consider,عاصف/عاصفة gale/tempest: gender variants,
+997,عاليا,عالِي,elevated,arabic-duplicate,Should-fix,"عالي x3 (997, 998, 999) are one lemma (high) in three forms; elevated/superior/uppermost hide identical meaning",
+1000,عامل,عامِل,worker,arabic-duplicate,Consider,عامل/عاملة worker/laboring: gender variants,
+1004,عباد,عَبْد,slave,sensitive,Should-fix,slave is a loaded word in a random phrase,retainer
+1008,عبوسا,عَبُوس,grim,confusable,Should-fix,"grim (1008) and grimy (1326) differ by one letter and are unrelated in meaning; grim (1008) and grimy (1326): one letter apart, unrelated meanings",sullen
+1011,عجبا,عَجَب,wonder,forced-synonym,Consider,"wonder/marvel/amazing (1011, 445, 1015): عجب cluster",
+1013,عجوز,عَجُوز,crone,sensitive,Should-fix,crone is insulting; عجوز = old woman,granny
+1016,عداوة,عَداوَة,enmity,confusable,Consider,enmity vs enemy (1017),
+1020,عربيا,عَرَبِيّ,arabic,vague,Consider,arabic is lowercase language/ethnic label,
+1023,عزة,عِزَّة,might,inflection-pair,Consider,might/mightier (1023 vs 159),
+1029,عصبة,عُصْبَة,gang,sensitive,Consider,gang is negative; عصبة = band/group,troop
+1030,عطاء,عَطاء,largesse,archaic,Consider,largesse is rare,generosity
+1033,عفريت,عِفْرِيت,demon,sensitive,Consider,demon is religiously loaded,ogre
+1034,عقبى,عُقْبَى,consequence,forced-synonym,Consider,consequence/outcome (1034 vs 994),
+1040,علوا,عُلُوّ,loftiness,inflection-pair,Should-fix,lofty (442) and loftiness (1040),altitude
+1042,عمك,عَمّ,paternal,wrong-gloss,Consider,عمّ = paternal uncle; paternal is an adjective,
+1047,عوجا,عِوَج,crookedness,inflection-pair,Should-fix,crooked (203) and crookedness (1047),curvature
+1048,عورات,عَوْرَة,exposed,sensitive,Consider,exposed/عورة = vulnerable or private parts,
+1054,غاوين,غاوي,misguided,inflection-pair,Consider,misguided (1054) vs misguidance (434),
+1055,غائبة,غائِبَة,concealed,inflection-pair,Should-fix,conceal (477) and concealed (1055),unseen
+1057,غثاء,غُثاء,scum,sensitive,Consider,scum is offensive-sounding,froth
+1059,غدوت,غَدَ,morn,archaic,Should-fix,morn is archaic; غدا = go out in the morning,tomorrow
+1062,غربية,غَرْبِيَّة,western,inflection-pair,Should-fix,west/western (1520 vs 1062),occidental
+1071,غفلة,غَفْلَة,negligence,inflection-pair,Should-fix,negligent/negligence (1052 vs 1071),carelessness
+1076,غمرات,غَمَرَة,depths,plural-pair,Must-fix,depths (1076) is the plural of depth (691),turmoil
+1077,غمرة,غَمْرَة,flood,arabic-duplicate,Should-fix,غمرة (1077) and غَمَرَة (1076) are one word; flood/depths hide identical meaning,
+1079,غنمتم,غَنِمْ,plunder,sensitive,Consider,plunder is violent; غنم = take as gain,acquire
+1083,غيابت,غَيابَت,dungeon,wrong-gloss,Consider,غيابة = depths (of the well); dungeon is off,bottom
+1087,فاجرا,فاجِر,dissolute,archaic,Consider,dissolute is formal,
+1093,فارهبون,يَرْهَبُ,fearful,inflection-pair,Should-fix,fear (57) and fearful (1093),intimidate
+1096,فاستعذ,اسْتَعِذْ,protection,forced-synonym,Consider,protection/refuge (1096 vs 165): both = seek refuge; verb glossed as a noun,
+1102,فاكهة,فاكِهَة,dessert,wrong-gloss,Should-fix,"فاكهة = fruit; dessert is wrong, and fruit/fruits already at 517/1150",luxury
+1103,فاكهين,فاكِه,merry,arabic-duplicate,Consider,فاكه/فكه merry/cheerful: same root and meaning,
+1104,فالق,فالِق,cleaver,wrong-gloss,Should-fix,فالق = splitter (of grain); cleaver is a butcher's knife,breaker
+1106,فأنساهم,أَنسَى,obliterate,wrong-gloss,Should-fix,أنسى = cause to forget; obliterate is much too strong (and 492 forget),eclipse
+1111,فتحت,فَتَحَ,unlock,forced-synonym,Consider,unlock/open (1111 vs 453),
+1115,فتنا,فَتَنُ,ordeal,forced-synonym,Consider,"ordeal/tribulation (1115, 1116)",
+1117,فتيان,فَتَيان,youths,plural-pair,Must-fix,youths (1117) is the plural of youth (1275); lads (1119) is a third word for the same plural,juveniles
+1119,فتية,فِتْيَة,lads,plural-pair,Should-fix,lads (1119) is British slang and the plural of lad; فتية/فتيان/فتى are one lemma in three forms,teenagers
+1120,فجاجا,فَجّ,pass,vague,Consider,pass is ambiguous,
+1123,فخلف,خَلَفَ,replace,inflection-pair,Should-fix,replacement (97) and replace (1123),supplant
+1126,فذوقوا,ذاقُ,savor,forced-synonym,Consider,savor/taste (1126 vs 77); savor is US spelling (savour),
+1128,فرارا,فِرار,flight,vague,Consider,flight is ambiguous (aircraft/escape),
+1138,فصعق,صَعِقَ,swoon,archaic,Should-fix,swoon is archaic; صعق = be struck unconscious,stupefied
+1139,فضة,فِضَّة,argent,archaic,Should-fix,argent is heraldic/archaic for silver; فضة = silver,silver
+1141,فعقروها,عَقَرَ,hamstring,sensitive,Consider,hamstring is violent,
+1150,فواكه,فَواكِه,fruits,plural-pair,Must-fix,fruits (1150) is the plural of fruit (517),harvest
+1154,قاسية,قاسِيَة,hardened,inflection-pair,Should-fix,hardened/harden (1154 vs 1183),callous
+1155,قاصدا,قاصِد,moderate,inflection-pair,Should-fix,moderate/moderation (1155 vs 1188),intermediate
+1158,قاض,قاض,judge,inflection-pair,Consider,judge/judgment (1158 vs 607),
+1161,قاعدا,قاعِد,seated,inflection-pair,Should-fix,"sit/sitting/seated (470, 1194, 1161): three forms of one verb",reclining
+1162,قانتات,قانِتَة,obedient,inflection-pair,Should-fix,"obedient/obey/obedience (1162, 436, 955): three forms of one word family",pious
+1165,قائل,قائِل,sayer,odd-word,Consider,sayer is rare; saying (1208),
+1166,قائما,قائِم,erect,arabic-duplicate,Consider,قائمة standing/قائم erect: gender variants,
+1169,قبيلا,قَبِيل,confrontation,vague,Consider,قبيل confrontation: loose,
+1172,قتورا,قَتُور,niggardly,sensitive,Must-fix,niggardly looks like a slur and has caused offence; قتور = stingy,tightfisted
+1174,قدمت,قَدَّمَ,forward,vague,Consider,قدم = bring forward; forward is wrong POS,
+1180,قرطاس,قِرْطاس,parchment,vague,Consider,parchment is loose for قرطاس (paper),document
+1190,قصيا,قَصِيّ,remote,inflection-pair,Should-fix,remoteness (310) and remote (1190),outlying
+1192,قطعت,قَطَّعَ,sever,forced-synonym,Consider,sever/cut (1192 vs 1290),
+1193,قطمير,قِطْمِير,pellicle,odd-word,Should-fix,pellicle is obscure; قطمير = thin skin on a date stone,membrane
+1197,قليلا,قَلِيل,scant,arabic-duplicate,Consider,قليل scant/قليلة meager: gender variants,
+1199,قمطريرا,قَمْطَرِير,calamitous,inflection-pair,Should-fix,calamity (1100) and calamitous (1199),harrowing
+1201,قنطارا,قِنطار,treasure,vague,Consider,قنطار = a large sum; treasure is vague (1250 riches),bullion
+1207,قوسين,قَوْسَيْن,bows,confusable,Consider,bows is a homograph (bow/bow) and plural,
+1213,كارهون,كارِه,averse,inflection-pair,Consider,"averse (1213) belongs to the aversion/avert family (157, 1501, 1864)",
+1214,كأسا,كَأْس,chalice,sensitive,Consider,chalice is religiously loaded,
+1215,كاشف,كاشِف,remover,inflection-pair,Should-fix,remove (79) and remover (1215),dispeller
+1216,كاشفة,كاشِفَة,unveiler,inflection-pair,Should-fix,unveiler (1216) and unveiled (1803),uncoverer
+1221,كاملة,كامِلَة,full,arabic-duplicate,Consider,كاملة full/كاملين entire: variants,
+1222,كاملين,كامِلَيْن,entire,inflection-pair,Should-fix,"entire (1222) belongs to the entirety/entirely family (550, 1218)",whole
+1225,كبد,كَبَد,toil,inflection-pair,Should-fix,toiling (1211) and toil (1225),drudgery
+1226,كثرة,كَثْرَة,abundance,inflection-pair,Should-fix,abundant/abundance (1058 vs 1226),multitude
+1230,كجهر,جَهْر,overtly,arabic-duplicate,Should-fix,"جهر overtly: third word for ""openly"" (with 556, 557)",
+1233,كذابا,كِذّاب,mendacity,odd-word,Consider,mendacity is rare,
+1235,كرمت,كَرَّمْ,dignify,inflection-pair,Should-fix,dignity/dignify (1846 vs 1235),glorify
+1241,كظيم,كَظِيم,silently,inflection-pair,Should-fix,silent (231) and silently (1241),brooding
+1246,كلالة,كَلالَة,collaterals,vague,Consider,"collaterals is a legal term, ambiguous (finance)",
+1257,لاعبين,لاعِب,player,inflection-pair,Should-fix,player/play (1257 vs 1273),jester
+1276,لفسدت,فَسَدَتِ,spoil,plural-pair,Must-fix,"spoil (1276) and spoils (1518): same lexeme, different Arabic meanings (rot vs booty)",rot
+1278,لقاء,لِقاء,encounter,inflection-pair,Should-fix,encountering/encounter (1580 vs 1278); 1579 ملاق/ملاقوا are singular/plural of one lemma,reunion
+1279,للمتقين,مُتَّقي,prudent,vague,Consider,متقي = God-fearing; prudent is a deliberate neutral choice,
+1281,لمحى,مُحْى,reviving,inflection-pair,Should-fix,revive (228) and reviving (1281),animator
+1283,لواحة,لَوّاحَة,scorching,inflection-pair,Should-fix,scorch (479) and scorching (1283),searing
+1289,ليا,لَيّ,twisting,inflection-pair,Should-fix,twist/twisting (2014 vs 1289),wrenching
+1291,لينة,لِينَة,palm,confusable,Consider,palm is a homograph (hand),
+1294,ماكثين,ماكِث,staying,inflection-pair,Should-fix,staying/stay (1294 vs 210),sojourning
+1295,مأكول,مَأْكُول,devoured,inflection-pair,Consider,devoured/devourer (1295 vs 190),
+1300,مبارك,مُبارَك,fortunate,arabic-duplicate,Consider,مبارك fortunate/مباركة auspicious: gender variants,
+1306,مبشرين,مُبَشِّر,announcer,forced-synonym,Consider,"announcer/herald/announce (1306, 299, 6)",
+1317,متبر,مُتَبَّر,destroyed,inflection-pair,Should-fix,destroyed (1317) and destroyer (1636),shattered
+1319,متبعون,مُتَّبَع,pursued,inflection-pair,Should-fix,pursuit (969) and pursued (1319),tracked
+1320,متجانف,مُتَجانِف,inclining,inflection-pair,Should-fix,incline (406) and inclining (1320),biased
+1329,متصدعا,مُتَصَدِّع,rent,confusable,Consider,rent is a homograph (payment),fractured
+1332,متفرقة,مُتَفَرِّقَة,dispersed,inflection-pair,Should-fix,disperse (236) and dispersed (1332),sporadic
+1337,مثقلة,مُثْقَلَة,laden,arabic-duplicate,Consider,مثقلة laden/مثقل encumbered: gender variants,
+1342,مجتمعون,مُجْتَمِع,assembled,inflection-pair,Should-fix,"assembled (1342) belongs to the assembly family (527, 549)",united
+1345,مجنون,مَجْنُون,crazed,sensitive,Consider,crazed insults; مجنون = possessed/mad,deranged
+1348,محتضر,مُحْتَضَر,attended,inflection-pair,Should-fix,"attended (1348) belongs to the attend family (427, 571, 1510)",convened
+1353,محرمة,مُحَرَّمَة,taboo,arabic-duplicate,Consider,محرمة taboo/محرم prohibited: gender variants,
+1358,محصنات,مُحْصَنَة,protected,arabic-duplicate,Should-fix,"محصنة/محصَّنة (1358, 1359) protected/fortified: same meaning; protection (1096) and protected (1358)",immune
+1360,محصنين,مُحْصِن,continent,wrong-gloss,Should-fix,محصن = chaste/protected; continent means a landmass in English,abstinent
+1361,محضرون,مُحْضَر,haled,archaic,Should-fix,haled is archaic; محضر = brought/presented,brought
+1378,مخلصين,مُخْلِص,devoted,inflection-pair,Should-fix,devotion (340) and devoted (1378),wholehearted
+1388,مدهنون,مُدْهِن,temporizer,odd-word,Consider,temporizer is rare,appeaser
+1396,مرتاب,مُرْتاب,skeptical,vague,Consider,skeptical is US spelling (sceptical),
+1403,مردفين,مُرْدِف,successive,inflection-pair,Should-fix,successively (358) and successive (1403),ensuing
+1407,مرصادا,مِرْصاد,ambush,sensitive,Consider,ambush is violent,
+1412,مرضعة,مُرْضِعَة,wetnurse,odd-word,Must-fix,wetnurse is not a standard English word (wet nurse); 87 already glosses the verb as nurse,lactating
+1413,مرضيا,مَرْضِيّ,acceptable,inflection-pair,Should-fix,acceptable (1413) and accept (1892),satisfactory
+1422,مزدجر,مُزْدَجَر,warning,vague,Consider,مزدجر = deterrence; warning clashes with warner (1607),
+1423,مزيد,مَزِيد,additional,inflection-pair,Should-fix,addition (787) and additional (1423),extra
+1425,مسافحات,مُسافِحَة,debauched,sensitive,Consider,"debauched/libertine (1425, 1426) are sexual-adjacent; gender variants of one lemma",
+1427,مساكن,مَسْكَن,residence,forced-synonym,Consider,"residence/abode/lodging cluster (1427, 678, 1341)",
+1434,مستقيم,مُسْتَقِيم,direct,wrong-gloss,Consider,"مستقيم = straight (the ""straight path""); direct loses this",
+1435,مستكبرا,مُسْتَكْبِر,proud,forced-synonym,Consider,"proud/arrogant/haughty (1435, 108, 360): كبر cluster",
+1437,مستمعون,مُسْتَمِع,hearkening,archaic,Should-fix,hearkening is archaic,attentive
+1444,مسرف,مُسْرِف,prodigal,vague,Consider,prodigal is Biblical,
+1447,مسغبة,مَسْغَبَة,gnawing,wrong-gloss,Consider,"مسغبة = hunger; gnawing is a participle, hunger used at 369",
+1448,مسفرة,مُسْفِرَة,radiant,inflection-pair,Should-fix,radiance (951) and radiant (1448),beaming
+1449,مسفوحا,مَسْفُوح,spilled,inflection-pair,Should-fix,spilled (1449) pairs with spill (proposed for 1865),outpoured
+1451,مسكونة,مَسْكُونَة,inhabited,inflection-pair,Should-fix,inhabitant (700) and inhabited (1451),populated
+1456,مسودا,مُسْوَدّ,darkened,inflection-pair,Should-fix,darken (1026) and darkened (1456),shadowed
+1459,مسومين,مُسَوِّم,insignia,vague,Consider,insignia is a noun; مسوِّم = marking,
+1461,مشتبها,مُشْتَبِه,resembling,inflection-pair,Should-fix,resembling/resemble (1461 vs 421),similar
+1463,مشرقين,مُشْرِق,sunrising,odd-word,Should-fix,sunrising is not standard English (sunrise),sunup
+1466,مشهود,مَشْهُود,attested,inflection-pair,Should-fix,attest/attested (1961 vs 1466),acknowledged
+1467,مشيدة,مُشَيَّدَة,erected,inflection-pair,Should-fix,erect (1166) and erected (1467),constructed
+1471,مصدقا,مُصَدِّق,confirmer,inflection-pair,Should-fix,confirmation (363) and confirmer (1471),endorser
+1472,مصرفا,مَصْرِف,avoidance,inflection-pair,Should-fix,avoid (44) and avoidance (1472),bypass
+1474,مصفرا,مُصْفَرّ,yellowed,inflection-pair,Consider,yellowed/yellow (1474 vs 921),
+1480,مضار,مُضارّ,injurious,inflection-pair,Should-fix,injurious/injury (1480 vs 943),hurtful
+1484,مضيا,مُضِيّ,onward,vague,Consider,مضيّ = going on; onward is vague,
+1487,مطلعون,مُطَّلِع,overlooking,inflection-pair,Should-fix,overlook (1097) and overlooking (1487),surveying
+1488,مطمئن,مُطْمَئِنّ,reassured,arabic-duplicate,Consider,مطمئن reassured/مطمئنة peaceful: gender variants,
+1490,مطهرة,مُطَهَّرَة,cleansed,inflection-pair,Should-fix,cleansed/cleansing (1490 vs 973),spotless
+1492,معاجزين,مُعاجِز,thwarting,odd-word,Consider,defeater (1497) is odd; thwarting/defeater are one idea,
+1493,معاذ,مَعاذ,asylum,vague,Consider,asylum has legal sense; معاذ = refuge,
+1494,معاشا,مَعاش,subsistence,arabic-duplicate,Consider,"livelihood x4: معاش subsistence, معايش sustenance, معيشة living, عيشة livelihood (1494, 1495, 1515, 1050) are one word family with identical meaning",
+1500,معذرة,مَعْذِرَة,justification,forced-synonym,Consider,justification (1500) vs excuse (1019),
+1502,معرة,مَعَرَّة,opprobrium,archaic,Consider,opprobrium is formal,stigma
+1508,معطلة,مُعَطَّلَة,deserted,inflection-pair,Should-fix,"deserter (641), deserted (1508), desertion (1762): three forms",vacant
+1509,معقب,مُعَقِّب,reverser,odd-word,Consider,reverser is odd,
+1512,معلوم,مَعْلُوم,determinate,arabic-duplicate,Consider,معلوم determinate/معلومة prescribed: gender variants,
+1514,معمر,مُعَمَّر,veteran,wrong-gloss,Should-fix,معمر = long-lived person; veteran implies military service,centenarian
+1516,مغارات,مَغارَة,grottoes,odd-word,Consider,grottoes is plural of an uncommon word,hideaways
+1527,مفازا,مَفاز,felicity,archaic,Consider,felicity is formal,windfall
+1529,مفتر,مُفْتَر,fabricator,arabic-duplicate,Should-fix,"فري cluster: fabricator, coiner, concocted, contrived, fabrication, invent, slander (1529-1532, 61, 172, 173): seven entries for one idea",
+1530,مفترون,مُفْتَري,coiner,wrong-gloss,Should-fix,مفتري = one who fabricates a lie; coiner means a counterfeiter of coins,counterfeiter
+1533,مفرطون,مُفْرَط,forgotten,inflection-pair,Should-fix,"forgotten/forget (1533 vs 492); also مفرط = neglected/abandoned, not forgotten",disregarded
+1540,مقاليد,مَقالِيد,vaults,wrong-gloss,Consider,مقاليد = keys/treasuries; vaults is a loose fit,
+1542,مقامع,مَقامِع,hooks,wrong-gloss,Consider,مقامع = iron rods/maces; hooks is off,rods
+1546,مقتدر,مُقْتَدِر,potent,vague,Consider,potent is loose for مقتدر (powerful),
+1547,مقتدون,مُقْتَدي,emulator,confusable,Consider,emulator has a computing sense,
+1548,مقترفون,مُقْتَرِف,perpetrating,sensitive,Consider,perpetrating has a criminal tone,
+1550,مقتصد,مُقْتَصِد,temperate,arabic-duplicate,Consider,مقتصد temperate/مقتصدة balanced: gender variants,
+1556,مقسوم,مَقْسُوم,portioned,inflection-pair,Should-fix,portion (315) and portioned (1556),allocated
+1561,مقمحون,مُقْمَح,stiffnecked,odd-word,Must-fix,stiffnecked is not a standard one-word form (stiff-necked),rigid
+1571,مكرمة,مُكَرَّمَة,esteemed,arabic-duplicate,Consider,مكرمة esteemed/مكرم venerated: gender variants,
+1578,ملء,مِلْء,fullness,inflection-pair,Should-fix,full (1221) and fullness (1578),plenitude
+1581,ملتحدا,مُلْتَحَد,hideout,forced-synonym,Consider,"hideout/bolthole/recourse/refuge group (1581, 1660, 1582)",
+1595,منازل,مَنازِل,lodgings,plural-pair,Must-fix,lodgings (1595) is the plural of lodging (1341),mansions
+1603,منتقمون,مُنتَقِم,avenger,sensitive,Consider,avenger is violent,
+1606,منجوك,مُنَجُّو,savior,sensitive,Consider,savior is religiously loaded; US spelling,
+1612,منشرة,مُنَشَّرَة,unrolled,arabic-duplicate,Consider,منشرة unrolled/منشور unfurled: variants,
+1617,منفطر,مُنفَطِر,sundered,archaic,Consider,sundered is archaic,
+1619,منقعر,مُنقَعِر,toppled,inflection-pair,Should-fix,toppled (1619) and topple (1819); toppled (1619) with topple (1819),felled
+1620,منقلب,مُنقَلَب,final,inflection-pair,Should-fix,final (1620) and finalize (1894),upshot
+1629,مهاجرات,مُهاجِرَة,migrant,confusable,Should-fix,"emigrant/migrant (1628, 1629): near-identical spelling and meaning; gender variants of one lemma; migrant/emigrant (1628, 1629): near-identical spelling and meaning",newcomer
+1632,مهتدون,مُهْتَدي,enlightened,inflection-pair,Should-fix,enlightenment (348) and enlightened (1632),righteous
+1638,مواخر,مَواخِر,ploughing,vague,Consider,ploughing is UK spelling (plowing),
+1639,مواضعه,مَواضِع,positions,plural-pair,Must-fix,positions (1639) is the plural of position (1565),sites
+1641,موبقا,مَوْبِق,doom,inflection-pair,Should-fix,doomed (347) and doom (1641),pitfall
+1645,موزون,مَوْزُون,weighed,homophone,Must-fix,"weighed (1645) and wade (1691) are homophones; also weigh/weight/weighty family (238, 1336, 512)",calibrated
+1647,مؤصدة,مُؤْصَدَة,enclosed,inflection-pair,Should-fix,enclosed (1647) and enclose (1832),bolted
+1653,موعظة,مَوْعِظَة,admonition,archaic,Consider,admonition is formal,
+1661,ميتة,مَيْتَة,carrion,sensitive,Consider,carrion is grisly,
+1666,ميعاد,مِيعاد,tryst,sensitive,Should-fix,tryst means a lovers' meeting; ميعاد = appointed time,juncture
+1671,ناصح,ناصِح,counselor,vague,Consider,counselor US spelling (counsellor),
+1680,نائمون,نائِم,sleeper,inflection-pair,Should-fix,sleeper (1680) and sleep (1754),dormant
+1685,نتربص,تَرَبَّصْ,bide,archaic,Should-fix,bide is archaic,linger
+1688,نجزى,جَزَى,requite,archaic,Should-fix,"requite is rare and pairs with requital (1340), repay (1687)",reimburse
+1692,نديا,نَدِيّ,gathering,inflection-pair,Should-fix,gather (43) and gathering (1692),forum
+1694,نذير,نَذِير,cautioner,odd-word,Should-fix,cautioner is rare; منذر and نذير both mean warner,harbinger
+1695,نربك,رَبَّيَ,rear,vague,Consider,rear is ambiguous,
+1696,نزاعة,نَزّاعَة,peeler,inflection-pair,Should-fix,peeler (1696) and peel (1706),plucker
+1698,نسارع,يُسارِعُ,rush,inflection-pair,Should-fix,rushing (1545) and rush (1698),scramble
+1705,نسقيكم,أَسْقَيْ,water,inflection-pair,Should-fix,watering (1462) and water (1705),irrigate
+1710,نشوزا,نُشُوز,recalcitrance,archaic,Consider,recalcitrance is long/formal,
+1715,نضرة,نَضْرَة,brightness,inflection-pair,Should-fix,brighten (120) and brightness (1715),freshness
+1741,نقيض,قَيَّضْ,allot,inflection-pair,Should-fix,allotment (1243) and allot (1741),assign
+1745,نكسوها,كَسَوْ,clothe,inflection-pair,Should-fix,clothing (1261) and clothe (1745),dress
+1752,ننسخ,يَنسَخُ,abrogate,archaic,Consider,abrogate is formal,supersede
+1757,هاجر,هاجَرَ,emigrate,inflection-pair,Should-fix,"emigrate (1757) with emigrant/migrant (1628, 1629); emigrate (1757) with emigrant (1628) and migrant (1629)",relocate
+1762,هجرا,هَجْر,desertion,inflection-pair,Should-fix,desertion (1762) belongs to the deserter/deserted family,estrangement
+1767,هضما,هَضْم,wrong,vague,Consider,هضم = injustice; wrong is vague,injustice
+1769,هلم,هَلُمّ,hither,archaic,Consider,"hither (1769) is archaic; هلمّ = come here, and هاؤم = here",
+1771,هماز,هَمّاز,slanderer,inflection-pair,Should-fix,slander (172) and slanderer (1771),detractor
+1774,هونا,هَوْن,humbly,inflection-pair,Should-fix,"humble (78) and humbly (1774); humility (198), humiliated (897) are the same cluster",softly
+1775,هيت,هَيْتَ,quick,wrong-gloss,Should-fix,هيت (هيت لك) = come here!; quick is wrong; come is already 441,signal
+1776,هيهات,هَيْهات,improbable,vague,Consider,هيهات = far be it; improbable is loose,
+1777,وأبقى,أَبْقَى,enduring,inflection-pair,Should-fix,endure (681) and enduring (1777),permanent
+1780,واختار,اخْتارَ,elect,forced-synonym,Consider,elect/select (1780 vs 387),
+1783,واردون,وارِد,arriving,inflection-pair,Should-fix,arrive (522) and arriving (1783),incoming
+1789,وأعتدنا,أَعْتَدَتْ,prepare,inflection-pair,Should-fix,preparation (486) and prepare (1789),arrange
+1792,وإقام,إِقام,establishing,inflection-pair,Should-fix,establish (1749) and establishing (1792),performing
+1793,وأكواب,أَكْواب,tumblers,confusable,Consider,tumblers also means acrobats,beakers
+1794,والدة,والِدَة,dam,wrong-gloss,Should-fix,"والدة = mother; dam means a female animal parent or a barrier, and mother is 212",mama
+1795,والرمان,رُمّان,pomegranate,long-word,Consider,"pomegranate: 11 letters, spelling errors likely",
+1799,والميسر,مَيْسِر,gambling,sensitive,Consider,gambling is sensitive,
+1802,وإيتاء,إِيتاء,bestowal,inflection-pair,Should-fix,bestowal/bestow (1802 vs 234),dispensing
+1807,وتمت,تَمَّ,complete,inflection-pair,Should-fix,"complete/completion/finalize (1807 vs 482, 1894)",conclude
+1813,وجلون,وَجِل,timorous,archaic,Consider,timorous is rare,cowering
+1814,وجهة,وِجْهَة,direction,inflection-pair,Should-fix,direct (1434) and direction (1814),course
+1818,وحيدا,وَحِيد,lone,homophone,Must-fix,lone (1818) is a homophone of loan (1179) and one letter from alone (1816); وحيد and وحد have the same meaning,only
+1820,وخفية,خُفْيَة,secretly,inflection-pair,Should-fix,secrecy (115) and secretly (1820),privately
+1822,ورباع,رُباع,fours,plural-pair,Must-fix,fours (1822) is the plural of four (81),quartets
+1825,وزنا,وَزْن,balance,inflection-pair,Should-fix,balanced (1551) and balance (1825),equilibrium
+1826,وزنوا,وَزَنُ,heft,odd-word,Consider,heft is informal as a verb,
+1829,وسطا,وَسَط,center,forced-synonym,Consider,center/middle (1829 vs 255); center is US spelling (centre),
+1830,وسعر,سُعُر,flaming,inflection-pair,Should-fix,flame (888) and flaming (1830),inferno
+1833,وسيدا,سَيِّد,master,sensitive,Consider,master pairs with slave (1004),
+1837,وصى,وَصَّى,enjoin,confusable,Should-fix,"enjoy (109) and enjoin (1837): near-spelling, different meaning",instruct
+1839,وطفقا,طَفِقَ,commence,forced-synonym,Consider,commence/begin (1839 vs 1874),
+1842,وعلانية,عَلانِيَة,openness,arabic-duplicate,Should-fix,"علانية openness: fourth word for openly (with 556, 557, 1230)",
+1843,وغرتهم,غَرَّ,delude,inflection-pair,Should-fix,"delude/delusion/deluded (1843, 1064, 2043)",swindle
+1847,وقرا,وَقْر,heaviness,inflection-pair,Should-fix,heavy (36) and heaviness (1847),bulk
+1852,وكل,وُكِّلَ,delegate,inflection-pair,Should-fix,delegation (1845) and delegate (1852),commission
+1854,ولأمة,أَمَة,handmaid,archaic,Should-fix,handmaid is archaic; أمة = female servant/slave,maidservant
+1856,ولدان,وَلِيد,stripling,archaic,Should-fix,stripling is archaic; وليد = young boy,toddler
+1858,ومأواهم,مَأْوَى,dwelling,inflection-pair,Should-fix,"dwell (121), dwellers (573), dwelling (1858): three forms",homestead
+1859,ونقر,أَقْرَرْ,fix,vague,Consider,أقرر = acknowledge; fix is loose,
+1863,ويخلد,يَخْلُدْ,perpetuate,inflection-pair,Should-fix,perpetual (685) and perpetuate (1863),eternalize
+1865,ويسفك,يَسْفِكُ,bloodshed,sensitive,Should-fix,bloodshed is violent and the wrong POS; يسفك = shed (blood),bleed
+1867,ويكأن,وَيْ,alas,archaic,Should-fix,alas is an archaic interjection; وي = an exclamation of surprise,ah
+1868,يابس,يابِس,dry,arabic-duplicate,Consider,يابسة arid/يابس dry: gender variants,
+1870,يأتل,يَأْتَلِ,forswear,wrong-gloss,Should-fix,forswear means renounce or perjure; يأتل = swear off / fall short,default
+1872,يبدل,بَدَّلَ,exchange,forced-synonym,Consider,"بدل cluster: exchange, substitute, swap, replacement, alteration (1872, 1873, 1939, 97, 342)",
+1875,يبسط,بَسَطَ,outspread,vague,Consider,outspread is an adjective,
+1882,يترقب,يَتَرَقَّبُ,watchful,inflection-pair,Consider,watchful/watch (1882 vs 403),
+1885,يتطهرون,تَطَهَّرْ,purify,inflection-pair,Should-fix,purify/purification (1885 vs 438),refine
+1896,يتوفى,تَوَفَّى,recall,vague,Consider,توفى = cause to die/take the soul; recall is euphemistic,
+1909,يحدث,يُحْدِثُ,originate,inflection-pair,Should-fix,originate (1909) with origination (227) and originator (1098),innovate
+1913,يحلفون,حَلَفْ,adjure,wrong-gloss,Should-fix,adjure means urge solemnly; حلف = swear an oath,assert
+1919,يختص,يَخْتَصُّ,distinguish,inflection-pair,Should-fix,distinguished (1815) and distinguish (1919),privilege
+1927,يدع,يَدُعُّ,rebuff,forced-synonym,Consider,rebuff/thrust (1927 vs 692),
+1933,يرضوه,يُرْضُ,please,inflection-pair,Should-fix,"please/pleased/pleasing (1933, 1445, 1411)",placate
+1934,يرغب,يَرْغَبُ,covet,vague,Consider,رغب = desire; covet is Biblical and negative,
+1936,يريد,أَرادَ,aim,vague,Consider,أراد = want/intend; aim is loose,
+1937,يزال,زالَت,lapse,vague,Consider,زال = cease/pass away; lapse is loose,
+1942,يستضعف,اسْتَضْعَفُ,belittle,vague,Consider,استضعف = deem weak/oppress; belittle is loose,
+1943,يستعجل,اسْتَعْجَلَ,hurry,inflection-pair,Should-fix,hurrying (819) and hurry (1943),speed
+1944,يستقيم,اسْتَقامُ,stand,inflection-pair,Should-fix,standing (1167) and stand (1944),vertical
+1947,يستوى,اسْتَوَى,level,wrong-gloss,Consider,استوى = settle/be established; level is off,
+1949,يسرا,يُسْر,facility,inflection-pair,Should-fix,facility/facilitate (1949 vs 1950); facility has a building sense,convenience
+1959,يشفع,يَشْفَعُ,intercede,inflection-pair,Should-fix,intercede (1959) joins intercessor (861) and intercession (879),beseech
+1968,يضاعف,يُضاعِفُ,compound,confusable,Consider,compound is a noun/verb homograph,
+1970,يضلل,أَضَلَّ,derail,vague,Consider,derail has a train sense; أضل = lead astray,misdirect
+1971,يضيع,أَضاعُ,waste,forced-synonym,Consider,"waste/wastefulness/squander (1971, 344, 343)",
+1978,يعبؤا,يَعْبَؤُا۟,mind,vague,Consider,mind is a noun,
+1982,يعص,عَصا,staff,vague,Consider,staff is ambiguous (employees),baton
+1989,يغيظ,يَغِيظُ,enrage,inflection-pair,Consider,enrage/raging (1989 vs 451),
+1992,يفسد,أَفْسَدُ,vitiate,odd-word,Should-fix,vitiate is rare/formal,undermine
+1994,يفلح,أَفْلَحَ,prosper,inflection-pair,Should-fix,prosperity (1724) and prosper (1994),thrive
+1995,يقبل,يَقْبَلُ,embrace,vague,Consider,embrace is loose; يقبل = accept (1892),
+1997,يقدر,قَدَرَ,enable,wrong-gloss,Consider,قدر = measure/decree/be able; enable is off,
+1998,يقرض,أَقْرَضُ,loaned,inflection-pair,Should-fix,loaned/loan (1998 vs 1179),financed
+2002,يكاد,كادَ,almost,arabic-duplicate,Should-fix,كاد (2002) and كيد (1231) both = almost; almost/nearly hide a true duplicate,
+2004,يلاقوا,يُلاقُ,meet,inflection-pair,Consider,meet/meeting (2004 vs 1579),
+2007,يلحدون,يُلْحِدُ,depart,inflection-pair,Should-fix,departure (712) and depart (2007),digress
+2008,يلعبون,يَلْعَبْ,sport,vague,Consider,sport is a noun; lab (1273 play),
+2012,يلمزك,يَلْمِزُ,defame,forced-synonym,Consider,"defame/slanderer/slander cluster (2012, 1771, 172)",
+2015,يمحق,يَمْحَقُ,erase,forced-synonym,Consider,erase/expunge (2015 vs 2016),
+2021,ينبغى,يَنۢبَغِي,behoove,archaic,Should-fix,behoove is archaic,befit
+2023,ينتظر,يَنتَظِرُ,expect,inflection-pair,Should-fix,expectant (1398) and expect (2023),foresee
+2028,ينظرون,يُنظَرُ,adjourn,vague,Consider,adjourn is a legal term; ينظر = be given respite,
+2029,ينعق,يَنْعِقُ,holler,vague,Consider,holler is informal,shriek
+2032,ينقلب,انقَلَبَ,flip,vague,Consider,flip is informal,
+2033,ينكح,نَكَحَ,wed,arabic-duplicate,Should-fix,"marry/wed (241, 2033) and wedlock (1742): one idea three times",
+2040,يوزعون,يُوزَعُ,marshalled,vague,Should-fix,marshalled is UK spelling (marshaled in US): typing variance,regimented
+2041,يوصل,يَصِلُ,connect,inflection-pair,Should-fix,connected (1838) and connect (2041),join
+2042,يوعظ,وَعَظْ,admonish,inflection-pair,Should-fix,admonition (1653) and admonish (2042),chide
+2043,يؤفك,أُفِكَ,deluded,inflection-pair,Should-fix,deluded (2043) with delude (1843) and delusion (1064),sidetracked
+2045,يوقنون,يُوقِنُ,certain,inflection-pair,Should-fix,certainty/certain (2001 vs 2045),confident
+2047,يئس,يَئِسَ,disheartened,forced-synonym,Consider,"despair/despondent/forlorn/disheartened (112, 1877, 1311, 2047)",
