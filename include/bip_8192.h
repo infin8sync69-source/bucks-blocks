@@ -86,6 +86,8 @@ struct Wordlist {
     std::string lang;         // manifest tag, e.g. "ar-dev"
     std::string normalizer;   // "exact" | "arabic" | "latin"
     std::string status;       // "dev" | "release" | anything else = not a default
+    std::string sha256;       // lower-case hex SHA-256 of the file bytes
+    bool pinned = false;      // the manifest pins sha256 (checked when the list loads)
     std::vector<std::string> entries;                 // display forms, index order
     std::unordered_map<std::string, uint16_t> index;  // normalized form -> index
 };
@@ -128,8 +130,8 @@ bool loadWordlistFile(const std::string& path,
  *   3. <executable dir>/../wordlists
  *   4. <executable dir>/wordlists
  *   5. BUCKS_SOURCE_DIR/wordlists  (compile-time, if defined)
- *   6. ./wordlists
- * Candidates 3-6 qualify only if they contain manifest.json.
+ * Candidates 3-5 qualify only if they contain manifest.json. The working
+ * directory is never searched.
  * An empty string clears the override. Changing the directory drops the cache.
  */
 void setWordlistDir(const std::string& dir);

@@ -4,8 +4,11 @@
 #include "crypto.h"
 #include "mnemonic_test_util.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <string>
 #include <vector>
@@ -227,6 +230,84 @@ TEST_F(MnemonicDir, BrokenManifestsAreRejected) {
     // valid UTF-8), which shows the normalizer check is per list.
     dir.write("manifest.json", "{\"version\":2,\"lists\":[{\"lang\":\"xx\",\"file\":\"xx-test-2048.txt\",\"normalizer\":\"latin\",\"status\":\"dev\"}]}");
     EXPECT_TRUE(loadWordlists(&err)) << err;
+}
+
+namespace {
+
+std::string fileSha256Hex(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const Hash256 d = sha256(std::vector<uint8_t>(bytes.begin(), bytes.end()));
+    return hexStr(std::vector<uint8_t>(d.begin(), d.end()));
+}
+
+} // namespace
+
+// WAL-14 / WORDLIST-1: every shipped list is pinned and the pin is the hash of its bytes. This fails when a
+// list file changes and its manifest hash does not.
+TEST_F(MnemonicDir, ShippedListsMatchTheirManifestPins) {
+    const fs::path dir = fs::path(BUCKS_SOURCE_DIR) / "wordlists";
+    std::ifstream in(dir / "manifest.json", std::ios::binary);
+    ASSERT_TRUE(in);
+    const nlohmann::json m = nlohmann::json::parse(in);
+    ASSERT_TRUE(m.contains("lists") && m["lists"].is_array());
+    for (const auto& e : m["lists"]) {
+        const std::string file = e.value("file", "");
+        ASSERT_TRUE(e.contains("sha256") && e["sha256"].is_string()) << file << " has no \"sha256\" pin in manifest.json";
+        EXPECT_EQ(fileSha256Hex(dir / file), e["sha256"].get<std::string>())
+            << "wordlists/" << file << " changed but manifest.json still pins the old hash. Phrases made with a "
+               "published list need its exact bytes: publish a changed list under a new tag with its own pin.";
+    }
+    // The loader agrees with the independent hash above.
+    std::string err;
+    setWordlistDir(dir.string());
+    ASSERT_TRUE(loadWordlists(&err)) << err;
+    for (const auto& lang : mnemonicLanguages()) {
+        auto wl = findWordlist(lang);
+        ASSERT_TRUE(wl);
+        EXPECT_TRUE(wl->pinned) << lang;
+    }
+}
+
+TEST_F(MnemonicDir, PinnedListMustMatchItsBytes) {
+    TempDir dir;
+    dir.write("xx.txt", syntheticLatinList());
+    const std::string pin = fileSha256Hex(dir.path() / "xx.txt");
+    auto manifest = [](const std::string& status, const std::string& pinField) {
+        return "{\"version\":2,\"lists\":[{\"lang\":\"xx\",\"file\":\"xx.txt\",\"normalizer\":\"latin\","
+               "\"status\":\"" + status + "\"" + pinField + "}]}";
+    };
+    std::string err;
+    setWordlistDir(dir.str());
+
+    dir.write("manifest.json", manifest("release", ",\"sha256\":\"" + pin + "\""));
+    ASSERT_TRUE(loadWordlists(&err)) << err;
+    auto wl = findWordlist("xx");
+    ASSERT_TRUE(wl);
+    EXPECT_EQ(wl->sha256, pin);
+    EXPECT_TRUE(wl->pinned);
+
+    // One word changed in place: refused, and the error says why.
+    std::string edited = syntheticLatinList();
+    edited.replace(edited.find("w0007"), 5, "w9999");
+    dir.write("xx.txt", edited);
+    EXPECT_FALSE(loadWordlists(&err));
+    EXPECT_NE(err.find("does not match the SHA-256"), std::string::npos) << err;
+    EXPECT_NE(err.find("xx"), std::string::npos) << err;
+    MnemonicError merr = MnemonicError::OK;
+    EXPECT_TRUE(mnemonicFromEntropy(fromHex(kat128().entropyHex), "xx", &merr).empty());
+    EXPECT_EQ(merr, MnemonicError::WORDLIST_LOAD_FAILED);
+
+    // A release list must be pinned; a malformed pin is refused; placeholders may go unpinned.
+    dir.write("xx.txt", syntheticLatinList());
+    dir.write("manifest.json", manifest("release", ""));
+    EXPECT_FALSE(loadWordlists(&err));
+    EXPECT_NE(err.find("no \"sha256\" pin"), std::string::npos) << err;
+    dir.write("manifest.json", manifest("release", ",\"sha256\":\"" + std::string(64, 'Z') + "\""));
+    EXPECT_FALSE(loadWordlists(&err));
+    dir.write("manifest.json", manifest("dev", ""));
+    ASSERT_TRUE(loadWordlists(&err)) << err;
+    EXPECT_FALSE(findWordlist("xx")->pinned);
 }
 
 // ---------------------------------------------------------------------------

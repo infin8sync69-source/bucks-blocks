@@ -20,7 +20,11 @@
 // LANGUAGES
 //   * wordlists/manifest.json lists the languages:
 //       {"version":2,"lists":[{"lang":"ar-dev","file":"ar-dev-2048.txt",
-//                              "normalizer":"arabic","status":"dev"}]}
+//                              "normalizer":"arabic","status":"dev",
+//                              "sha256":"<hex of the file bytes>"}]}
+//     A list whose bytes do not match its "sha256" is refused; a "release"
+//     list must have one. A published list never changes in place: a new
+//     version gets a new tag (and its own pin).
 //   * Lists are INDEX-ALIGNED: entry i of every list means the same 11-bit
 //     value, so convertMnemonic() re-encodes a phrase in another language
 //     without changing the entropy. Future English/Urdu/... lists must keep
@@ -68,7 +72,7 @@
 //
 // WORDLIST DIRECTORY (first hit wins; see resolveWordlistDir)
 //   setWordlistDir() > $BUCKS_WORDLIST_DIR > <exe>/../wordlists >
-//   <exe>/wordlists > BUCKS_SOURCE_DIR/wordlists > ./wordlists.
+//   <exe>/wordlists > BUCKS_SOURCE_DIR/wordlists. Never the working directory.
 //   The two explicit settings are used as given (no fallback) so a wrong
 //   configuration fails loudly instead of silently picking another list.
 // ============================================================================
@@ -85,6 +89,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <sstream>
 #include <unordered_set>
 
 #if defined(__APPLE__)
@@ -323,15 +328,26 @@ bool loadWordlistFile(const std::string& path,
     if (!isKnownMnemonicNormalizer(normalizer))
         return fail("unknown normalizer '" + normalizer + "'");
 
-    std::ifstream in(path, std::ios::binary);
-    if (!in) return fail("cannot open");
+    std::string bytes;
+    {
+        std::ifstream file(path, std::ios::binary);
+        if (!file) return fail("cannot open");
+        std::ostringstream ss;
+        ss << file.rdbuf();
+        if (file.bad()) return fail("read error");
+        bytes = ss.str();
+    }
 
     Wordlist list;
     list.lang = lang;
     list.normalizer = normalizer;
     list.status = status;
+    // Hash of the exact bytes: phrases depend on them, so this is what the manifest pins.
+    const Hash256 digest = sha256(std::vector<uint8_t>(bytes.begin(), bytes.end()));
+    list.sha256 = hexStr(std::vector<uint8_t>(digest.begin(), digest.end()));
     list.entries.reserve(MNEMONIC_WORDLIST_SIZE);
 
+    std::istringstream in(bytes);
     std::string line;
     size_t lineNo = 0;
     while (std::getline(in, line)) {
@@ -358,7 +374,6 @@ bool loadWordlistFile(const std::string& path,
         list.index.emplace(norm, static_cast<uint16_t>(list.entries.size()));
         list.entries.push_back(entry);
     }
-    if (in.bad()) return fail("read error");
     if (list.entries.size() != MNEMONIC_WORDLIST_SIZE)
         return fail("expected " + std::to_string(MNEMONIC_WORDLIST_SIZE) + " entries, found " +
                     std::to_string(list.entries.size()));
@@ -435,7 +450,7 @@ std::string resolveDirLocked(std::string* err) {
 #ifdef BUCKS_SOURCE_DIR
     candidates.push_back((fs::path(BUCKS_SOURCE_DIR) / "wordlists").string());
 #endif
-    candidates.push_back("./wordlists");
+    // No ./wordlists: the working directory must not decide which list a phrase is read with (audit WAL-14).
 
     for (const auto& c : candidates)
         if (hasManifest(c)) return c;
@@ -496,6 +511,23 @@ std::shared_ptr<const Registry> loadRegistryFrom(const std::string& dir, std::st
         std::string listErr;
         if (!loadWordlistFile((fs::path(dir) / file).string(), lang, normalizer, status, *list, &listErr))
             return fail(listErr);
+
+        // Every phrase made with a list depends on its exact bytes, so a pinned list that changed is refused
+        // instead of silently decoding phrases to other wallets (audit WAL-14). Release lists must be pinned.
+        if (item.contains("sha256")) {
+            const auto& pin = item["sha256"];
+            if (!pin.is_string() || pin.get<std::string>().size() != 64 ||
+                pin.get<std::string>().find_first_not_of("0123456789abcdef") != std::string::npos)
+                return fail("list '" + lang + "': \"sha256\" must be 64 lower-case hex characters");
+            if (pin.get<std::string>() != list->sha256)
+                return fail("list '" + lang + "' (" + file + ") does not match the SHA-256 pinned in " + MANIFEST_NAME +
+                            ": pinned " + pin.get<std::string>() + ", file " + list->sha256 +
+                            ". The file was changed or damaged; restore the published file, because phrases made "
+                            "with this list need its exact bytes");
+            list->pinned = true;
+        } else if (status == "release") {
+            return fail("release list '" + lang + "' has no \"sha256\" pin in " + MANIFEST_NAME);
+        }
         reg->lists.push_back(std::move(list));
     }
 
