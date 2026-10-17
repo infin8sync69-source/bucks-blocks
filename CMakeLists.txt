@@ -24,6 +24,30 @@ set(BUCKS_SANITIZE "" CACHE STRING
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 
+# Fuzz targets (tests/fuzz). With a clang that has the libFuzzer runtime the whole library is
+# instrumented for coverage (fuzzer-no-link) and sanitized; otherwise the targets only replay
+# their corpus. Apple's clang has no libFuzzer; Homebrew LLVM and Linux clang do.
+# This comes before the hardening flags because it may turn on ASan, which FORTIFY must not
+# be combined with (audit SAN-7).
+option(BUCKS_FUZZ "Build the fuzz targets in tests/fuzz" OFF)
+if(BUCKS_FUZZ)
+    if(NOT BUCKS_BUILD_TESTS)
+        message(FATAL_ERROR "BUCKS_FUZZ needs BUCKS_BUILD_TESTS (the fuzz targets live in tests/)")
+    endif()
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer")
+    check_cxx_source_compiles(
+        "extern \"C\" int LLVMFuzzerTestOneInput(const unsigned char*, unsigned long) { return 0; }"
+        BUCKS_HAVE_LIBFUZZER)
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(BUCKS_HAVE_LIBFUZZER)
+        if(NOT BUCKS_SANITIZE)
+            set(BUCKS_SANITIZE "address,undefined" CACHE STRING "" FORCE)
+        endif()
+        add_compile_options(-fsanitize=fuzzer-no-link)
+    endif()
+endif()
+
 # Hardening for every target, including the vendored sqlite3.c and googletest.
 # Windows (MinGW) is left on toolchain defaults.
 if(NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -44,28 +68,6 @@ if(NOT WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     endif()
 endif()
 
-# Fuzz targets (tests/fuzz). With a clang that has the libFuzzer runtime the whole library is
-# instrumented for coverage (fuzzer-no-link) and sanitized; otherwise the targets only replay
-# their corpus. Apple's clang has no libFuzzer; Homebrew LLVM and Linux clang do.
-option(BUCKS_FUZZ "Build the fuzz targets in tests/fuzz" OFF)
-if(BUCKS_FUZZ)
-    if(NOT BUCKS_BUILD_TESTS)
-        message(FATAL_ERROR "BUCKS_FUZZ needs BUCKS_BUILD_TESTS (the fuzz targets live in tests/)")
-    endif()
-    include(CheckCXXSourceCompiles)
-    set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer")
-    check_cxx_source_compiles(
-        "extern \"C\" int LLVMFuzzerTestOneInput(const unsigned char*, unsigned long) { return 0; }"
-        BUCKS_HAVE_LIBFUZZER)
-    unset(CMAKE_REQUIRED_FLAGS)
-    if(BUCKS_HAVE_LIBFUZZER)
-        if(NOT BUCKS_SANITIZE)
-            set(BUCKS_SANITIZE "address,undefined" CACHE STRING "" FORCE)
-        endif()
-        add_compile_options(-fsanitize=fuzzer-no-link)
-    endif()
-endif()
-
 # Sanitizers apply to every target so googletest and sqlite3 are instrumented
 # too. Findings abort the process, so ctest fails instead of just logging.
 if(BUCKS_SANITIZE)
@@ -75,6 +77,13 @@ if(BUCKS_SANITIZE)
         -fno-omit-frame-pointer
     )
     add_link_options(-fsanitize=${BUCKS_SANITIZE})
+    # GCC's identical-code folding merges look-alike functions and can drop __tsan_func_exit from
+    # the exception path of the survivor, so each exception leaks a TSan shadow-stack slot until
+    # it overflows: FuzzParsers.CoinbaseTransaction crashed with a SEGV in __tsan::FuncEntry
+    # (audit SAN-1). Clang's TSan is not affected.
+    if(BUCKS_SANITIZE MATCHES "thread" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(-fno-ipa-icf)
+    endif()
 endif()
 
 # Warnings for Bucks' own C++ code. bucks_core passes these on to everything
