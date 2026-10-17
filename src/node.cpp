@@ -180,9 +180,14 @@ std::vector<BlockHeader> Node::headersAfter(const std::vector<Hash256>& loc, con
     return state_->headersAfter(loc, stop, max);
 }
 
-std::vector<Hash256> Node::missingBlocksOnBestHeaderChain(size_t max) const {
+std::vector<Hash256> Node::missingBlocksTowards(const Hash256& peerBest, size_t max) const {
     std::lock_guard<std::mutex> lock(mu_);
-    return state_->missingBlocks(max);
+    return state_->missingBlocks(peerBest, max);
+}
+
+void Node::noteBlockAvailable(const Hash256& hash, Hash256& peerBest) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (state_->hasMoreWork(hash, peerBest)) peerBest = hash;
 }
 
 uint64_t Node::circulatingSupply() const {

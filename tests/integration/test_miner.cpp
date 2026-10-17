@@ -6,6 +6,7 @@
 #include "genesis.h"
 #include "mempool.h"
 #include "miner.h"
+#include "persistent_chain.h"
 #include "pow.h"
 #include "test_chain.h"
 
@@ -219,20 +220,34 @@ TEST(Miner, SyncRule) {
     BlockTemplate t;
     std::string err;
 
-    // (a) The tip (genesis) is years older than the clock and nothing better is known: mining works.
+    // (a) The tip (genesis) is months older than the clock and nothing better is known: mining works.
     EXPECT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
 
-    // (b) A header with more work is known but its block is not connected.
+    // (b) A header with more work is known but its block is not: mining goes on (audit CON-1).
     Block better = r.chain.build(r.chain.tip());
     ASSERT_TRUE(r.chain.state().ProcessNewBlockHeaders({better.header}).valid());
+    EXPECT_EQ(r.chain.state().miningBlockedReason(), "");
+    EXPECT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
+
+    // (c) Initial block download: the block arrives and connects, but the new tip is still more than a day
+    // old, so the node is catching up and does not mine on it.
+    ASSERT_TRUE(r.chain.submit(better).valid());
     EXPECT_FALSE(r.assembler.createNewBlock(ownedBy(7), {}, t, err));
     EXPECT_EQ(err, "node is syncing");
-    EXPECT_EQ(r.chain.state().miningBlockedReason(), "node is syncing");
 
-    // The block arrives: the tip catches up and mining is allowed again.
-    ASSERT_TRUE(r.chain.submit(better).valid());
+    // Ten minutes without another block: the download has stalled (or the network has), mining resumes.
+    r.chain.now() += 601;
     EXPECT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
     EXPECT_EQ(t.block.header.height, 2u);
+
+    // More old blocks close the gate again; a block from today opens it at once.
+    ASSERT_TRUE(r.chain.submit(r.chain.build(r.chain.tip())).valid());
+    EXPECT_EQ(r.chain.state().miningBlockedReason(), "node is syncing");
+    const uint32_t gap = uint32_t(r.chain.now() - 60 - int64_t(r.chain.tip()->header.timestamp));
+    ASSERT_TRUE(r.chain.submit(r.chain.build(r.chain.tip(), {}, 0, gap)).valid());
+    EXPECT_EQ(r.chain.state().miningBlockedReason(), "");
+    EXPECT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
+    EXPECT_EQ(t.block.header.height, 4u);
 
     // Regtest has no restriction, even with a better unconnected header.
     Rig reg;
@@ -341,22 +356,57 @@ TEST(Miner, StopRequestEndsTheLoop) {
     EXPECT_EQ(r.chain.tip()->height, 0u);
 }
 
-// Audit CON-1: a header whose block never arrives must not hold mining forever.
-TEST(Miner, HeaderWithoutABlockStopsGatingAfterTenMinutes) {
+// Audit CON-1: a header whose block never arrives, plus a real child block on top of it, used to stop mining for
+// good (also across restarts). Neither may hold the gate, not even for a while.
+TEST(Miner, HeaderOnlyParentAndBodiedChildDoNotStopMining) {
     ChainParams p = chainParams(NetworkId::REGTEST);
     p.id = NetworkId::TEST;
-    Rig r(p);
-    ASSERT_TRUE(r.chain.ok());
-    BlockTemplate t;
-    std::string err;
+    for (bool requested : {false, true}) {
+        Rig r(p);
+        ASSERT_TRUE(r.chain.ok());
+        const Block h1 = r.chain.build(r.chain.tip(), {}, 9);
+        ASSERT_TRUE(r.chain.state().ProcessNewBlockHeaders({h1.header}).valid());   // H1's body never comes
+        const Block h2 = buildTestBlock(p, r.chain.state().find(h1.getHash()), {}, 9);
+        ASSERT_TRUE(r.chain.submit(h2, requested).valid());
+        const BlockIndex* e2 = r.chain.state().find(h2.getHash());
+        ASSERT_NE(e2, nullptr);
+        EXPECT_TRUE(e2->status & HAVE_DATA);
+        EXPECT_FALSE(e2->haveChainData);
 
-    Block phantom = r.chain.build(r.chain.tip());
-    ASSERT_TRUE(r.chain.state().ProcessNewBlockHeaders({phantom.header}).valid());   // its body never comes
-    EXPECT_EQ(r.chain.state().miningBlockedReason(), "node is syncing");
+        EXPECT_EQ(r.chain.state().miningBlockedReason(), "") << "requested=" << requested;
+        std::string err;
+        ASSERT_EQ(r.mine(err), MineResult::FOUND) << err;
+        EXPECT_EQ(r.chain.tip()->height, 1u);
+        EXPECT_NE(r.chain.tip()->hash, h1.getHash());
+        // H1 is still worth fetching, but only from a peer that announced H2 (or H1).
+        EXPECT_EQ(r.chain.state().missingBlocks(h2.getHash(), 16), std::vector<Hash256>{h1.getHash()});
+        EXPECT_TRUE(r.chain.state().missingBlocks(Hash256{}, 16).empty());
+    }
+}
 
-    r.chain.now() += 599;
-    EXPECT_EQ(r.chain.state().miningBlockedReason(), "node is syncing");
-    r.chain.now() += 2;   // 601 s after the header was first stored
-    EXPECT_EQ(r.chain.state().miningBlockedReason(), "");
-    EXPECT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
+TEST(Miner, HeaderOnlyParentAndBodiedChildDoNotStopMiningAfterRestart) {
+    ChainParams p = chainParams(NetworkId::REGTEST);
+    p.id = NetworkId::TEST;
+    PersistentChain c(p);
+    ASSERT_TRUE(c.open().ok);
+    const Block h1 = c.build(c.state().tip(), {}, 9);
+    ASSERT_TRUE(c.state().ProcessNewBlockHeaders({h1.header}).valid());
+    const Block h2 = c.build(c.state().find(h1.getHash()), {}, 9);
+    ASSERT_TRUE(c.state().ProcessNewBlock(h2, false).valid());
+    EXPECT_EQ(c.state().miningBlockedReason(), "");
+
+    for (bool clean : {true, false}) {
+        c.close(clean);
+        c.now() += 7 * 86'400;
+        const LoadResult r = c.open();
+        ASSERT_TRUE(r.ok) << r.error;
+        ASSERT_NE(c.state().find(h2.getHash()), nullptr);
+        EXPECT_EQ(c.state().tip()->height, 0u);
+        EXPECT_EQ(c.state().miningBlockedReason(), "") << "clean=" << clean;
+    }
+    // And the chain still grows on its own tip.
+    const uint32_t gap = uint32_t(c.now() - int64_t(c.state().tip()->header.timestamp));
+    ASSERT_TRUE(c.submit(c.build(c.state().tip(), {}, 0, gap)).valid());
+    EXPECT_EQ(c.state().tip()->height, 1u);
+    EXPECT_EQ(c.state().miningBlockedReason(), "");
 }

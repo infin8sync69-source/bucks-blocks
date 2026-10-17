@@ -75,16 +75,14 @@ std::vector<BlockHeader> ChainState::headersAfter(const std::vector<Hash256>& lo
     return out;
 }
 
-std::vector<Hash256> ChainState::missingBlocks(size_t max) const {
-    // The best header chain: the non-failed entry with the most work that is not under a
-    // fork alert; its ancestors without data, oldest first.
-    const BlockIndex* best = nullptr;
-    index_.forEach([&](const BlockIndex& e) {
-        if (e.failed() || skipped_.count(e.hash)) return;
-        if (!best || e.chainWork > best->chainWork) best = &e;
-    });
+std::vector<Hash256> ChainState::missingBlocks(const Hash256& towards, size_t max) const {
+    // The branch to a block a peer announced, unless it is failed or under a fork alert; its
+    // ancestors without data, oldest first. Asking only the announcing peer means a header whose
+    // block nobody has does not get honest peers dropped as stalling (audit CON-1).
     std::vector<Hash256> out;
-    if (!best || !(best->chainWork > chain_.tip()->chainWork)) return out;
+    const BlockIndex* best = index_.find(towards);
+    if (!best || best->failed() || skipped_.count(best->hash)) return out;
+    if (!(best->chainWork > chain_.tip()->chainWork)) return out;
     std::vector<const BlockIndex*> path;
     for (const BlockIndex* e = best; e && !chain_.contains(e); e = e->prev) path.push_back(e);
     for (auto it = path.rbegin(); it != path.rend() && out.size() < max; ++it) {
@@ -93,32 +91,45 @@ std::vector<Hash256> ChainState::missingBlocks(size_t max) const {
     return out;
 }
 
+bool ChainState::hasMoreWork(const Hash256& a, const Hash256& b) const {
+    const BlockIndex* ea = index_.find(a);
+    if (!ea) return false;
+    const BlockIndex* eb = index_.find(b);
+    return !eb || ea->chainWork > eb->chainWork;
+}
+
 std::string ChainState::miningBlockedReason() const {
     if (params_.id == NetworkId::REGTEST) return {};
     const BlockIndex* tip = chain_.tip();
     if (!tip) return "no chain tip";
     if (tip->chainWork < params_.minimumChainWork) return "node is syncing";
 
+    // Initial block download: the tip is more than a day old and still moving. Only connected blocks move it, so
+    // nothing a peer sends without the blocks below it counts; and a tip that stopped moving never blocks, so the
+    // launch from an old genesis and a restart after a day without blocks can mine (section 8.5).
+    constexpr int64_t kOldTipSeconds = 86'400;
+    constexpr int64_t kSyncProgressSeconds = 600;
+    const int64_t now = clock_();
+    if (int64_t(tip->header.timestamp) < now - kOldTipSeconds && lastTipMove_ != 0 &&
+        now - lastTipMove_ <= kSyncProgressSeconds)
+        return "node is syncing";
+
+    // A block that can connect now (its data and all its ancestors' are stored) is waiting. A header, or a body
+    // whose parent never arrives, does not count: one of each used to stop mining for good (audit CON-1).
     std::vector<const BlockIndex*> parked;
     for (const Hash256& h : skipped_) {
         if (const BlockIndex* e = index_.find(h)) parked.push_back(e);
     }
-    // A header whose block never arrives must not hold mining forever: ten minutes after a header was first
-    // stored without its data it no longer counts (audit CON-1). Honest sync keeps getting bodies and so keeps
-    // the gate closed through the tip moving forward.
-    constexpr int64_t kHeaderOnlyGateSeconds = 600;
-    const int64_t now = clock_();
-    bool better = false;
+    bool waiting = false;
     index_.forEach([&](const BlockIndex& e) {
-        if (better || e.failed() || !(e.chainWork > tip->chainWork)) return;
-        if (!(e.status & HAVE_DATA) && now - e.firstSeen > kHeaderOnlyGateSeconds) return;
+        if (waiting || !e.haveChainData || e.failed() || !(e.chainWork > tip->chainWork)) return;
         for (const BlockIndex* s : parked) {
             const BlockIndex* lca = lastCommonAncestor(&e, s);
             if (lca == &e || lca == s) return;   // on (or beyond) a branch under fork alert
         }
-        better = true;
+        waiting = true;
     });
-    return better ? "node is syncing" : std::string();
+    return waiting ? "node is syncing" : std::string();
 }
 
 // ---------------------------------------------------------------- headers
@@ -142,7 +153,6 @@ BlockIndex* ChainState::acceptHeader(const BlockHeader& header, ValidationState&
 
     BlockIndex* e = index_.insert(header, parent);
     e->status = HEADER_VALID;
-    e->firstSeen = clock_();
     persistStatus(e);
     return e;
 }
@@ -455,6 +465,7 @@ bool ChainState::activateBestChain(std::string& err) {
         for (auto& d : disconnected) d.first->status &= ~uint32_t(IN_MAIN_CHAIN);
         chain_.setTip(stepEnd);
         tipSequence_.fetch_add(1, std::memory_order_release);
+        lastTipMove_ = clock_();
         if (onDisconnect_) {
             for (auto& d : disconnected) onDisconnect_(d.second);
         }
@@ -532,7 +543,6 @@ bool ChainState::loadIndexFromStore(const StoredState& state, int tier, std::str
                 return corrupt(bst.code);
         }
         BlockIndex* e = index_.insert(row.header, parent);
-        e->firstSeen = clock_();
         if (e->chainWork != row.chainWork) return corrupt("stored chain work differs from the recomputed value");
         loaded.emplace_back(e, &row);
     }

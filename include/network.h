@@ -143,6 +143,9 @@ public:
     std::chrono::steady_clock::time_point lastHeadersRequestTime;
     bool headersInFlight = false;        // one getheaders at a time; forgotten after 10 s
     std::set<Hash256> requestedBlocks;
+    // The most-work block this peer announced or sent. Blocks are asked only from peers that announced
+    // them, so a peer is never dropped as stalling for a block it does not have (audit CON-1).
+    Hash256 bestKnownBlock{};
     int fd() const { return socket_fd; }
 
     // Buffer management for non-blocking receive
@@ -168,7 +171,7 @@ private:
 
     void handleMessage(const NetMessage& msg);
     // Sync helpers (section 8.6): ask for headers with our locator, and for the block
-    // data of the best header chain, at most 16 blocks in flight per peer.
+    // data on the way to this peer's best announced block, at most 16 blocks in flight per peer.
     void requestHeaders();
     void requestMissingBlocks();
 };

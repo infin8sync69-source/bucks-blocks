@@ -14,6 +14,7 @@
 #include "network.h"
 #include "node_harness.h"
 #include "pow.h"
+#include "test_chain.h"
 #include "wallet.h"
 
 using namespace Bucks;
@@ -121,6 +122,39 @@ TEST(Network, NewBlockIsAnnouncedAndFetched) {
         ASSERT_TRUE(waitFor([&] { return t.b.node->tip().hash == t.a.node->tip().hash; })) << i;
     }
     EXPECT_EQ(t.b.node->height(), 3u);
+}
+
+// Audit CON-1: B knows a header chain with more work whose blocks nobody has. It used to ask every peer for
+// those blocks only, so it never fetched the real chain an honest peer offered, and dropped that peer as
+// stalling after 60 s. Blocks are now asked only from the peer that announced them.
+TEST(Network, PhantomHeadersDoNotStopTheDownloadFromAnHonestPeer) {
+    TwoNodes t;
+    ASSERT_TRUE(t.start());
+    TestChain phantom;   // same regtest genesis; its blocks are never sent anywhere
+    std::vector<BlockHeader> headers;
+    for (int i = 0; i < 5; ++i) {
+        const Block b = phantom.extend({}, 9);
+        headers.push_back(b.header);
+    }
+    ASSERT_TRUE(t.b.node->submitHeaders(headers).valid());
+
+    Wallet w;
+    w.generateKeys();
+    for (int i = 0; i < 2; ++i) ASSERT_TRUE(mineOne(*t.a.node, w));   // less work than the phantom headers
+
+    ASSERT_TRUE(t.connectBToA());
+    bool askedForPhantom = false;
+    auto synced = [&] {
+        {
+            std::lock_guard<std::mutex> lock(t.netB->peersMutex);
+            for (auto& kv : t.netB->peers)
+                for (const BlockHeader& h : headers) askedForPhantom |= kv.second->requestedBlocks.count(h.hash()) > 0;
+        }
+        return t.b.node->tip().hash == t.a.node->tip().hash;
+    };
+    EXPECT_TRUE(waitFor(synced)) << "B at " << t.b.node->height();
+    EXPECT_FALSE(askedForPhantom);
+    EXPECT_EQ(t.netB->peerCount(), 1u);
 }
 
 // P2P-1: a block with a bad coinbase is counted in the INVALID category.

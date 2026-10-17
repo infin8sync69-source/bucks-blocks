@@ -63,9 +63,12 @@ public:
     std::vector<Hash256> locator() const;
     std::vector<BlockHeader> headersAfter(const std::vector<Hash256>& locator, const Hash256& stop,
                                           size_t max) const;
-    // Blocks of the best known header chain whose data we still lack (at most max),
-    // used to decide what to download.
-    std::vector<Hash256> missingBlocksOnBestHeaderChain(size_t max) const;
+    // Blocks whose data we still lack on the way to `peerBest`, the most-work block a peer
+    // announced (at most max): what to download from that peer.
+    std::vector<Hash256> missingBlocksTowards(const Hash256& peerBest, size_t max) const;
+    // A peer announced or sent `hash`: it becomes the peer's best block if it is known and
+    // has more work than `peerBest`.
+    void noteBlockAvailable(const Hash256& hash, Hash256& peerBest) const;
     uint64_t circulatingSupply() const;
     uint64_t goldReserve() const { return 0; }        // the gold module is a later phase
 

@@ -89,8 +89,12 @@ public:
     void raiseForkAlert(const ForkAlert& a, uint64_t depth);   // logs once per competing tip
 
     // Section 8.5, "when the miner may work". Empty when mining is allowed,
-    // otherwise the reason ("node is syncing"). Regtest has no restriction.
-    // A branch parked by a fork alert does not block mining.
+    // otherwise the reason ("node is syncing"): minimum chain work not reached,
+    // initial block download (the tip is more than a day old and blocks kept
+    // connecting in the last ten minutes), or a block that can connect is
+    // waiting. Headers, and blocks whose ancestors are missing, never block
+    // mining; neither does a branch parked by a fork alert. Regtest has no
+    // restriction.
     std::string miningBlockedReason() const;
     const ChainParams& params() const { return params_; }
 
@@ -101,9 +105,13 @@ public:
     std::vector<BlockHeader> headersAfter(const std::vector<Hash256>& locator, const Hash256& stop,
                                           size_t max) const;
 
-    // Hashes of blocks on the best header chain whose data we do not have yet
-    // (closest to the tip first, at most `max`). Used to decide what to download.
-    std::vector<Hash256> missingBlocks(size_t max) const;
+    // Hashes of blocks whose data we do not have yet on the way from the active
+    // chain to `towards` (closest to the tip first, at most `max`). Empty unless
+    // `towards` is known, not failed, not parked and has more work than the tip.
+    // Used to decide what to download from the peer that announced `towards`.
+    std::vector<Hash256> missingBlocks(const Hash256& towards, size_t max) const;
+    // True when `a` is a known block with more work than `b` (or `b` is unknown).
+    bool hasMoreWork(const Hash256& a, const Hash256& b) const;
 
     // The reject state recorded for a block that failed validation.
     bool rejectState(const Hash256& hash, ValidationState& out) const;
@@ -136,6 +144,7 @@ private:
     std::set<Hash256> approved_;       // deep reorgs the operator allowed
     std::map<Hash256, ValidationState> rejects_;
     ForkAlert alert_;
+    int64_t lastTipMove_ = 0;          // clock when the tip last changed after load; 0 = not since
     bool storeFailed_ = false;         // a write to the store failed: the chain state is not trustworthy
     DisconnectHook onDisconnect_;
     StepHook onStep_;

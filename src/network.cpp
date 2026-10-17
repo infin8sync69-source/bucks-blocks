@@ -392,7 +392,7 @@ void Peer::requestHeaders() {
 
 void Peer::requestMissingBlocks() {
     if (requestedBlocks.size() >= MAX_BLOCKS_IN_FLIGHT) return;
-    std::vector<Hash256> missing = network.getNode().missingBlocksOnBestHeaderChain(MAX_BLOCKS_IN_FLIGHT);
+    std::vector<Hash256> missing = network.getNode().missingBlocksTowards(bestKnownBlock, MAX_BLOCKS_IN_FLIGHT);
     std::vector<Inventory> wanted;
     for (const Hash256& h : missing) {
         if (requestedBlocks.size() + wanted.size() >= MAX_BLOCKS_IN_FLIGHT) break;
@@ -484,16 +484,23 @@ void Peer::handleMessage(const NetMessage& msg) {
             }
             std::vector<Inventory> wantTx;
             bool unknownBlock = false;
+            bool knownBlock = false;
             for (const Inventory& inv : invs) {
                 if (inv.type == InvType::BLOCK) {
-                    // A new block is learned through its header; data is requested only for
-                    // headers on the best header chain.
-                    if (!node.knowsHeader(inv.hash)) unknownBlock = true;
+                    // A new block is learned through its header. A header we already have (perhaps from a
+                    // peer that never sends the block) can now be fetched from this peer.
+                    if (!node.knowsHeader(inv.hash)) {
+                        unknownBlock = true;
+                    } else {
+                        node.noteBlockAvailable(inv.hash, bestKnownBlock);
+                        knownBlock = true;
+                    }
                 } else if (!node.mempoolTransaction(inv.hash) && wantTx.size() < 100) {
                     wantTx.push_back(inv);
                 }
             }
             if (unknownBlock) requestHeaders();
+            else if (knownBlock) requestMissingBlocks();
             if (!wantTx.empty()) sendMsg(NetMessage(MessageType::GETDATA, serializeInvs(wantTx)));
             break;
         }
@@ -530,6 +537,7 @@ void Peer::handleMessage(const NetMessage& msg) {
                 if (st.result != ValidationResult::TIME_TOO_NEW && st.result != ValidationResult::INTERNAL)
                     misbehavior(penaltyFor(st.result));
             } else {
+                node.noteBlockAvailable(headers.back().hash(), bestKnownBlock);
                 requestMissingBlocks();
                 if (headers.size() == MAX_HEADERS_PER_MESSAGE) requestHeaders();   // more to come
             }
@@ -562,6 +570,7 @@ void Peer::handleMessage(const NetMessage& msg) {
             const Hash256 hash = b.getHash();
             const bool requested = requestedBlocks.erase(hash) > 0;
             const ValidationState st = node.submitBlock(b, requested);
+            if (st.valid() || st.result == ValidationResult::DUPLICATE) node.noteBlockAvailable(hash, bestKnownBlock);
             if (st.valid()) {
                 Bucks::logOut() << "DEBUG: Accepted block " << b.header.height << " from " << ip << std::endl;
                 requestMissingBlocks();
