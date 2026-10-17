@@ -1,4 +1,5 @@
-// The read-only wallet views the web console uses: the fee of a payment before it is sent (ONB-03).
+// The wallet views the web console uses: the fee of a payment before it is sent (ONB-03), the spendable part
+// of a balance (ONB-07), one wallet's history (ONB-05) and the recovery-phrase backup flag (ONB-08).
 #include <gtest/gtest.h>
 #include "server.h"
 #include "node.h"
@@ -9,6 +10,8 @@
 #include <nlohmann/json.hpp>
 #include <atomic>
 #include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <string>
 
 using json = nlohmann::json;
@@ -17,6 +20,13 @@ using namespace Bucks;
 namespace {
 
 const char* const kToken = "views-token-0123456789abcdef0123456789abcdef";
+
+std::string readFile(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
 
 // The API prints a txid byte for byte.
 Hash256 txidOf(const std::string& hex) {
@@ -233,6 +243,79 @@ TEST_F(WalletViewsTest, HistoryListsSentReceivedAndPendingPaymentsOfOneWallet) {
     auto r = cli.Get(("/api/wallets/" + a + "/history").c_str());
     ASSERT_TRUE(r);
     EXPECT_EQ(r->status, 401);
+    server.stop();
+}
+
+TEST_F(WalletViewsTest, CreatedWalletIsNotBackedUpUntilThePhraseIsConfirmed) {
+    std::string a, b, phraseB, restored;
+    {
+        Server server(*h.node, nullptr, cfg);
+        ASSERT_TRUE(server.start());
+        httplib::Client cli("127.0.0.1", server.port());
+        auto backedUp = [&](const std::string& addr) {
+            auto r = cli.Get("/api/wallets", auth);
+            EXPECT_TRUE(r && r->status == 200);
+            const json list = json::parse(r->body);
+            for (const auto& w : list["wallets"])
+                if (w["address"] == addr) return w["backedUp"].get<bool>();
+            ADD_FAILURE() << "no wallet " << addr;
+            return true;
+        };
+
+        a = createWallet(cli);
+        const json createdB = post(cli, "/api/wallets/create", json::object(), 200);
+        b = createdB["wallet"]["address"];
+        phraseB = createdB["mnemonic"];
+        EXPECT_FALSE(backedUp(a));
+        EXPECT_FALSE(backedUp(b));
+        json onDisk = json::parse(readFile(server.walletFile()));
+        EXPECT_EQ(onDisk["wallets"][0]["backupConfirmed"], false);
+
+        // A restored wallet was typed in from its phrase: it is backed up.
+        std::string otherPhrase;
+        Wallet other = Wallet::createNew(&otherPhrase);
+        restored = post(cli, "/api/wallets/restore", {{"mnemonic", otherPhrase}}, 200)["wallet"]["address"];
+        EXPECT_TRUE(backedUp(restored));
+
+        // The console confirms after its word check.
+        const json ok = post(cli, "/api/wallets/backup", {{"address", a}}, 200);
+        EXPECT_TRUE(ok["backedUp"].get<bool>());
+        EXPECT_TRUE(ok["persisted"].get<bool>());
+        EXPECT_TRUE(backedUp(a));
+        EXPECT_FALSE(backedUp(b));
+        onDisk = json::parse(readFile(server.walletFile()));
+        EXPECT_EQ(onDisk["wallets"][0]["backupConfirmed"], true);
+
+        // Proving the phrase: a phrase of another wallet is refused, B's own phrase confirms B.
+        json wrong = post(cli, "/api/wallets/backup", {{"address", b}, {"mnemonic", otherPhrase}}, 400);
+        EXPECT_EQ(wrong["error"], "That phrase belongs to a different wallet");
+        EXPECT_EQ(wrong.dump().find(otherPhrase.substr(0, 6)), std::string::npos) << "the reply never echoes the phrase";
+        post(cli, "/api/wallets/backup", {{"address", b}, {"mnemonic", "not a phrase"}}, 400);
+        EXPECT_FALSE(backedUp(b));
+
+        post(cli, "/api/wallets/backup", {{"address", "tNoSuchWallet111111111111"}}, 404);
+        post(cli, "/api/wallets/backup", {{"wallet", a}}, 400);
+        post(cli, "/api/wallets/backup", {{"address", a}, {"mnemonic", 7}}, 400);
+        auto r = cli.Post("/api/wallets/backup", json{{"address", a}}.dump(), "application/json");
+        ASSERT_TRUE(r);
+        EXPECT_EQ(r->status, 401);
+        server.stop();
+    }
+    // The flags survive a restart; restoring B from its phrase also confirms it.
+    Server server(*h.node, nullptr, cfg);
+    ASSERT_TRUE(server.start());
+    httplib::Client cli("127.0.0.1", server.port());
+    auto r = cli.Get("/api/wallets", auth);
+    ASSERT_TRUE(r && r->status == 200);
+    const json list = json::parse(r->body)["wallets"];
+    ASSERT_EQ(list.size(), 3u);
+    EXPECT_TRUE(list[0]["backedUp"].get<bool>());
+    EXPECT_FALSE(list[1]["backedUp"].get<bool>());
+    EXPECT_TRUE(list[2]["backedUp"].get<bool>());
+    const json again = post(cli, "/api/wallets/restore", {{"mnemonic", phraseB}}, 200);
+    EXPECT_TRUE(again["existing"].get<bool>());
+    r = cli.Get("/api/wallets", auth);
+    EXPECT_TRUE(json::parse(r->body)["wallets"][1]["backedUp"].get<bool>());
     server.stop();
 }
 

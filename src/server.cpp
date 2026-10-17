@@ -1078,6 +1078,7 @@ void Server::setupRoutes() {
             Wallet w = Wallet::createNew(&mnemonic, lang, entropyBits);
             w.setAddressVersion(node.params().p2pkhAddressVersion);
             w.setMnemonic("");
+            markBackupPending(w);   // until the user confirms the phrase (ONB-08)
             bool persisted = addWallet(w);
 
             std::string usedLang = lang.empty() ? defaultMnemonicLanguage() : lang;
@@ -1159,6 +1160,8 @@ void Server::setupRoutes() {
                 std::lock_guard<std::mutex> lock(walletMutex);
                 for (const auto& existing : wallets) {
                     if (existing.getAddress() == address) {
+                        // Typing the whole phrase in proves the backup of a wallet whose check was never finished (ONB-08).
+                        if (backupPendingLocked(existing)) confirmBackupLocked(existing);
                         json out = {{"success", true}, {"wallet", walletJson(existing)}, {"existing", true}};
                         out.update(echo);
                         reply(res, 200, out);
@@ -1294,6 +1297,11 @@ void Server::setupRoutes() {
     s->Get(R"(/api/wallets/([1-9A-HJ-NP-Za-km-z]+)/history)", [this](const httplib::Request& req, httplib::Response& res) {
         json out;
         const int status = walletHistory(req.matches[1], req.get_param_value("limit"), req.get_param_value("depth"), out);
+        reply(res, status, out);
+    });
+    s->Post("/api/wallets/backup", [this](const httplib::Request& req, httplib::Response& res) {
+        json out;
+        const int status = confirmWalletBackup(req.body, out);
         reply(res, status, out);
     });
 
@@ -1664,7 +1672,98 @@ json Server::walletSummaryLocked(const Wallet& w) const {
     const uint64_t usable = std::min(coinsTotal, balance);
     const uint64_t locked = usable > immature + spendable ? usable - immature - spendable : 0;
     return json{{"address", w.getAddress()}, {"balance", balance}, {"spendable", spendable},
-                {"immature", immature}, {"locked", locked}, {"incoming", incoming}};
+                {"immature", immature}, {"locked", locked}, {"incoming", incoming},
+                {"backedUp", !backupPendingLocked(w)}};
+}
+
+// Public key of a wallets.json entry, lower-case ("" when absent or not a string).
+static std::string entryPublicKey(const json& e) {
+    auto it = e.find("pubKeyHex");
+    if (it == e.end()) it = e.find("pubKey");
+    return it != e.end() && it->is_string() ? lowerAscii(it->get<std::string>()) : std::string();
+}
+
+// A created wallet's entry carries "backupConfirmed": false until the user confirms its recovery phrase
+// (ONB-08); the console keeps such a wallet from looking ready. Restored wallets, and entries written before
+// the flag existed, count as backed up. backupPending_ holds the wallets this process created that are not
+// confirmed yet: saveWalletsLocked writes their flag, and they still count if the file could not be written.
+bool Server::backupPendingLocked(const Wallet& w) const {
+    const std::string pub = lowerAscii(w.getPublicKeyHex());
+    if (backupPending_.count(pub)) return true;
+    if (!walletDoc.contains("wallets") || !walletDoc["wallets"].is_array()) return false;
+    for (const auto& e : walletDoc["wallets"]) {
+        if (e.is_object() && entryPublicKey(e) == pub) {
+            auto it = e.find("backupConfirmed");
+            return it != e.end() && it->is_boolean() && !it->get<bool>();
+        }
+    }
+    return false;
+}
+
+bool Server::confirmBackupLocked(const Wallet& w) {
+    const std::string pub = lowerAscii(w.getPublicKeyHex());
+    backupPending_.erase(pub);
+    if (walletDoc.contains("wallets") && walletDoc["wallets"].is_array()) {
+        for (auto& e : walletDoc["wallets"])
+            if (e.is_object() && entryPublicKey(e) == pub) e["backupConfirmed"] = true;
+    }
+    return saveWalletsLocked();
+}
+
+// Called before addWallet, so that the wallet's first entry on disk already carries the flag.
+void Server::markBackupPending(const Wallet& w) {
+    std::lock_guard<std::mutex> lock(walletMutex);
+    backupPending_.insert(lowerAscii(w.getPublicKeyHex()));
+}
+
+// POST /api/wallets/backup {address[, mnemonic, passphrase]}: the user confirmed the recovery phrase. The
+// console sends only the address after its own word check; a user who left the backup half-way proves the
+// phrase by sending it, and the node checks that it gives this wallet (nothing is stored).
+int Server::confirmWalletBackup(const std::string& body, json& out) {
+    if (!walletOk) {
+        out = errorJson("Wallet subsystem disabled: " + walletErr);
+        return 503;
+    }
+    json j;
+    try { j = body.empty() ? json::object() : json::parse(body); } catch (...) { out = errorJson("Invalid JSON body"); return 400; }
+    if (!j.is_object() || !j.contains("address") || !j["address"].is_string() ||
+        (j.contains("mnemonic") && !j["mnemonic"].is_string()) || (j.contains("passphrase") && !j["passphrase"].is_string())) {
+        out = errorJson("address (string) is required; mnemonic and passphrase must be strings");
+        return 400;
+    }
+    const std::string address = j["address"];
+    Wallet w;
+    {
+        std::lock_guard<std::mutex> lock(walletMutex);
+        auto it = std::find_if(wallets.begin(), wallets.end(), [&](const Wallet& x) { return x.getAddress() == address; });
+        if (it == wallets.end()) {
+            out = errorJson("No wallet with that address on this node");
+            return 404;
+        }
+        w = *it;
+    }
+    if (j.contains("mnemonic")) {
+        std::string phrase = j["mnemonic"];
+        std::string derived;
+        try {
+            Wallet check = Wallet::fromMnemonic(phrase, j.value("passphrase", ""));
+            check.setAddressVersion(node.params().p2pkhAddressVersion);
+            derived = check.getAddress();
+        } catch (const std::exception& e) {
+            OPENSSL_cleanse(&phrase[0], phrase.size());
+            out = errorJson(e.what());   // never contains the phrase (see Wallet::fromMnemonic)
+            return 400;
+        }
+        OPENSSL_cleanse(&phrase[0], phrase.size());
+        if (derived != address) {
+            out = errorJson("That phrase belongs to a different wallet");
+            return 400;
+        }
+    }
+    std::lock_guard<std::mutex> lock(walletMutex);
+    const bool persisted = confirmBackupLocked(w);
+    out = json{{"success", true}, {"address", address}, {"backedUp", true}, {"persisted", persisted}};
+    return 200;
 }
 
 // Fee of a payment this node's wallet just built: every input is one of the wallet's confirmed coins, so the fee
@@ -2010,6 +2109,7 @@ bool Server::saveWalletsLocked() {
         e["privKeyHex"] = w.getPrivateKeyHex();
         e["pubKeyHex"]  = w.getPublicKeyHex();
         e["address"]    = w.getAddress();
+        if (backupPending_.count(pub)) e["backupConfirmed"] = false;   // created, phrase not confirmed (ONB-08)
         arr.push_back(e);
     }
     for (auto& e : opaque) {

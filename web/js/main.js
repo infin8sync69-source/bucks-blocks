@@ -1,7 +1,7 @@
 // Application shell: login gate, banners, navigation, routing, polling.
 import { h, icon, netBadge, errorState, spinner, notice, busy, toast } from "./ui.js";
 import { post, ApiError } from "./api.js";
-import { state, subscribe, startPolling, refresh, loadAuth, resetAfterLogin, resetAfterLogout, network } from "./store.js";
+import { state, subscribe, startPolling, refresh, loadAuth, resetAfterLogin, resetAfterLogout, network, hasUnsaved } from "./store.js";
 import { NETWORKS, timeAgo, fmtInt } from "./util.js";
 
 const PAGES = [
@@ -19,6 +19,7 @@ let mode = ""; // "login" | "shell" | ""
 let shell = null; // element refs
 let current = null; // { id, view }
 let routeToken = 0;
+let justSignedIn = false; // the first page after a login takes the focus (ONB-18)
 
 // ---------- routing ----------
 function parseRoute() {
@@ -69,7 +70,7 @@ function setTitle(label) {
 function buildShell() {
   const nav = h("nav", { class: "nav", "aria-label": "Main" }, PAGES.map((p) =>
     h("a", { href: `#/${p.id}`, dataset: { page: p.id } }, icon(p.icon, { size: 20 }), h("span", null, window.innerWidth < 900 ? p.short : p.label))));
-  const banners = h("div", { class: "banners", id: "banners" });
+  const banners = h("div", { class: "banners", id: "banners", role: "region", "aria-label": "Node status" });
   const netSlot = h("span", { id: "net-slot" });
   const conn = h("span", { class: "conn", id: "conn", role: "status" });
   const logout = h("button", { type: "button", class: "btn ghost sm", onclick: doLogout, "aria-label": "Sign out" }, icon("logout", { size: 16 }), h("span", { class: "conn-text" }, "Sign out"));
@@ -99,7 +100,7 @@ let lastChrome = "";
 function updateChrome() {
   if (!shell) return;
   const net = network();
-  const sig = JSON.stringify([state.conn, net, state.lastOk && Math.floor(state.lastOk / 10000), state.info && state.info.height, state.info && state.info.syncing, state.rateLimitedUntil > Date.now()]);
+  const sig = JSON.stringify([state.conn, net, state.lastOk && Math.floor(state.lastOk / 10000), state.info && state.info.height, state.info && state.info.syncing, state.rateLimitedUntil > Date.now(), notBackedUp().length]);
   if (sig === lastChrome) return;
   lastChrome = sig;
 
@@ -118,6 +119,12 @@ function updateChrome() {
   if (state.rateLimitedUntil > Date.now()) {
     items.push(h("div", { class: "banner offline", role: "alert" }, icon("alert", { size: 18 }), h("span", null, "The node is rate-limiting this browser. Updates are paused for a moment.")));
   }
+  const unconfirmed = notBackedUp();
+  if (unconfirmed.length) {
+    items.push(h("div", { class: "banner net-warn" }, icon("alert", { size: 18 }),
+      h("span", null, `${unconfirmed.length === 1 ? "A wallet on this node is" : `${unconfirmed.length} wallets on this node are`} not backed up: its recovery phrase was never confirmed. `,
+        h("a", { href: "#/wallet" }, "Finish the backup"))));
+  }
   if (net === "test") items.push(h("div", { class: "banner net-warn" }, icon("alert", { size: 18 }), h("span", null, "TESTNET. These coins have no value and the network can be reset at any time. Never reuse a real wallet phrase here.")));
   else if (net === "regtest") items.push(h("div", { class: "banner net-dev" }, icon("info", { size: 18 }), h("span", null, "REGTEST. A private development chain; blocks are cheap to mine and coins have no value.")));
   else if (net && net !== "main") items.push(h("div", { class: "banner net-warn" }, icon("alert", { size: 18 }), h("span", null, "Unknown network. Do not send funds.")));
@@ -125,7 +132,10 @@ function updateChrome() {
   setTitle((PAGES.find((p) => p.id === parseRoute().id) || {}).label);
 }
 
+const notBackedUp = () => (state.wallets || []).filter((w) => w.backedUp === false);
+
 async function doLogout() {
+  if (hasUnsaved() && !window.confirm("You have not finished backing up your new wallet. Signing out clears its recovery phrase from this page for good, and the wallet stays marked as not backed up. Sign out anyway?")) return;
   try { await post("/api/auth/logout", {}); } catch { /* the cookie may already be gone */ }
   resetAfterLogout();
 }
@@ -153,6 +163,7 @@ function buildLogin() {
     try {
       await post("/api/auth/login", { token });
       input.value = "";
+      justSignedIn = true;
       await resetAfterLogin();
       refresh();
     } catch (err) {
@@ -169,8 +180,8 @@ function buildLogin() {
       submit.replaceChildren(icon("lock", { size: 18 }), "Unlock console");
     }
   });
-  const el = h("div", { class: "login" }, form);
-  app.replaceChildren(h("div", { class: "banners", id: "banners" }), el);
+  const el = h("main", { class: "login", id: "main", tabindex: "-1" }, form);
+  app.replaceChildren(h("div", { class: "banners", id: "banners", role: "region", "aria-label": "Node status" }), el);
   shell = null;
   current = null;
   return { status };
@@ -199,13 +210,15 @@ function onState() {
   if (!state.authChecked) return;
   if (!state.authenticated) {
     if (mode !== "login") {
+      const signedOut = mode === "shell";
       if (current && current.view && current.view.destroy) current.view.destroy();
       loginRefs = buildLogin();
       mode = "login";
       lastChrome = "";
       setTitle("Sign in");
+      // After a sign-out or an expired session the focus would fall to <body> with the removed shell (ONB-18).
       const t = document.querySelector(".login h1");
-      if (t && state.sessionExpired) t.focus();
+      if (t && (state.sessionExpired || signedOut)) t.focus();
     }
     updateLogin();
     return;
@@ -215,7 +228,8 @@ function onState() {
     mode = "shell";
     lastChrome = "";
     updateChrome();
-    renderRoute(false);
+    renderRoute(justSignedIn);
+    justSignedIn = false;
     return;
   }
   updateChrome();

@@ -258,6 +258,11 @@ private:
     int estimatePayment(const std::string& body, nlohmann::json& out);
     int walletHistory(const std::string& address, const std::string& limit, const std::string& depth,
                       nlohmann::json& out);
+    bool backupPendingLocked(const Wallet& w) const;
+    bool confirmBackupLocked(const Wallet& w);
+    void markBackupPending(const Wallet& w);
+    int confirmWalletBackup(const std::string& body, nlohmann::json& out);
+    std::set<std::string> backupPending_;   // public keys (lower-case hex) of created, unconfirmed wallets
 };
 
 } // namespace Bucks
