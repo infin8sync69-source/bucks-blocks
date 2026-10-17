@@ -15,6 +15,7 @@
 #include "network.h"
 #include "node_harness.h"
 #include "pow.h"
+#include "serialize.h"
 #include "wallet.h"
 
 using namespace Bucks;
@@ -383,8 +384,65 @@ TEST(P2pAudit, BadAddressesFromAPeerDoNotThrow) {
     NodeHarness h;
     ASSERT_TRUE(h.node) << h.error;
     Network net(*h.node);
-    EXPECT_NO_THROW(net.handleAddrMessage({"1.2.3.4:notaport", "1.2.3.4:99999", "1.2.3.4:", ":80", "1.2.3.4:-5",
-                                           "no-colon", std::string(400, 'a') + ":80", "1.2.3.4:99999999999999999999"}));
+    size_t added = 1;
+    EXPECT_NO_THROW(added = net.addAddresses({"1.2.3.4:notaport", "1.2.3.4:99999", "1.2.3.4:", ":80", "1.2.3.4:-5",
+                                              "no-colon", std::string(400, 'a') + ":80",
+                                              "1.2.3.4:99999999999999999999"}, "8.8.8.8"));
+    EXPECT_EQ(added, 0u);
+    EXPECT_EQ(net.addresses().size(), 0u);
+}
+
+namespace {
+
+std::vector<uint8_t> addrPayload(const std::vector<std::string>& list) {
+    Writer w;
+    w.u32(uint32_t(list.size()));
+    for (const std::string& s : list) {
+        w.u16(uint16_t(s.size()));
+        w.bytes(reinterpret_cast<const uint8_t*>(s.data()), s.size());
+    }
+    return w.take();
+}
+
+} // namespace
+
+// NET-11, NET-NEW-4: an address from a peer goes into the address table and is dialled from there.
+TEST(P2pAudit, AddressFromAPeerIsDialledFromTheTable) {
+    NodeHarness a, b, c;
+    ASSERT_TRUE(a.node && b.node && c.node);
+    Network netA(*a.node), netB(*b.node), netC(*c.node);
+    const uint16_t portA = freePort(), portC = freePort();
+    netA.start(portA);
+    netB.start(freePort());
+    netC.start(portC);
+    ASSERT_TRUE(netB.connectToPeer("127.0.0.1", portA));
+    ASSERT_TRUE(waitFor([&] { return netA.peerCount() == 1 && netB.peerCount() == 1; }));
+
+    sendToAll(netB, NetMessage(MessageType::ADDR, addrPayload({"127.0.0.1:" + std::to_string(portC)})));
+    EXPECT_TRUE(waitFor([&] { return netC.peerCount() == 1 && netA.peerCount() == 2; }))
+        << "A did not dial the address B gave it";
+    NetAddress ac;
+    ASSERT_TRUE(NetAddress::parse("127.0.0.1:" + std::to_string(portC), ac));
+    auto e = netA.addresses().find(ac);
+    ASSERT_TRUE(e);
+    EXPECT_TRUE(e->tried);
+    netC.stop();
+    netB.stop();
+    netA.stop();
+}
+
+// NET-NEW-4: a peer cannot fill the table; what is beyond its allowance is dropped unread.
+TEST(P2pAudit, AddressFloodIsRateLimited) {
+    TwoNodes t;
+    ASSERT_TRUE(t.start());
+    ASSERT_TRUE(t.connectBToA());
+    std::vector<std::string> flood;
+    for (int i = 0; i < 1000; ++i) flood.push_back("11." + std::to_string(i / 256) + "." + std::to_string(i % 256) + ".1:8733");
+    sendToAll(*t.netB, NetMessage(MessageType::ADDR, addrPayload(flood)));
+    ASSERT_TRUE(waitFor([&] { return t.netA->addresses().size() >= 10; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    EXPECT_EQ(t.netA->addresses().size(), 10u);
+    EXPECT_EQ(t.netA->peerCount(), 1u) << "the flooding peer is not punished for an unsolicited ADDR";
 }
 
 // NET-4, NET-11: dials ran one after another on the network thread and each waited up to 3 s, so addresses that

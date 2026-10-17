@@ -15,6 +15,9 @@
 #include <set>
 #include <chrono>
 #include <map>
+#include <functional>
+#include <optional>
+#include <random>
 #include <stdexcept>
 
 #include "chainparams.h"
@@ -110,6 +113,87 @@ struct NetMessage {
 };
 
 // ------------------------------------------------------------
+// Peer addresses (discovery, non-consensus)
+// ------------------------------------------------------------
+
+// A numeric IPv4 endpoint, as peers advertise it ("a.b.c.d:port").
+struct NetAddress {
+    uint32_t ip = 0;              // host byte order
+    uint16_t port = 0;
+
+    // Exactly "a.b.c.d:port" with port 1..65535: no names, no IPv6, nothing around it.
+    static bool parse(const std::string& s, NetAddress& out);
+    static bool parseIP(const std::string& ip, uint32_t& out);
+    std::string ipString() const;
+    std::string toString() const;
+    uint32_t group() const { return ip >> 16; }   // the /16 network, for diversity
+    bool isLoopback() const;      // 127/8
+    bool isPrivate() const;       // 10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16
+    bool isValid() const;         // a port, and not 0/8, multicast, reserved or broadcast
+    bool isRoutable() const;      // valid, public unicast
+    // Whether a peer at `source` may tell us about this address: public addresses from anyone,
+    // private ones from private or loopback peers, loopback ones from loopback peers only. A
+    // remote peer cannot point us at our own LAN or at services on this host.
+    bool acceptableFrom(uint32_t source) const;
+
+    friend bool operator==(const NetAddress& a, const NetAddress& b) { return a.ip == b.ip && a.port == b.port; }
+    friend bool operator<(const NetAddress& a, const NetAddress& b) {
+        return a.ip != b.ip ? a.ip < b.ip : a.port < b.port;
+    }
+};
+
+// Bounded table of addresses learned from peers (audit NET-NEW-4, NET-11). An address a peer told
+// us about is "new"; one we completed a handshake with is "tried". New entries can never push out
+// tried ones, and the peers of one /16 can fill only MAX_NEW_PER_SOURCE_GROUP new entries, so one
+// flooding source churns only its own share. Thread-safe; times are Unix seconds.
+class AddrMan {
+public:
+    static constexpr size_t MAX_NEW = 1024;
+    static constexpr size_t MAX_TRIED = 256;
+    static constexpr size_t MAX_NEW_PER_SOURCE_GROUP = 64;
+
+    struct Entry {
+        NetAddress addr;
+        uint32_t sourceGroup = 0;
+        int64_t lastSeen = 0;       // last advertised, or last connected
+        int64_t lastTry = 0;
+        int64_t lastSuccess = 0;
+        int attempts = 0;           // dials since the last handshake
+        bool tried = false;
+    };
+
+    AddrMan();
+
+    // Adds `a` as new, or refreshes it. True if it was not in the table.
+    bool add(const NetAddress& a, uint32_t sourceGroup, int64_t now);
+    void attempt(const NetAddress& a, int64_t now);        // a dial starts
+    void good(const NetAddress& a, int64_t now);           // a handshake completed
+    void remove(const NetAddress& a);
+    // A random entry to dial: not excluded by `skip`, past its retry delay (which grows with
+    // failed dials), from the tried or the new entries with equal chance. Entries that `prefer`
+    // accepts are taken first.
+    std::optional<NetAddress> select(int64_t now, const std::function<bool(const NetAddress&)>& skip,
+                                     const std::function<bool(const NetAddress&)>& prefer = {});
+    // Up to `max` random entries that still look reachable, for a getaddr reply.
+    std::vector<NetAddress> sample(size_t max, int64_t now);
+    std::optional<Entry> find(const NetAddress& a) const;
+    size_t size() const;
+    size_t triedCount() const;
+
+private:
+    bool isTerrible(const Entry& e, int64_t now) const;
+    void evictNew(uint32_t sourceGroup, int64_t now);
+    void evictTried();
+
+    mutable std::mutex mu_;
+    std::map<NetAddress, Entry> entries_;
+    std::map<uint32_t, size_t> newPerSource_;
+    size_t newCount_ = 0;
+    size_t triedCount_ = 0;
+    std::mt19937_64 rng_;
+};
+
+// ------------------------------------------------------------
 // Peer (transport only, non-consensus)
 // ------------------------------------------------------------
 enum class PeerState {
@@ -139,6 +223,7 @@ public:
     PeerState getState() const { return state; }
 
     bool sendMsg(const NetMessage& msg);
+    void askForAddresses();         // getaddr, with the token allowance for the reply
 
     std::string address() const;
     const std::string& getIP() const { return ip; }
@@ -175,7 +260,12 @@ private:
     std::mutex sendMutex;
     int misbehaviorScore;
     std::chrono::steady_clock::time_point connectionTime;
-    
+
+    // Addresses this peer may still give us: one per token, 0.1 tokens a second, and 1000 more
+    // when we ask it (getaddr). The rest of an ADDR is dropped (audit NET-NEW-4).
+    double addrTokens = 10;
+    std::chrono::steady_clock::time_point addrTokensAt;
+
     // Encryption (Phase 5)
     std::unique_ptr<P2PSessionEncryption> encryption;
     bool encryptionNegotiated;
@@ -228,18 +318,19 @@ public:
     // Queued for the network thread, which sends it outside the peer lock. Used by
     // message handlers (which run under that lock) and by the node's listeners.
     void queueBroadcast(const NetMessage& msg, int exceptFd = -1);
-    void queueAddresses(const std::vector<std::string>& addresses);
 
     // Security & Banning
     void banIP(const std::string& ip);
     bool isIPBanned(const std::string& ip) const;
 
-    // Peer discovery (Phase 6)
-    void handleAddrMessage(const std::vector<std::string>& addresses);
+    // Peer discovery: addresses a peer at `sourceIp` told us about go into the address table
+    // (never dialled straight away); entries that do not parse or that this source may not
+    // give us are dropped. Returns how many were new.
+    size_t addAddresses(const std::vector<std::string>& addresses, const std::string& sourceIp);
+    AddrMan& addresses() { return addrman_; }
 
     // Peer discovery access (for Peer class)
     std::mutex peersMutex;
-    std::set<std::string> knownPeers;
     std::unordered_map<int, std::unique_ptr<Peer>> peers;
     uint16_t listenPort;
 
@@ -251,7 +342,6 @@ private:
     size_t txListenerId_ = 0;
     std::mutex queueMutex;
     std::vector<std::pair<NetMessage, int>> relayQueue;
-    std::vector<std::vector<std::string>> addrQueue;
     void flushQueues();
     std::atomic<bool> running;
     int listenSocket;
@@ -264,6 +354,8 @@ private:
     // Peer Discovery (Phase 6)
     std::chrono::steady_clock::time_point lastDiscoveryTime;
     void discoverPeers();
+    AddrMan addrman_;
+    void dialFromAddressTable(size_t outbound, const std::set<NetAddress>& linked);
 
     // --connect peers (MANUAL) and seeds (SEED), redialled by maintainConnections. Guarded by
     // peersMutex; entries are only ever appended.
