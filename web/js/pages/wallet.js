@@ -21,7 +21,8 @@ export function mount(root) {
   let langs = null; // cached /api/wallets/languages
   const draw = keyedRender(holder);
 
-  function go(m) { mode = m; lastSig = null; render(state); }
+  // The form views write into holder directly, so the main view's cache is stale after any switch (ONB-06).
+  function go(m) { mode = m; lastSig = null; draw.reset(); render(state); }
   let lastSig = null;
 
   function render(s) {
