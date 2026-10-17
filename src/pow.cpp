@@ -70,5 +70,50 @@ uint32_t calculateNextWorkRequired(uint32_t lastBits,
     return encodeCompact(target);
 }
 
+// The specification needs arithmetic (flooring) right shifts of negative
+// numbers; C++17 leaves them implementation-defined.
+static_assert((int64_t(-1) >> 1) == int64_t(-1), "ASERT needs arithmetic right shifts");
+
+U256 calculateASERT(const U256& refTarget,
+                    int64_t spacing,
+                    int64_t timeDiff,
+                    int64_t heightDiff,
+                    const U256& powLimit,
+                    int64_t halfLife) {
+    // Exponent in 16-bit fixed point. Division truncates toward zero, as the
+    // specification requires (its note 3); flooring here changes ~75% of the
+    // official vectors.
+    const int64_t exponent = ((timeDiff - spacing * (heightDiff + 1)) * 65536) / halfLife;
+
+    // exponent = shifts * 2^16 + frac with 0 <= frac < 2^16 (the shift floors).
+    int64_t shifts = exponent >> 16;
+    const uint64_t frac = uint64_t(exponent - shifts * 65536);
+
+    // 65536 * 2^(frac / 65536) by the cubic approximation; the sum fits in
+    // uint64 (largest at frac = 65535: 2^64 - 1.8e14).
+    const uint32_t factor = 65536 + uint32_t((195766423245049ull * frac +
+                                              971821376ull * frac * frac +
+                                              5127ull * frac * frac * frac +
+                                              (1ull << 47)) >> 48);
+    U256 next = refTarget;
+    next *= factor;  // < 2^256 by the startup assertion on powLimit
+
+    // Multiply by 2^shifts and drop the 2^16 scale of the factor.
+    shifts -= 16;
+    if (shifts <= 0) {
+        next = -shifts >= 256 ? U256() : next >> unsigned(-shifts);
+    } else if (shifts >= 256 || ((next << unsigned(shifts)) >> unsigned(shifts)) != next) {
+        // The shift would lose high bits: the exact value is at least 2^256,
+        // so above powLimit as well (the specification's note 6).
+        next = powLimit;
+    } else {
+        next = next << unsigned(shifts);
+    }
+
+    if (next.isZero()) return U256(1);  // 0 is not a valid target, 1 is
+    if (next > powLimit) return powLimit;
+    return next;
+}
+
 } // namespace Pow
 } // namespace Bucks
