@@ -2,6 +2,7 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <thread>
 #include <string>
 #include <memory>
@@ -21,9 +22,30 @@
 using namespace Bucks;
 
 static std::atomic<bool> running{true};   // lock-free: safe to store from a signal handler
+static std::atomic<bool> hangup{false};
 
 void handleSignal(int) {
     running.store(false);
+}
+
+void handleHangup(int) {
+    hangup.store(true);
+}
+
+// A whole decimal number in [lo, hi]. Signs, spaces, trailing characters and overflow are refused, so a
+// typo cannot abort the process or wrap a port around (audit OPS-13).
+static bool parseNumber(const std::string& text, uint64_t lo, uint64_t hi, uint64_t& out) {
+    if (text.empty() || text.size() > 20) return false;
+    uint64_t v = 0;
+    for (char c : text) {
+        if (c < '0' || c > '9') return false;
+        const uint64_t digit = static_cast<uint64_t>(c - '0');
+        if (v > (UINT64_MAX - digit) / 10) return false;
+        v = v * 10 + digit;
+    }
+    if (v < lo || v > hi) return false;
+    out = v;
+    return true;
 }
 
 static void printUsage() {
@@ -52,6 +74,8 @@ static void printUsage() {
         "  --api-allowed-host <h>    accept this Host header (repeatable)\n"
         "  --trust-proxy             rate-limit on X-Forwarded-For (behind a trusted proxy only)\n"
         "  --ipfs-enable, --ipfs-port <n>, --auto-mine\n"
+        "Signals: SIGINT and SIGTERM stop the node cleanly. SIGHUP is logged and ignored, so closing\n"
+        "the terminal does not stop it (there is no configuration to reload).\n"
         "Without --api-token/--api-token-file/$BUCKS_API_TOKEN a random token is\n"
         "written to <datadir>/.cookie at start; the web UI asks for it.\n";
 }
@@ -65,6 +89,10 @@ int main(int argc, char* argv[]) {
 #endif
     std::signal(SIGINT, handleSignal);
     std::signal(SIGTERM, handleSignal);
+#ifdef SIGHUP
+    // The conventional daemon answer: a hangup (closed SSH session) does not stop the node (audit OPS-12).
+    std::signal(SIGHUP, handleHangup);
+#endif
 
     // Parse command line arguments
     bool startServer = false;
@@ -88,8 +116,18 @@ int main(int argc, char* argv[]) {
     bool trustProxy = false;
     LoadOptions loadOptions;
 
+    // Reads the value after option `name`; false (after saying why) unless it is a number in [lo, hi].
+    auto numberArg = [&](int& i, const std::string& name, uint64_t lo, uint64_t hi, uint64_t& out) {
+        const std::string text = argv[++i];
+        if (parseNumber(text, lo, hi, out)) return true;
+        Bucks::logErr() << "✗ " << name << " expects a whole number from " << lo << " to " << hi
+                        << ", got '" << text << "'\n";
+        return false;
+    };
+
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
+        uint64_t number = 0;
         std::string networkName;
         if (arg == "--network" && i + 1 < argc) {
             networkName = argv[++i];
@@ -104,9 +142,11 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--server") {
             startServer = true;
         } else if (arg == "--port" && i + 1 < argc) {
-            port = static_cast<uint16_t>(std::stoi(argv[++i]));
+            if (!numberArg(i, arg, 1, 65535, number)) return 2;
+            port = static_cast<uint16_t>(number);
         } else if (arg == "--p2p-port" && i + 1 < argc) {
-            p2pPort = static_cast<uint16_t>(std::stoi(argv[++i]));
+            if (!numberArg(i, arg, 1, 65535, number)) return 2;
+            p2pPort = static_cast<uint16_t>(number);
         } else if (arg == "--connect" && i + 1 < argc) {
             connectPeers.push_back(argv[++i]);
         } else if (arg == "--seed" && i + 1 < argc) {
@@ -118,7 +158,8 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--ipfs-enable") {
              enableIPFS = true;
         } else if (arg == "--ipfs-port" && i + 1 < argc) {
-             ipfsPort = static_cast<uint16_t>(std::stoi(argv[++i]));
+             if (!numberArg(i, arg, 1, 65535, number)) return 2;
+             ipfsPort = static_cast<uint16_t>(number);
         } else if (arg == "--auto-mine") {
              autoMine = true;
              startServer = true; // auto-mine implies server mode
@@ -142,7 +183,8 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--trust-proxy") {
              trustProxy = true;
         } else if (arg == "--checkblocks" && i + 1 < argc) {
-             loadOptions.checkBlocks = static_cast<uint32_t>(std::stoul(argv[++i]));
+             if (!numberArg(i, arg, 0, UINT32_MAX, number)) return 2;
+             loadOptions.checkBlocks = static_cast<uint32_t>(number);
         } else if (arg == "--checkdb") {
              loadOptions.checkTier = 2;
         } else if (arg == "--checkdb=full") {
@@ -233,13 +275,9 @@ int main(int argc, char* argv[]) {
     auto splitHostPort = [](const std::string& hp, std::string& host, uint16_t& port) {
         const size_t colon = hp.rfind(':');
         if (colon == std::string::npos || colon == 0) return false;
-        try {
-            const int p = std::stoi(hp.substr(colon + 1));
-            if (p < 1 || p > 65535) return false;
-            port = static_cast<uint16_t>(p);
-        } catch (...) {
-            return false;
-        }
+        uint64_t p = 0;
+        if (!parseNumber(hp.substr(colon + 1), 1, 65535, p)) return false;
+        port = static_cast<uint16_t>(p);
         host = hp.substr(0, colon);
         return true;
     };
@@ -305,6 +343,8 @@ int main(int argc, char* argv[]) {
     // Main loop
     while (running.load()) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (hangup.exchange(false))
+            Bucks::logOut() << "SIGHUP received and ignored; stop the node with SIGINT or SIGTERM\n";
     }
 
     Bucks::logOut() << "\nShutting down...\n";

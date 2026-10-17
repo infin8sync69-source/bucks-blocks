@@ -1,12 +1,21 @@
-// The bucks executable itself: start-up checks and option parsing (audit OPS-06).
+// The bucks executable itself: start-up checks, option parsing and signals (audit OPS-06, OPS-12, OPS-13).
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
+#include <thread>
 
 #ifndef _WIN32
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -34,6 +43,36 @@ RunResult runNode(const std::string& args) {
     const int status = ::pclose(p);
     r.exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
     return r;
+}
+
+// A TCP port that was free a moment ago.
+uint16_t freePort() {
+    const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t len = sizeof(a);
+    uint16_t port = 0;
+    if (fd >= 0 && ::bind(fd, reinterpret_cast<sockaddr*>(&a), sizeof(a)) == 0 &&
+        ::getsockname(fd, reinterpret_cast<sockaddr*>(&a), &len) == 0)
+        port = ntohs(a.sin_port);
+    if (fd >= 0) ::close(fd);
+    return port;
+}
+
+std::string readAll(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+// Polls until `done` holds or `seconds` pass.
+template <class F>
+bool waitFor(F done, int seconds) {
+    for (int i = 0; i < seconds * 20; ++i) {
+        if (done()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return done();
 }
 
 class CliTest : public ::testing::Test {
@@ -68,6 +107,67 @@ TEST_F(CliTest, ServerWithoutWordListsStopsBeforeTouchingTheChain) {
     EXPECT_NE(r.output.find("manifest.json"), std::string::npos) << r.output;
     EXPECT_NE(r.output.find("--wordlist-dir"), std::string::npos) << r.output;
     EXPECT_FALSE(fs::exists(dir + "/data/regtest/chain.sqlite"));
+}
+
+// OPS-13: a malformed or out-of-range number is a usage error (exit 2) with a message, never an abort or a
+// port that silently wraps around.
+TEST_F(CliTest, MalformedNumbersAreUsageErrors) {
+    const char* const bad[][2] = {
+        {"--port", "abc"}, {"--port", "99999"}, {"--port", "-1"}, {"--port", "0"}, {"--port", "80x"},
+        {"--port", " 80"}, {"--p2p-port", "65536"}, {"--p2p-port", "18446744073709551617"},
+        {"--ipfs-port", "''"}, {"--checkblocks", "-1"}, {"--checkblocks", "4294967296"},
+    };
+    for (const auto& b : bad) {
+        const RunResult r = runNode("--network=regtest --datadir '" + dir + "/data' " + b[0] + " '" + b[1] + "'");
+        EXPECT_EQ(r.exitCode, 2) << b[0] << " " << b[1] << ": " << r.output;
+        EXPECT_NE(r.output.find(std::string(b[0]) + " expects a whole number"), std::string::npos) << r.output;
+        EXPECT_EQ(r.output.find("terminate called"), std::string::npos) << r.output;
+    }
+    EXPECT_FALSE(fs::exists(dir + "/data/regtest/chain.sqlite"));
+    const RunResult r = runNode("--network=regtest --datadir '" + dir + "/data' --p2p-port " +
+                                std::to_string(freePort()) + " --connect 127.0.0.1:80x");
+    EXPECT_EQ(r.exitCode, 2) << r.output;
+    EXPECT_NE(r.output.find("--connect expects host:port"), std::string::npos) << r.output;
+}
+
+// OPS-12: SIGHUP (a closed terminal) is logged and ignored; SIGTERM still stops the node cleanly.
+TEST_F(CliTest, HangupIsIgnoredAndTermStopsCleanly) {
+    const uint16_t p2p = freePort();
+    ASSERT_NE(p2p, 0);
+    const std::string log = dir + "/node.log";
+    const std::string datadir = dir + "/data";
+    const std::string p2pArg = std::to_string(p2p);
+    const pid_t pid = ::fork();
+    ASSERT_GE(pid, 0);
+    if (pid == 0) {
+        const int fd = ::open(log.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        if (fd < 0) ::_exit(127);
+        ::dup2(fd, 1);
+        ::dup2(fd, 2);
+        ::execl(BUCKS_NODE_BINARY, BUCKS_NODE_BINARY, "--network=regtest", "--datadir", datadir.c_str(),
+                "--p2p-port", p2pArg.c_str(), static_cast<char*>(nullptr));
+        ::_exit(127);
+    }
+    int status = 0;
+    bool reaped = false;
+    auto exited = [&] { return reaped || (reaped = ::waitpid(pid, &status, WNOHANG) == pid); };
+    // Never leave the node running when an assertion ends the test early.
+    struct Reaper {
+        pid_t pid;
+        bool& reaped;
+        ~Reaper() { if (!reaped) { ::kill(pid, SIGKILL); ::waitpid(pid, nullptr, 0); } }
+    } reaper{pid, reaped};
+
+    ASSERT_TRUE(waitFor([&] { return readAll(log).find("P2P network started") != std::string::npos || exited(); }, 30))
+        << readAll(log);
+    ASSERT_EQ(::kill(pid, SIGHUP), 0) << "the node exited early: " << readAll(log);
+    EXPECT_TRUE(waitFor([&] { return readAll(log).find("SIGHUP received") != std::string::npos; }, 10)) << readAll(log);
+    EXPECT_FALSE(exited()) << "SIGHUP stopped the node: " << readAll(log);
+
+    ::kill(pid, SIGTERM);
+    ASSERT_TRUE(waitFor(exited, 30)) << readAll(log);
+    EXPECT_TRUE(WIFEXITED(status) && WEXITSTATUS(status) == 0) << readAll(log);
+    EXPECT_NE(readAll(log).find("Node stopped cleanly"), std::string::npos) << readAll(log);
 }
 
 #endif
