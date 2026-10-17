@@ -94,12 +94,23 @@ MessageType NetMessageHeader::commandToType(const char* cmd) {
 }
 
 uint32_t NetMessageHeader::maxPayload(MessageType type) {
+    // The small messages are capped near their real size: a 4 MiB ping used to be echoed in full,
+    // under the peer lock (audit NET-14, NET-5).
     switch (type) {
         case MessageType::BLOCK:      return 1'000'000 + ENCRYPTION_OVERHEAD;
         case MessageType::TX:         return 100'000 + ENCRYPTION_OVERHEAD;
         case MessageType::HEADERS:    return 168'003 + ENCRYPTION_OVERHEAD;
         case MessageType::GETHEADERS: return 3'269 + ENCRYPTION_OVERHEAD;
         case MessageType::ENCINIT:    return 33;
+        case MessageType::VERSION:    return 64 + ENCRYPTION_OVERHEAD;        // height, listen port, nonce
+        case MessageType::VERACK:
+        case MessageType::GETADDR:    return ENCRYPTION_OVERHEAD;             // empty
+        case MessageType::PING:
+        case MessageType::PONG:       return 8 + ENCRYPTION_OVERHEAD;         // a nonce
+        case MessageType::ADDR:       return 4 + 1000 * (2 + 21) + ENCRYPTION_OVERHEAD;
+        case MessageType::GETDATA:    return 4 + 1000 * 36 + ENCRYPTION_OVERHEAD;
+        case MessageType::INV:        return 4 + 50'000 * 36 + ENCRYPTION_OVERHEAD;
+        case MessageType::REJECT:     return 1'024 + ENCRYPTION_OVERHEAD;     // never sent; ignored
         default:                      return MAX_MESSAGE_PAYLOAD;
     }
 }
@@ -922,9 +933,18 @@ void Peer::handleMessage(const NetMessage& msg) {
                 misbehavior(20);
                 break;
             }
+            // Each item once, and at most a window of blocks per request (we ask for 16 at a time):
+            // 1000 copies of one block hash used to be answered with 1000 blocks (audit NET-5).
+            std::set<Hash256> seen;
+            size_t blocks = 0;
             for (const Inventory& inv : invs) {
+                if (!seen.insert(inv.hash).second) continue;
                 if (inv.type == InvType::BLOCK) {
-                    if (auto b = node.blockByHash(inv.hash)) sendMsg(NetMessage(MessageType::BLOCK, b->serialize()));
+                    if (blocks >= MAX_BLOCKS_IN_FLIGHT) continue;
+                    if (auto b = node.blockByHash(inv.hash)) {
+                        ++blocks;
+                        sendMsg(NetMessage(MessageType::BLOCK, b->serialize()));
+                    }
                 } else if (auto tx = node.mempoolTransaction(inv.hash)) {
                     sendMsg(NetMessage(MessageType::TX, tx->serialize()));
                 }

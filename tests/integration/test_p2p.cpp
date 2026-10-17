@@ -679,6 +679,19 @@ TEST(P2pAudit, MisbehavingLoopbackPeerIsDisconnected) {
     EXPECT_TRUE(t.connectBToA()) << "loopback must not be banned";
 }
 
+// NET-14: a ping of up to 4 MiB was echoed in full under the peer lock. A ping carries 8 bytes now; a
+// bigger one is an oversized frame and the peer is dropped.
+TEST(P2pAudit, BigPingIsRefused) {
+    TwoNodes t;
+    ASSERT_TRUE(t.start());
+    ASSERT_TRUE(t.connectBToA());
+    sendToAll(*t.netB, NetMessage(MessageType::PING, std::vector<uint8_t>(8, 1)));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    EXPECT_EQ(t.netA->peerCount(), 1u) << "a normal ping is fine";
+    sendToAll(*t.netB, NetMessage(MessageType::PING, std::vector<uint8_t>(3'000'000, 1)));
+    EXPECT_TRUE(waitFor([&] { return t.netA->peerCount() == 0; }));
+}
+
 // NET-NEW-4: a peer cannot fill the table; what is beyond its allowance is dropped unread.
 TEST(P2pAudit, AddressFloodIsRateLimited) {
     TwoNodes t;

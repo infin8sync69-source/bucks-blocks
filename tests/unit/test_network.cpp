@@ -112,7 +112,16 @@ TEST(NetworkMessageTest, PerCommandPayloadCaps) {
     EXPECT_LT(NetMessageHeader::maxPayload(MessageType::TX), 101'000u);
     EXPECT_GE(NetMessageHeader::maxPayload(MessageType::GETHEADERS), 3'269u);
     EXPECT_GE(NetMessageHeader::maxPayload(MessageType::HEADERS), 168'003u);
-    EXPECT_EQ(NetMessageHeader::maxPayload(MessageType::PING), MAX_MESSAGE_PAYLOAD);
+    // NET-14: small messages are capped near their size (a 4 MiB ping was echoed in full).
+    for (MessageType t : {MessageType::PING, MessageType::PONG, MessageType::VERACK, MessageType::GETADDR,
+                          MessageType::VERSION}) {
+        EXPECT_LE(NetMessageHeader::maxPayload(t), 64u + 256u) << NetMessageHeader::typeToCommand(t);
+    }
+    EXPECT_GE(NetMessageHeader::maxPayload(MessageType::PING), 8u);
+    EXPECT_GE(NetMessageHeader::maxPayload(MessageType::ADDR), 4u + 1000u * 23u);
+    EXPECT_GE(NetMessageHeader::maxPayload(MessageType::INV), 4u + 50'000u * 36u);
+    std::vector<uint8_t> bigPing(1000, 1);
+    EXPECT_THROW(NetMessage::deserialize(frame(kMagic, command("ping"), 1000, bigPing), kMagic), NetMalformed);
 
     // A tx frame above its cap is refused although it is far below the 4 MiB limit.
     std::vector<uint8_t> big(NetMessageHeader::maxPayload(MessageType::TX) + 1, 7);
