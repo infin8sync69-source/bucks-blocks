@@ -265,9 +265,42 @@ bool ChainState::approveReorg(const Hash256& tipHash, std::string& err) {
         err = "no parked branch with that tip";
         return false;
     }
+    const BlockIndex* approved = index_.find(tipHash);
+    if (!approved) {
+        err = "no parked branch with that tip";
+        return false;
+    }
     approved_.insert(tipHash);
-    skipped_.erase(tipHash);
-    return activateBestChain(err);
+    // Unpark the tip and whatever was parked above it since: they are the same branch.
+    for (auto it = skipped_.begin(); it != skipped_.end();) {
+        const BlockIndex* s = index_.find(*it);
+        if (s && s->height >= approved->height && s->getAncestor(approved->height) == approved)
+            it = skipped_.erase(it);
+        else
+            ++it;
+    }
+    if (!activateBestChain(err)) return false;
+    // Report what happened, not what was asked (audit CON-7).
+    if (!chain_.contains(approved)) {
+        if (approved->failed()) {
+            if (alert_.active && alert_.otherTip == tipHash) alert_ = ForkAlert{};   // nothing left to decide
+            err = "the approved branch is invalid; this node stays on its chain";
+        } else {
+            err = "the approved branch did not become the active chain (no more work than the tip?)";
+        }
+        return false;
+    }
+    return true;
+}
+
+// The operator's approval covers the reorg that brings the approved block into the active chain, also after its
+// branch has grown. Once it is in, a later deep reorg needs a new approval.
+bool ChainState::approvedReorgTo(const BlockIndex* best) const {
+    for (const Hash256& h : approved_) {
+        const BlockIndex* a = index_.find(h);
+        if (a && !chain_.contains(a) && best->height >= a->height && best->getAncestor(a->height) == a) return true;
+    }
+    return false;
 }
 
 bool ChainState::rejectState(const Hash256& hash, ValidationState& out) const {
@@ -354,7 +387,8 @@ bool ChainState::activateBestChain(std::string& err) {
         }
 
         const uint64_t depth = uint64_t(tip->height - fork->height);
-        if (depth > params_.maxAutoReorgDepth && !approved_.count(best->hash)) {
+        const bool approved = approvedReorgTo(best);
+        if (depth > params_.maxAutoReorgDepth && !approved) {
             raiseForkAlert(ForkAlert{true, fork->height, tip->hash, best->hash, best->chainWork - tip->chainWork}, depth);
             skipped_.insert(best->hash);
             continue;
@@ -378,7 +412,8 @@ bool ChainState::activateBestChain(std::string& err) {
                 }
             }
             if (!found) stepLast = path.size() - 1;
-            if (stepLast > 2 * params_.maxAutoReorgDepth + 32) {
+            // A long way to overtake the tip is a deep reorg too, unless the operator approved it.
+            if (stepLast > 2 * params_.maxAutoReorgDepth + 32 && !approved) {
                 raiseForkAlert(ForkAlert{true, fork->height, tip->hash, best->hash, best->chainWork - tip->chainWork}, depth);
                 skipped_.insert(best->hash);
                 continue;
@@ -475,7 +510,10 @@ bool ChainState::activateBestChain(std::string& err) {
             for (auto& d : disconnected) gone.push_back(d.second);
             onStep_(gone, connectedBlocks);
         }
-        if (alert_.active && approved_.count(best->hash)) alert_ = ForkAlert{};
+        if (alert_.active) {   // the branch the alert was about is now ours
+            const BlockIndex* other = index_.find(alert_.otherTip);
+            if (other && chain_.contains(other)) alert_ = ForkAlert{};
+        }
     }
 }
 

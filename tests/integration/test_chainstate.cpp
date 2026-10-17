@@ -219,6 +219,79 @@ TEST(ChainState, DeepReorgRefused) {
     EXPECT_FALSE(t.state().forkAlert().active);
 }
 
+// Audit CON-7: after a long partition the other branch needs more than 2 * limit + 32 blocks to overtake the
+// tip. The approval used to be answered with success while the node stayed where it was.
+TEST(ChainState, ApprovedDeepReorgHappensEvenWhenLong) {
+    TestChain t(regtestWithDepth(3));   // limit 3: a step of more than 38 blocks counts as deep
+    const BlockIndex* base = t.state().tip();
+    branch(t, base, 40, 0);
+    std::vector<Block> side = branch(t, base, 41, 1);
+    ASSERT_TRUE(t.state().forkAlert().active);
+    EXPECT_EQ(t.state().tip()->height, 40u);
+
+    std::string err;
+    ASSERT_TRUE(t.state().approveReorg(side.back().getHash(), err)) << err;
+    EXPECT_EQ(t.state().tip()->hash, side.back().getHash());
+    EXPECT_EQ(t.state().tip()->height, 41u);
+    EXPECT_FALSE(t.state().forkAlert().active);
+}
+
+// The approval covers the branch, also after it has grown; once the branch is ours a new deep fork needs a new
+// approval.
+TEST(ChainState, ApprovalCoversTheGrownBranchOnly) {
+    TestChain t(regtestWithDepth(5));
+    branch(t, t.state().tip(), 10, 0);
+    const BlockIndex* fork = t.state().activeChain()[4];
+    std::vector<Block> side = branch(t, fork, 7, 1);   // parked
+    const Hash256 parked = side.back().getHash();
+    ASSERT_EQ(t.state().forkAlert().otherTip, parked);
+    std::vector<Block> more = branch(t, t.state().find(parked), 2, 1);   // the parked branch grows, parked again
+    EXPECT_EQ(t.state().tip()->height, 10u);
+
+    std::string err;
+    ASSERT_TRUE(t.state().approveReorg(parked, err)) << err;   // the operator approves what the alert showed
+    EXPECT_EQ(t.state().tip()->hash, more.back().getHash());
+    EXPECT_FALSE(t.state().forkAlert().active);
+
+    // Later, a fork six blocks deep above the approved block (so on the approved branch) is parked again.
+    std::vector<Block> ours = branch(t, t.state().tip(), 10, 0);
+    const BlockIndex* again = t.state().activeChain()[t.state().tip()->height - 6];
+    ASSERT_GT(again->height, t.state().find(parked)->height);
+    std::vector<Block> other = branch(t, again, 7, 2);
+    EXPECT_EQ(t.state().tip()->hash, ours.back().getHash());
+    EXPECT_TRUE(t.state().forkAlert().active);
+    EXPECT_EQ(t.state().forkAlert().otherTip, other.back().getHash());
+}
+
+// approveReorg says so when the approved branch turns out invalid, and the node stays on its chain.
+TEST(ChainState, ApprovingAnInvalidBranchFails) {
+    TestChain t(regtestWithDepth(5));
+    branch(t, t.state().tip(), 10, 0);
+    const Hash256 ourTip = t.state().tip()->hash;
+    const BlockIndex* parent = t.state().activeChain()[4];
+    std::vector<Block> side;
+    for (int i = 0; i < 7; ++i) {
+        // The third block's coinbase claims one unit too much: only ConnectBlock can see it.
+        const uint64_t amount = i == 2 ? Rules::Subsidy(parent->height + 1, t.params()) + 1 : 0;
+        Block b = t.build(parent, {}, 1, 600, amount);
+        ASSERT_TRUE(t.submit(b).valid()) << i;   // stored, not connected
+        side.push_back(b);
+        parent = t.state().find(b.getHash());
+    }
+    ASSERT_TRUE(t.state().forkAlert().active);
+
+    std::string err;
+    EXPECT_FALSE(t.state().approveReorg(side.back().getHash(), err));
+    EXPECT_NE(err.find("invalid"), std::string::npos) << err;
+    EXPECT_EQ(t.state().tip()->hash, ourTip);
+    EXPECT_TRUE(t.state().find(side[2].getHash())->failed());
+    EXPECT_FALSE(t.state().forkAlert().active);   // nothing left to decide
+
+    // An unknown tip is refused as before.
+    EXPECT_FALSE(t.state().approveReorg(hashWith(7), err));
+    EXPECT_EQ(err, "no parked branch with that tip");
+}
+
 // CS-10: an unrequested block far above the tip is not stored.
 TEST(ChainState, UnrequestedFarBlock) {
     TestChain source;

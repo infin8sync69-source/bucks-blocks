@@ -71,8 +71,9 @@ public:
     // requested = the block was asked for (or mined locally).
     ValidationState ProcessNewBlock(const Block& block, bool requested);
 
-    // Operator approval of one deep reorg (CS-9). Only the named tip is allowed;
-    // chain selection runs at once.
+    // Operator approval of one deep reorg (CS-9): the branch to the named parked
+    // tip, also when it has grown since. Chain selection runs at once; true only
+    // if the approved tip is then in the active chain (err says why not).
     bool approveReorg(const Hash256& tipHash, std::string& err);
 
     // Called with every block removed from the active chain, after commit.
@@ -123,6 +124,7 @@ private:
     ValidationState acceptBlock(const Block& block, bool requested, BlockIndex*& entry);
 
     void markFailed(BlockIndex* e, const ValidationState& reason);
+    bool approvedReorgTo(const BlockIndex* best) const;
     void propagateHaveChainData(BlockIndex* e);
     BlockIndex* pickCandidate();
     bool activateBestChain(std::string& err);
