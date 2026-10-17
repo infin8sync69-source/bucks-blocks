@@ -158,6 +158,7 @@ function buildLogin() {
     h("p", { class: "muted", id: "token-hint" }, "Paste the node's API token. It is the value in the file passed with --api-token-file, or the .cookie file in the node's data directory. It is exchanged for a session cookie and never stored in this browser."),
     status,
     h("div", { class: "field", style: "margin-top:12px" }, h("label", { for: "token" }, "API token"), input),
+    tokenHelp(),
     errBox,
     h("div", { style: "margin-top:14px" }, submit));
   form.addEventListener("submit", async (e) => {
@@ -175,7 +176,7 @@ function buildLogin() {
     } catch (err) {
       let msg = err.message;
       if (err instanceof ApiError) {
-        if (err.status === 401) msg = "That token was not accepted. Check that you copied the whole value, with no extra characters.";
+        if (err.status === 401) msg = "That token was not accepted. Check that you copied the whole value, with no extra characters. If the node was restarted since you copied it, read the token again: it changes at every start.";
         else if (err.status === 429) msg = `Too many attempts. Wait ${err.retryAfter || 60} seconds and try again.`;
         else if (err.offline) msg = "Cannot reach the node. Is it running with --server, and are you on the right address and port?";
       }
@@ -193,6 +194,18 @@ function buildLogin() {
   return { status };
 }
 
+// Where the token is, and that the generated one changes at every start (ONB-15). The exact path depends on
+// --datadir and the network; the node prints it at start.
+function tokenHelp() {
+  return h("details", { class: "token-help" },
+    h("summary", null, "Where do I find the token?"),
+    h("div", { class: "stack", style: "gap:8px;margin-top:8px;font-size:.9rem" },
+      h("p", { style: "margin:0" }, "On the computer that runs the node, with the default data directory on mainnet:"),
+      h("code", { class: "addr", style: "user-select:all" }, "cat ~/.bucks/.cookie"),
+      h("p", { style: "margin:0" }, "The node prints the exact file when it starts, in the line \"API token file: ...\". If the node was started with --datadir, the file is in that directory."),
+      h("p", { style: "margin:0" }, h("strong", null, "A new token is written every time the node starts, "), "so after a restart or an upgrade sign in with the new value. To keep one token, start the node with --api-token-file <file>.")));
+}
+
 let loginRefs = null;
 function updateLogin() {
   const status = loginRefs.status;
@@ -200,7 +213,7 @@ function updateLogin() {
   const slot = document.getElementById("login-net");
   if (slot) slot.replaceChildren(net ? netBadge(net) : "");
   const items = [];
-  if (state.sessionExpired) items.push(notice("warn", "Your session expired or was ended. Sign in again to continue."));
+  if (state.sessionExpired) items.push(notice("warn", "Your session expired or was ended. Sign in again to continue. If the node was restarted, it has a new token: read it again from its .cookie file (unless the node uses --api-token-file)."));
   if (state.conn === "offline") items.push(notice("error", "Cannot reach the node. Retrying every 10 seconds."));
   else if (state.walletsEnabled === false && state.walletError) items.push(notice("warn", `Wallet subsystem unavailable: ${state.walletError}`));
   status.replaceChildren(...items);

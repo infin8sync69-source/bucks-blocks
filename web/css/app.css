@@ -257,6 +257,8 @@ a.list-row:hover { background: var(--surface-2); }
 .login { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
 .login-card { width: 100%; max-width: 440px; }
 .login .banners { position: static; }
+.token-help { margin-top: -4px; }
+.token-help summary { cursor: pointer; color: var(--info); font-size: .9rem; font-weight: 550; padding: 6px 0; }
 
 /* ---------- toasts ---------- */
 #toasts { position: fixed; right: 16px; bottom: 16px; z-index: 100; display: grid; gap: 8px; max-width: min(380px, calc(100vw - 32px)); }
