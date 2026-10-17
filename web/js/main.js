@@ -249,6 +249,8 @@ function onState() {
     updateChrome();
     renderRoute(justSignedIn);
     justSignedIn = false;
+    // Fetch every page now, so that pages not opened yet still work while the node is unreachable (ONB-21).
+    PAGES.forEach((p) => p.load().catch(() => {}));
     return;
   }
   updateChrome();
