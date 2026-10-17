@@ -2,7 +2,7 @@
 import { h, icon, netBadge, errorState, spinner, notice, busy, toast } from "./ui.js";
 import { post, ApiError } from "./api.js";
 import { state, subscribe, startPolling, refresh, loadAuth, resetAfterLogin, resetAfterLogout, network, hasUnsaved } from "./store.js";
-import { NETWORKS, timeAgo, fmtInt } from "./util.js";
+import { NETWORKS, timeAgo, fmtInt, syncStatus } from "./util.js";
 
 const PAGES = [
   { id: "overview", label: "Overview", short: "Home", icon: "overview", load: () => import("./pages/overview.js") },
@@ -100,13 +100,15 @@ let lastChrome = "";
 function updateChrome() {
   if (!shell) return;
   const net = network();
-  const sig = JSON.stringify([state.conn, net, state.lastOk && Math.floor(state.lastOk / 10000), state.info && state.info.height, state.info && state.info.syncing, state.rateLimitedUntil > Date.now(), notBackedUp().length]);
+  const sync = syncStatus(state.info, state.node);
+  const sig = JSON.stringify([state.conn, net, state.lastOk && Math.floor(state.lastOk / 10000), state.info && state.info.height, sync && [sync.label, sync.alone], state.rateLimitedUntil > Date.now(), notBackedUp().length]);
   if (sig === lastChrome) return;
   lastChrome = sig;
 
   shell.netSlot.replaceChildren(net ? netBadge(net) : "");
-  const dotCls = state.conn === "ok" ? (state.info && state.info.syncing ? "warn" : "ok") : state.conn === "offline" ? "bad" : "";
-  const text = state.conn === "offline" ? "Node offline" : !state.info ? "Connecting…" : state.info.syncing ? `Syncing · #${fmtInt(state.info.height)}` : `Synced · #${fmtInt(state.info.height)}`;
+  // "Synced" only with peers: a node alone mines and shows a chain nobody else has (ONB-04).
+  const dotCls = state.conn === "ok" ? (sync && sync.tone === "ok" ? "ok" : "warn") : state.conn === "offline" ? "bad" : "";
+  const text = state.conn === "offline" ? "Node offline" : !sync ? "Connecting…" : `${sync.label} · #${fmtInt(state.info.height)}`;
   shell.conn.replaceChildren(h("span", { class: `dot ${dotCls}` }), h("span", { class: "conn-text" }, text));
   shell.conn.title = state.lastOk ? `Last response ${timeAgo(state.lastOk / 1000)}` : "No response yet";
 
@@ -118,6 +120,10 @@ function updateChrome() {
   }
   if (state.rateLimitedUntil > Date.now()) {
     items.push(h("div", { class: "banner offline", role: "alert" }, icon("alert", { size: 18 }), h("span", null, "The node is rate-limiting this browser. Updates are paused for a moment.")));
+  }
+  if (state.conn === "ok" && sync && sync.alone) {
+    items.push(h("div", { class: "banner net-warn" }, icon("alert", { size: 18 }),
+      h("span", null, h("strong", null, "No peers connected. "), "This node is not in contact with the Bucks network: blocks it mines and payments it shows exist only here until it connects. Check the internet connection and that the P2P port is open, or start the node with --seed or --connect.")));
   }
   const unconfirmed = notBackedUp();
   if (unconfirmed.length) {

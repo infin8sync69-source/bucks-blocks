@@ -76,6 +76,24 @@ export function amountProblem(units, { balance, spendable, fee = MIN_FEE_UNITS, 
 }
 
 /**
+ * What the console says about the node's place in the network (ONB-04). A node without peers is on a chain of
+ * its own whatever its tip looks like, so it is never called "Synced". `info` is /api/blockchain/info and
+ * `node` /api/status (peerCount, uptimeSeconds); `node` may be missing while it loads. `alone` asks for the
+ * no-peers banner: not on regtest, a private chain, and not in the first minute while seeds are dialled.
+ */
+export function syncStatus(info, node) {
+  if (!info) return null;
+  const peers = node && Number.isFinite(Number(node.peerCount)) ? Number(node.peerCount) : null;
+  const starting = !!node && Number(node.uptimeSeconds) < 60;
+  const noPeers = peers === 0;
+  const alone = noPeers && !starting && info.network !== "regtest";
+  if (info.syncing) return { label: "Syncing", tone: "warn", sub: noPeers ? "Waiting for peers to download from" : "Initial block download in progress", noPeers, alone };
+  if (peers === null) return { label: "Tip", tone: "", sub: "Peer count not known yet", noPeers, alone };
+  if (noPeers) return { label: starting ? "Connecting" : "No peers", tone: "warn", sub: starting ? "Looking for peers" : "Not connected to any other node", noPeers, alone };
+  return { label: "Synced", tone: "ok", sub: `Following the chain tip with ${peers} peer${peers === 1 ? "" : "s"}`, noPeers, alone };
+}
+
+/**
  * How one entry of GET /api/wallets/<address>/history is shown: label, sign of the amount, status text and
  * pill tone. A mining reward is spendable once it has `maturity` confirmations.
  */

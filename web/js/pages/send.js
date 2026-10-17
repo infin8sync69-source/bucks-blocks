@@ -1,7 +1,7 @@
 import { h, icon, copyButton, pageHead, skeletonRows, errorState, notice, field, busy, netBadge } from "../ui.js";
 import { get, post, ApiError } from "../api.js";
 import { state, loadWallets, selectWallet, selectedWallet, emit } from "../store.js";
-import { fmtBucks, fmtInt, parseBucks, amountProblem, validateAddress, MIN_FEE_UNITS, DUST_LIMIT_UNITS, COINBASE_MATURITY, NETWORKS, shortAddr } from "../util.js";
+import { fmtBucks, fmtInt, parseBucks, amountProblem, validateAddress, syncStatus, MIN_FEE_UNITS, DUST_LIMIT_UNITS, COINBASE_MATURITY, NETWORKS, shortAddr } from "../util.js";
 
 export function mount(root) {
   const holder = h("div", { class: "stack" });
@@ -276,7 +276,9 @@ export function mount(root) {
         if (from.options.length !== s.wallets.length) fillFrom(s);
         else [...from.options].forEach((o) => { const w = s.wallets.find((x) => x.address === o.value); if (w) o.textContent = optionText(w); });
         balHint.textContent = hintText();
-        syncWarn.replaceChildren(...(s.info && s.info.syncing ? [notice("warn", "This node is still syncing. Balances may be out of date and payments may be rejected until it catches up.")] : []));
+        const sync = syncStatus(s.info, s.node);
+        syncWarn.replaceChildren(...(s.info && s.info.syncing ? [notice("warn", "This node is still syncing. Balances may be out of date and payments may be rejected until it catches up.")] : []),
+          ...(sync && sync.alone ? [notice("warn", h("strong", null, "No peers connected. "), "A payment sent now stays on this node until it connects to the network.")] : []));
         followPayment(s);
       },
     };
