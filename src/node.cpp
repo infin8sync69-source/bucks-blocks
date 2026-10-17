@@ -341,7 +341,7 @@ std::optional<Transaction> Node::mempoolTransaction(const Hash256& txid) const {
 
 MineResult Node::mine(const Script& minerScript, const AssemblerOptions& options,
                       const std::atomic<bool>& stop, std::string& err, Hash256* found,
-                      int64_t timeLimitSeconds) {
+                      int64_t timeLimitSeconds, unsigned threads) {
     // The API's "mine one block" and the auto-miner share one Miner; serialize them, and give up if asked to stop
     // while waiting (audit CON-5).
     std::unique_lock<std::mutex> mineLock(mineMu_, std::defer_lock);
@@ -355,6 +355,7 @@ MineResult Node::mine(const Script& minerScript, const AssemblerOptions& options
         before = state_->tipSequence();
     }
     miner_->setTimeLimitSeconds(timeLimitSeconds);
+    miner_->setThreads(threads);
     const MineResult r = miner_->mineOne(minerScript, options, stop, err);
     if (r == MineResult::FOUND && found) *found = miner_->lastBlockHash();
     notifyTip(before);
