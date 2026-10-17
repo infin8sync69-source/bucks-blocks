@@ -1,7 +1,7 @@
 import { h, icon, copyButton, pageHead, skeletonRows, errorState, notice, field, busy, netBadge } from "../ui.js";
 import { post, ApiError } from "../api.js";
 import { state, loadWallets, selectWallet, selectedWallet, emit } from "../store.js";
-import { fmtBucks, parseBucks, validateAddress, MIN_FEE_UNITS, COINBASE_MATURITY, NETWORKS, shortAddr } from "../util.js";
+import { fmtBucks, parseBucks, amountProblem, validateAddress, MIN_FEE_UNITS, DUST_LIMIT_UNITS, COINBASE_MATURITY, NETWORKS, shortAddr } from "../util.js";
 
 export function mount(root) {
   const holder = h("div", { class: "stack" });
@@ -80,9 +80,10 @@ export function mount(root) {
       let amtErr = "";
       if (!a.ok) { result.ok = false; if (amt.value.trim() || showAll) amtErr = a.error; }
       else {
-        const bal = BigInt(wallet(state).balance);
-        if (a.units > bal) { amtErr = `That is more than this wallet holds (${fmtBucks(bal, { trim: true })} BUCKS).`; result.ok = false; }
-        else if (a.units + MIN_FEE_UNITS > bal) { amtErr = `Not enough left to also pay the network fee (at least ${fmtBucks(MIN_FEE_UNITS, { trim: true })} BUCKS).`; result.ok = false; }
+        const w = wallet(state);
+        const dust = state.info && state.info.dustLimit != null ? state.info.dustLimit : DUST_LIMIT_UNITS;
+        const problem = amountProblem(a.units, { balance: w.balance, spendable: w.spendable, dust });
+        if (problem) { amtErr = problem; result.ok = false; }
         result.units = a.units;
       }
       setErr(amtField, amt, showAll || touchedAmt ? amtErr : "");
