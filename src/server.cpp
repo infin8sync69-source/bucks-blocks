@@ -34,6 +34,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <filesystem>
+#include <system_error>
 
 #ifdef _WIN32
 #ifndef _WIN32_WINNT
@@ -348,6 +349,7 @@ Server::Server(Node& n, Network* net, const ServerConfig& cfg)
       isRunning(false),
       svr(new httplib::Server()) {
 
+    minerThreads = config.mineThreads ? config.mineThreads : std::max(1u, std::thread::hardware_concurrency());
     dataDirPath = config.dataDir.empty() ? defaultDataDir() : config.dataDir;
     // One wallet file per network, next to that network's chain (and its process lock): two nodes can no longer
     // overwrite each other's keys through a shared file (audit WAL-2).
@@ -642,10 +644,13 @@ bool Server::start(int port) {
 }
 
 void Server::stop() {
-    // Stop the miner first: it reads the wallet list and the chain.
-    autoMineStop.store(true);
-    autoMining.store(false);
-    if (autoMinerThread.joinable()) autoMinerThread.join();
+    // Stop the miner first: it uses the chain. Nothing can start it again after this, so no
+    // late API request leaves a running thread behind (audit SAN-2).
+    {
+        std::lock_guard<std::mutex> ctl(minerCtlMutex);
+        minerShutdown = true;
+        stopMinerLocked();
+    }
 
     if (!isRunning) return;
 
@@ -1420,19 +1425,28 @@ void Server::setupRoutes() {
     // =========================================================
     // Auto-Mining Control
     // =========================================================
-    s->Post("/api/mining/start", [this](const httplib::Request&, httplib::Response& res) {
-        startAutoMine();
-        if (!autoMining.load()) {
-            reply(res, 400, errorJson("No wallet to mine to; create or restore one first"));
+    s->Post("/api/mining/start", [this](const httplib::Request& req, httplib::Response& res) {
+        json j;
+        if (!parseBody(req, res, j)) return;
+        std::string err;
+        if (const int status = startMining(j, err)) {
+            reply(res, status, errorJson(err));
             return;
+        }
+        std::string address;
+        {
+            std::lock_guard<std::mutex> lock(minerInfoMutex);
+            address = minerAddress;
         }
         res.set_content(json{
             {"success", true},
             {"message", "Auto-mining started"},
-            {"minerAddress", minerAddress}
+            {"minerAddress", address},
+            {"threads", minerThreads}
         }.dump(), "application/json");
     });
 
+    // Stops continuous mining and a running one-block search.
     s->Post("/api/mining/stop", [this](const httplib::Request&, httplib::Response& res) {
         stopAutoMine();
         res.set_content(json{
@@ -1460,13 +1474,30 @@ void Server::setupRoutes() {
         res.set_content(json{{"success", true}}.dump(), "application/json");
     });
 
+    // Public. hashRate is live while the miner hashes (audit ML-3); blockedReason is why the
+    // node cannot build a block now, which is not the same as "syncing" (ONB-14).
     s->Get("/api/mining/status", [this](const httplib::Request&, httplib::Response& res) {
-        res.set_content(json{
-            {"mining",       autoMining.load()},
-            {"minerAddress", minerAddress},
+        const Node::MiningInfo info = node.miningInfo();
+        const bool busy = minerBusy.load();
+        const uint64_t rate = busy ? node.minerHashRate() : 0;
+        const double expected = targetToDouble(Pow::blockProof(info.bits));   // hashes per block on average
+        json j{
+            {"mining",       autoMining.load()},   // continuous mining is on
+            {"busy",         busy},                // hashing now: continuous or one block
+            {"threads",      minerThreads},
             {"blocksFound",  blocksFound.load()},
-            {"hashRate",     hashesPerSecond.load()}
-        }.dump(), "application/json");
+            {"hashRate",     rate},
+            {"bits",         info.bits},
+            {"expectedHashesPerBlock", expected},
+            {"expectedSecondsPerBlock", rate ? json(expected / double(rate)) : json(nullptr)},
+            {"blockedReason", info.blockedReason}
+        };
+        {
+            std::lock_guard<std::mutex> lock(minerInfoMutex);
+            j["minerAddress"] = minerAddress;
+            j["job"] = mineJob.id ? mineJobJsonLocked() : json(nullptr);
+        }
+        res.set_content(j.dump(), "application/json");
     });
 }
 
@@ -1495,39 +1526,23 @@ void Server::handleEconomyStatus(std::function<void(const std::string&)> respons
     response(j.dump());
 }
 
+// "Mine one block" runs as a background search with no time limit: at mainnet difficulty a
+// block takes hours, so a fixed 60 s cap failed nearly every time (audit ML-4). The request
+// waits up to config.mineOneWait for the block (regtest and testnet are usually that fast)
+// and otherwise answers 202; /api/mining/status then shows the search, POST
+// /api/mining/stop ends it. While continuous mining runs the request is refused instead of
+// waiting for the miner forever (NEW-5).
 int Server::mineBlock(const std::string& body, json& out) {
     try {
-        size_t minerIndex = 0;
+        json j = json::object();
         if (!trimWs(body).empty()) {
-            json j;
             try { j = json::parse(body); } catch (...) { out = errorJson("Invalid JSON body"); return 400; }
-            if (j.is_object() && j.contains("minerWalletIndex")) {
-                if (!j["minerWalletIndex"].is_number_unsigned()) {
-                    out = errorJson("minerWalletIndex must be a non-negative integer");
-                    return 400;
-                }
-                minerIndex = j["minerWalletIndex"].get<size_t>();
-            }
         }
-
-        // Copy only what the coinbase needs. The wallet list is never written
-        // here (the old `Wallet& miner = wallets[0]; miner = wallets[idx];`
-        // overwrote the primary key: CRY-9/API-5/OPS-3) and the lock is not
-        // held across the hash loop (API-8).
         std::vector<uint8_t> minerScript;
-        std::string minerAddr;
-        {
-            std::lock_guard<std::mutex> lock(walletMutex);
-            if (wallets.empty()) {
-                out = errorJson("No wallet to mine to; create or restore one first");
-                return 400;
-            }
-            if (minerIndex >= wallets.size()) {
-                out = errorJson("minerWalletIndex out of range");
-                return 400;
-            }
-            minerScript = wallets[minerIndex].getP2PKHScript();
-            minerAddr = wallets[minerIndex].getAddress();
+        std::string minerAddr, err;
+        if (const int status = resolvePayout(j, minerScript, minerAddr, err)) {
+            out = errorJson(err);
+            return status;
         }
 
         // IPFS Liveness Check
@@ -1539,53 +1554,92 @@ int Server::mineBlock(const std::string& body, json& out) {
             }
         }
 
-        // Coinbase data: the IPFS peer id travels in the miner tag, anchored CIDs in the single
-        // NULL_DATA output (at most 80 bytes per block; the rest wait for the next block). Neither
-        // goes into the scriptSig any more (API-16).
-        AssemblerOptions options;
-        if (!ipfsPeerId.empty()) options.minerTag = "IPFS:" + ipfsPeerId;
-        std::vector<std::string> anchored;
+        uint64_t id = 0;
         {
-            std::lock_guard<std::mutex> lock(anchorMutex);
-            std::string payload;
-            while (!pendingCIDs.empty()) {
-                const std::string piece = "ANCHOR:" + pendingCIDs.front();
-                const size_t extra = piece.size() + (payload.empty() ? 0 : 1);
-                if (payload.size() + extra > 80) break;
-                if (!payload.empty()) payload += ';';
-                payload += piece;
-                anchored.push_back(pendingCIDs.front());
-                pendingCIDs.erase(pendingCIDs.begin());
+            std::lock_guard<std::mutex> ctl(minerCtlMutex);
+            if (minerShutdown) {
+                out = errorJson("The node is shutting down");
+                return 503;
             }
-            options.extraPayload.assign(payload.begin(), payload.end());
-        }
-        auto requeue = [&]() {
-            std::lock_guard<std::mutex> lock(anchorMutex);
-            pendingCIDs.insert(pendingCIDs.begin(), anchored.begin(), anchored.end());
-        };
+            if (autoMining.load()) {
+                out = errorJson("Continuous mining is running and already mines every block it can; "
+                                "stop it to search for a single block");
+                return 409;
+            }
+            if (minerBusy.load()) {
+                std::lock_guard<std::mutex> lock(minerInfoMutex);
+                out = errorJson("A one-block search is already running");
+                out["job"] = mineJobJsonLocked();
+                return 409;
+            }
+            if (minerThread.joinable()) minerThread.join();   // a finished search
 
-        std::atomic<bool> noStop{false};
-        std::string mineErr;
-        Hash256 foundHash{};
-        const MineResult result = node.mine(minerScript, options, noStop, mineErr, &foundHash, 60);
-        if (result == MineResult::STOPPED) {
-            requeue();
-            out = errorJson("Mining timed out");
-            return 503;
+            // Coinbase data: the IPFS peer id travels in the miner tag, anchored CIDs in the single
+            // NULL_DATA output (at most 80 bytes per block; the rest wait for the next block). Neither
+            // goes into the scriptSig any more (API-16).
+            AssemblerOptions options;
+            if (!ipfsPeerId.empty()) options.minerTag = "IPFS:" + ipfsPeerId;
+            std::vector<std::string> anchored;
+            {
+                std::lock_guard<std::mutex> lock(anchorMutex);
+                std::string payload;
+                while (!pendingCIDs.empty()) {
+                    const std::string piece = "ANCHOR:" + pendingCIDs.front();
+                    const size_t extra = piece.size() + (payload.empty() ? 0 : 1);
+                    if (payload.size() + extra > 80) break;
+                    if (!payload.empty()) payload += ';';
+                    payload += piece;
+                    anchored.push_back(pendingCIDs.front());
+                    pendingCIDs.erase(pendingCIDs.begin());
+                }
+                options.extraPayload.assign(payload.begin(), payload.end());
+            }
+            {
+                std::lock_guard<std::mutex> lock(minerInfoMutex);
+                id = mineJob.id + 1;
+                mineJob = MineJob{};
+                mineJob.id = id;
+                mineJob.state = "running";
+                mineJob.address = minerAddr;
+                mineJob.startedAt = int64_t(std::time(nullptr));
+                minerAddress = minerAddr;
+            }
+            minerStop = false;
+            minerBusy = true;
+            try {
+                minerThread = std::thread(&Server::minerLoop, this, minerScript, options, anchored, true);
+            } catch (const std::system_error& e) {
+                minerBusy = false;
+                {
+                    std::lock_guard<std::mutex> lock(anchorMutex);
+                    pendingCIDs.insert(pendingCIDs.begin(), anchored.begin(), anchored.end());
+                }
+                finishMineJob("failed", json(), std::string("cannot start the miner: ") + e.what(), 500);
+                out = errorJson(std::string("cannot start the miner: ") + e.what());
+                return 500;
+            }
         }
-        if (result == MineResult::FAILED) {
-            requeue();
-            out = errorJson(mineErr.empty() ? "Mining failed" : mineErr);
-            return mineErr == "node is syncing" ? 503 : 500;
+        Bucks::logOut() << "[miner] Searching for one block -> " << minerAddr << " (" << minerThreads
+                        << " threads)" << std::endl;
+
+        std::unique_lock<std::mutex> lock(minerInfoMutex);
+        minerInfoCv.wait_for(lock, config.mineOneWait, [&] { return mineJob.id != id || mineJob.state != "running"; });
+        if (mineJob.id == id && mineJob.state == "found") {
+            out = json{{"success", true}, {"block", mineJob.block}, {"minerAddress", mineJob.address}};
+            return 200;
         }
-        auto mined = node.blockByHash(foundHash);
-        if (!mined) {
-            out = errorJson("Block rejected");
-            return 500;
+        if (mineJob.id == id && mineJob.state == "failed") {
+            out = errorJson(mineJob.error.empty() ? "Mining failed" : mineJob.error);
+            return mineJob.status ? mineJob.status : 500;
         }
-        for (const std::string& cid : anchored) pinCID(cid);
-        out = json{{"success", true}, {"block", blockToJSON(*mined)}, {"minerAddress", minerAddr}};
-        return 200;
+        if (mineJob.id == id && mineJob.state == "stopped") {
+            out = errorJson("Mining was stopped before a block was found");
+            return 409;
+        }
+        out = json{{"success", true}, {"pending", true}, {"minerAddress", minerAddr},
+                   {"message", "Still searching. Follow it in /api/mining/status; POST /api/mining/stop ends it."}};
+        if (mineJob.id == id) out["job"] = mineJobJsonLocked();
+        return 202;
 
     } catch (const std::exception& e) {
         out = errorJson(e.what());
@@ -1657,67 +1711,160 @@ bool Server::pinCID(const std::string& cid) {
 // Auto-mining
 // ============================================================================
 
-void Server::startAutoMine() {
-    if (autoMining.exchange(true)) return; // already running
-    autoMineStop.store(false);
+// One mining thread at a time. start, stop and "mine one block" run under minerCtlMutex,
+// which is held across the join, so two requests can never join or replace the same
+// std::thread (that aborted the node: audit SAN-2), and a start can no longer clear the stop
+// flag of a loop that is still running (NEW-6). The loop never takes minerCtlMutex.
 
-    // Check if we have any wallet to mine to
-    {
-        std::lock_guard<std::mutex> lock(walletMutex);
-        if (wallets.empty()) {
-            autoMining.store(false);
-            Bucks::logOut() << "[miner] FAILED to start auto-mining: No wallets available. Please create or restore a wallet first.\n";
-            return;
+int Server::resolvePayout(const json& request, std::vector<uint8_t>& script, std::string& address,
+                          std::string& err) {
+    // Copy only what the coinbase needs. The wallet list is never written here (the old
+    // `Wallet& miner = wallets[0]; miner = wallets[idx];` overwrote the primary key:
+    // CRY-9/API-5/OPS-3) and the lock is not held across the hash loop (API-8).
+    size_t index = 0;
+    if (request.is_object() && request.contains("minerWalletIndex")) {
+        if (!request["minerWalletIndex"].is_number_unsigned()) {
+            err = "minerWalletIndex must be a non-negative integer";
+            return 400;
         }
-        minerAddress = wallets[0].getAddress();
+        index = request["minerWalletIndex"].get<size_t>();
     }
+    std::lock_guard<std::mutex> lock(walletMutex);
+    if (wallets.empty()) {
+        err = "No wallet to mine to; create or restore one first";
+        return 400;
+    }
+    if (index >= wallets.size()) {
+        err = "minerWalletIndex out of range";
+        return 400;
+    }
+    script = wallets[index].getP2PKHScript();
+    address = wallets[index].getAddress();
+    return 0;
+}
 
-    // A previous loop may have exited after stopAutoMine(); reap it first.
-    if (autoMinerThread.joinable()) autoMinerThread.join();
+bool Server::startAutoMine(std::string& err) {
+    return startMining(json::object(), err) == 0;
+}
 
-    Bucks::logOut() << "[miner] Auto-mining started -> " << minerAddress << std::endl;
-    autoMinerThread = std::thread(&Server::autoMineLoop, this);
+int Server::startMining(const json& request, std::string& err) {
+    std::vector<uint8_t> script;
+    std::string address;
+    if (const int status = resolvePayout(request, script, address, err)) return status;
+
+    std::lock_guard<std::mutex> ctl(minerCtlMutex);
+    if (minerShutdown) {
+        err = "The node is shutting down";
+        return 503;
+    }
+    if (autoMining.load()) return 0;   // already running
+    if (minerBusy.load()) {
+        err = "A one-block search is running; stop it first";
+        return 409;
+    }
+    if (minerThread.joinable()) minerThread.join();   // a finished one-block search
+    {
+        std::lock_guard<std::mutex> lock(minerInfoMutex);
+        minerAddress = address;
+    }
+    minerStop = false;
+    autoMining = true;
+    minerBusy = true;
+    try {
+        minerThread = std::thread(&Server::minerLoop, this, script, AssemblerOptions{}, std::vector<std::string>{}, false);
+    } catch (const std::system_error& e) {
+        autoMining = false;
+        minerBusy = false;
+        err = std::string("cannot start the miner: ") + e.what();
+        return 500;
+    }
+    Bucks::logOut() << "[miner] Auto-mining started -> " << address << " (" << minerThreads << " threads)"
+                    << std::endl;
+    return 0;
 }
 
 void Server::stopAutoMine() {
-    autoMineStop.store(true);
-    autoMining.store(false);
-    Bucks::logOut() << "[miner] Auto-mining stopped." << std::endl;
+    std::lock_guard<std::mutex> ctl(minerCtlMutex);
+    stopMinerLocked();
 }
 
-void Server::autoMineLoop() {
-    using clock = std::chrono::steady_clock;
+void Server::stopMinerLocked() {
+    const bool wasRunning = minerThread.joinable();
+    minerStop = true;
+    if (minerThread.joinable()) minerThread.join();   // the loop checks the flag every check interval
+    const bool wasAuto = autoMining.exchange(false);
+    minerBusy = false;
+    if (wasAuto) Bucks::logOut() << "[miner] Auto-mining stopped." << std::endl;
+    else if (wasRunning) Bucks::logOut() << "[miner] Mining stopped." << std::endl;
+}
 
-    while (autoMining.load() && !autoMineStop.load()) {
-        Script script;
-        {
-            std::lock_guard<std::mutex> lk(walletMutex);
-            if (wallets.empty()) break;
-            script = wallets[0].getP2PKHScript();
-        }
+void Server::finishMineJob(const std::string& state, const json& block, const std::string& error, int status) {
+    {
+        std::lock_guard<std::mutex> lock(minerInfoMutex);
+        if (mineJob.state != "running") return;
+        mineJob.state = state;
+        mineJob.block = block;
+        mineJob.error = error;
+        mineJob.status = status;
+    }
+    minerInfoCv.notify_all();
+}
 
-        AssemblerOptions options;     // tag "Bucks"; templates are rebuilt every minute and on every new tip
+json Server::mineJobJsonLocked() const {
+    json j{{"id", mineJob.id}, {"state", mineJob.state}, {"minerAddress", mineJob.address},
+           {"startedAt", mineJob.startedAt}};
+    if (mineJob.state == "found") j["block"] = mineJob.block;
+    if (!mineJob.error.empty()) j["error"] = mineJob.error;
+    return j;
+}
+
+// Continuous mining, or one block (a "mine one block" request). The payout is fixed when the
+// loop starts.
+void Server::minerLoop(std::vector<uint8_t> script, AssemblerOptions options, std::vector<std::string> anchored,
+                       bool oneBlock) {
+    std::string state = "stopped", error, lastErr;   // how a one-block search ended
+    json block;
+    int status = 0;
+    while (!minerStop.load()) {
         std::string err;
         Hash256 found{};
-        const uint64_t hashesBefore = node.minerHashes();
-        const auto started = clock::now();
-        const MineResult r = node.mine(script, options, autoMineStop, err, &found, 0);
-
-        const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(clock::now() - started).count();
-        if (seconds > 0) hashesPerSecond.store((node.minerHashes() - hashesBefore) / seconds);
-
+        const MineResult r = node.mine(script, options, minerStop, err, &found, 0, minerThreads);
         if (r == MineResult::FOUND) {
             ++blocksFound;
+            lastErr.clear();
             Bucks::logOut() << "[miner] *** Block found! hash=" << hash256ToHex(found)
                       << " total=" << blocksFound.load() << " ***" << std::endl;
+            if (oneBlock) {
+                for (const std::string& cid : anchored) pinCID(cid);
+                const std::optional<Block> mined = node.blockByHash(found);
+                block = mined ? blockToJSON(*mined) : json{{"hash", hash256ToHex(found)}};
+                state = "found";
+                break;
+            }
         } else if (r == MineResult::FAILED) {
-            // For example "node is syncing": wait and try again.
-            Bucks::logOut() << "[miner] " << err << ", retrying..." << std::endl;
-            for (int i = 0; i < 10 && autoMining.load() && !autoMineStop.load(); ++i)
+            if (oneBlock) {
+                state = "failed";
+                error = err.empty() ? "Mining failed" : err;
+                status = err == "node is syncing" ? 503 : 500;
+                break;
+            }
+            // For example "node is syncing": wait and try again, and say so once, not every second.
+            if (err != lastErr) Bucks::logOut() << "[miner] " << err << ", retrying..." << std::endl;
+            lastErr = err;
+            for (int i = 0; i < 10 && !minerStop.load(); ++i)
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } else {
+            break;   // stopped
         }
     }
-    Bucks::logOut() << "[miner] Auto-mine loop exited." << std::endl;
+    if (oneBlock && state != "found") {
+        std::lock_guard<std::mutex> lock(anchorMutex);
+        pendingCIDs.insert(pendingCIDs.begin(), anchored.begin(), anchored.end());
+    }
+    // Not busy before the job reports its end, so a client that mines again right after the
+    // answer is not refused as "already running".
+    minerBusy = false;
+    if (oneBlock) finishMineJob(state, block, error, status);
 }
 
 // ============================================================================

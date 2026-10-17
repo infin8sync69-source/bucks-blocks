@@ -96,6 +96,12 @@ public:
     uint64_t minerHashes() const { return miner_->hashes(); }
     uint64_t minerHashRate() const { return miner_->hashRate(); }   // all threads, recent seconds
 
+    struct MiningInfo {
+        std::string blockedReason;   // why no block template can be built now ("" = it can)
+        uint32_t bits = 0;           // proof of work required of the next block
+    };
+    MiningInfo miningInfo() const;
+
     // ---- Notifications (called without the chain lock held) ----
     using TipListener = std::function<void(const Hash256& hash, uint32_t height)>;
     using TxListener = std::function<void(const Transaction&)>;

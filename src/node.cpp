@@ -10,6 +10,7 @@
 #include "log.h"
 #include "mempool_file.h"
 #include "script.h"
+#include "validation_rules.h"
 
 namespace Bucks {
 
@@ -338,6 +339,14 @@ std::optional<Transaction> Node::mempoolTransaction(const Hash256& txid) const {
 }
 
 // ---------------------------------------------------------------- mining
+
+Node::MiningInfo Node::miningInfo() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    MiningInfo info;
+    info.blockedReason = state_->miningBlockedReason();
+    info.bits = Rules::GetNextWorkRequired(state_->tip(), params_);
+    return info;
+}
 
 MineResult Node::mine(const Script& minerScript, const AssemblerOptions& options,
                       const std::atomic<bool>& stop, std::string& err, Hash256* found,

@@ -264,8 +264,9 @@ int main(int argc, char* argv[]) {
         }
 
         if (autoMine) {
-            Bucks::logOut() << "✓ Node configured for mining (rewards → primary wallet)\n";
-            server->startAutoMine();
+            std::string err;
+            if (server->startAutoMine(err)) Bucks::logOut() << "✓ Node configured for mining (rewards → primary wallet)\n";
+            else Bucks::logErr() << "✗ Auto-mining not started: " << err << "\n";
         }
     }
 

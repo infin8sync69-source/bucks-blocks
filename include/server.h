@@ -95,6 +95,13 @@ struct ServerConfig {
     // IPFS Integration
     bool enableIPFS = false;
     uint16_t ipfsPort = 5001;
+
+    // ---- Mining ----
+    // Hashing threads of the built-in miner; 0 = one per CPU (hardware concurrency).
+    unsigned mineThreads = 0;
+    // How long POST /api/mining/mine waits for its block before answering 202 and leaving
+    // the search running in the background (audit ML-4).
+    std::chrono::milliseconds mineOneWait{5000};
 };
 
 /**
@@ -181,13 +188,32 @@ private:
     std::unique_ptr<std::thread> serverThread;
     int boundPort = -1;
 
-    // ---- Auto-mining ----
-    std::atomic<bool> autoMining{false};
-    std::atomic<bool> autoMineStop{false};
-    std::thread autoMinerThread;
+    // ---- Mining (audit SAN-2, NEW-5, NEW-6) ----
+    // One mining thread at a time, continuous or one block. minerCtlMutex serializes
+    // start, stop and "mine one block" and is held across the join; the mining thread
+    // never takes it.
+    std::mutex minerCtlMutex;
+    bool minerShutdown = false;              // set by stop(): nothing starts after it
+    std::thread minerThread;
+    std::atomic<bool> minerStop{false};
+    std::atomic<bool> autoMining{false};     // continuous mining is on
+    std::atomic<bool> minerBusy{false};      // the mining thread is hashing
     std::atomic<uint64_t> blocksFound{0};
-    std::atomic<uint64_t> hashesPerSecond{0};
-    std::string minerAddress;
+    unsigned minerThreads = 1;
+    // What /api/mining/status shows. The status route is public, so it reads these
+    // under minerInfoMutex and never waits for minerCtlMutex.
+    mutable std::mutex minerInfoMutex;
+    std::condition_variable minerInfoCv;     // a one-block search ended
+    std::string minerAddress;                // payout of the running (or last) search
+    struct MineJob {                         // the last "mine one block" request
+        uint64_t id = 0;
+        std::string state;                   // running, found, failed, stopped
+        std::string address;
+        std::string error;
+        int status = 0;                      // HTTP status of a failure
+        int64_t startedAt = 0;               // unix seconds
+        nlohmann::json block;                // found: the block
+    } mineJob;
 
     // httplib server instance (pointer to avoid including implementation in header if possible,
     // but httplib is header-only so we can't easily forward declare 'Server' without the header.
@@ -232,12 +258,23 @@ private:
     bool validateSession(const std::string& id);
     void destroySession(const std::string& id);
 
-    // ---- Auto-mining control ----
+    // ---- Mining control ----
 public:
-    void startAutoMine();
+    // Starts continuous mining, paid to the first wallet. False with `err` set when there is
+    // nothing to pay to or a one-block search is running.
+    bool startAutoMine(std::string& err);
+    // Stops continuous mining and any one-block search; returns once the miner has stopped.
     void stopAutoMine();
 private:
-    void autoMineLoop();
+    // 0 on success, else an HTTP status with `err` set.
+    int resolvePayout(const nlohmann::json& request, std::vector<uint8_t>& script, std::string& address,
+                      std::string& err);
+    int startMining(const nlohmann::json& request, std::string& err);
+    void stopMinerLocked();                 // caller holds minerCtlMutex
+    void minerLoop(std::vector<uint8_t> script, AssemblerOptions options, std::vector<std::string> anchored,
+                   bool oneBlock);
+    void finishMineJob(const std::string& state, const nlohmann::json& block, const std::string& error, int status);
+    nlohmann::json mineJobJsonLocked() const;   // caller holds minerInfoMutex
 
     // IPFS Helper
     bool checkIPFSStatus(std::string& peerId);
