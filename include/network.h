@@ -34,6 +34,8 @@ constexpr uint32_t MAX_MESSAGE_PAYLOAD = 4 * 1024 * 1024; // 4MB
 constexpr uint32_t MAX_PEER_BUFFER = MAX_MESSAGE_PAYLOAD + 1024; // 4MB + safety overhead
 constexpr size_t MAX_PEERS = 125;
 constexpr size_t MAX_PEERS_PER_IP = 8;
+// Outbound connections the node opens on its own (seeds and discovered addresses).
+constexpr size_t MAX_OUTBOUND_PEERS = 8;
 
 std::vector<uint8_t> serializeInvs(const std::vector<struct Inventory>& invs);
 
@@ -117,21 +119,31 @@ enum class PeerState {
     DISCONNECTED
 };
 
+// How a connection came about. Outbound connections carry the port we dialled.
+enum class ConnKind {
+    INBOUND,
+    MANUAL,     // --connect, or connectToPeer
+    SEED,       // --seed, ChainParams::seedNodes
+};
+
 class Network;
 class Node;
 
 class Peer {
 public:
-    Peer(Network& net, int socket, const std::string& ip, uint16_t port);
+    Peer(Network& net, int socket, const std::string& ip, uint16_t port, ConnKind kind = ConnKind::INBOUND);
     ~Peer();
 
     void disconnect();
     PeerState getState() const { return state; }
 
     bool sendMsg(const NetMessage& msg);
-    
+
     std::string address() const;
     const std::string& getIP() const { return ip; }
+    uint16_t getPort() const { return port; }
+    ConnKind kind() const { return kind_; }
+    bool outbound() const { return kind_ != ConnKind::INBOUND; }
 
     // Misbehavior tracking
     void misbehavior(int penalty);
@@ -154,6 +166,7 @@ private:
     int socket_fd;
     std::string ip;
     uint16_t port;
+    ConnKind kind_;
     bool connected;
     PeerState state;
     
@@ -188,9 +201,12 @@ public:
     bool connectToPeer(const std::string& host, uint16_t port);
 
     // A peer to keep (--connect): redialled with exponential backoff (5 s up to 5 min) whenever
-    // the connection is missing. Seed nodes are only used while the node has fewer than 3 peers.
+    // the connection is missing.
     void addPersistentPeer(const std::string& host, uint16_t port);
-    void addSeedNode(const std::string& hostPort);
+    // A seed ("host:port"): dialled with backoff (6 s up to 5 min) whenever it is not connected
+    // and the node has fewer than MAX_OUTBOUND_PEERS outbound peers. False if it does not parse.
+    // Both may be called before or after start().
+    bool addSeedNode(const std::string& hostPort);
 
     // Message relay
     void broadcast(const NetMessage& msg);
@@ -244,20 +260,23 @@ private:
     mutable std::mutex securityMutex;
 
     // Peer Discovery (Phase 6)
-    std::vector<std::string> seedNodes;
     std::chrono::steady_clock::time_point lastDiscoveryTime;
     void discoverPeers();
-    void loadSeedNodes();
 
-    struct PersistentPeer {
+    // --connect peers (MANUAL) and seeds (SEED), redialled by maintainConnections. Guarded by
+    // peersMutex; entries are only ever appended.
+    struct DialTarget {
         std::string host;
         uint16_t port;
+        ConnKind kind;
         std::chrono::steady_clock::time_point nextAttempt;
-        int backoffSeconds = 5;
+        int backoffSeconds;
     };
-    std::vector<PersistentPeer> persistentPeers_;
+    std::vector<DialTarget> dialTargets_;
+    void addDialTarget(const std::string& host, uint16_t port, ConnKind kind);
     std::chrono::steady_clock::time_point lastMaintain_;
     void maintainConnections();
+    bool dial(const std::string& host, uint16_t port, ConnKind kind);
 
     std::thread networkThread;
     

@@ -229,8 +229,8 @@ NetMessage NetMessage::deserialize(const std::vector<uint8_t>& data, const std::
 // Peer implementation
 // ------------------------------------------------------------
 
-Peer::Peer(Network& net, int socket, const std::string& ip, uint16_t port)
-    : network(net), socket_fd(socket), ip(ip), port(port), connected(true),
+Peer::Peer(Network& net, int socket, const std::string& ip, uint16_t port, ConnKind kind)
+    : network(net), socket_fd(socket), ip(ip), port(port), kind_(kind), connected(true),
       state(PeerState::HANDSHAKE), misbehaviorScore(0), encryptionNegotiated(false) {
 
 #ifndef _WIN32
@@ -681,9 +681,12 @@ Network::Network(Node& n)
 #endif
     
     // Initialize peer discovery
-    lastDiscoveryTime = std::chrono::steady_clock::now() - std::chrono::minutes(31);   // first discovery at once
-    lastMaintain_ = std::chrono::steady_clock::now();
-    loadSeedNodes();
+    lastDiscoveryTime = std::chrono::steady_clock::now();
+    lastMaintain_ = std::chrono::steady_clock::now() - std::chrono::seconds(1);   // first round at once
+    for (const std::string& seed : node.params().seedNodes) {
+        if (!addSeedNode(seed)) Bucks::logErr() << "WARNING: ignoring malformed seed node '" << seed << "'" << std::endl;
+    }
+    Bucks::logOut() << "DEBUG: Loaded " << node.params().seedNodes.size() << " seed nodes" << std::endl;
 
     // New tips and accepted transactions are announced to every peer. The listeners only
     // queue the message: they run on arbitrary threads and the peer lock is not theirs.
@@ -780,6 +783,10 @@ bool resolveIPv4(const std::string& host, std::string& out) {
 } // namespace
 
 bool Network::connectToPeer(const std::string& host, uint16_t port) {
+    return dial(host, port, ConnKind::MANUAL);
+}
+
+bool Network::dial(const std::string& host, uint16_t port, ConnKind kind) {
     std::string ip;
     if (!resolveIPv4(host, ip)) return false;
 
@@ -823,73 +830,100 @@ bool Network::connectToPeer(const std::string& host, uint16_t port) {
 #endif
 
     std::lock_guard<std::mutex> lock(peersMutex);
-    peers[s] = std::make_unique<Peer>(*this, s, ip, port);
-    
+    peers[s] = std::make_unique<Peer>(*this, s, ip, port, kind);
+
     return true;
 }
 
+namespace {
+
+// First retry delay. A seed starts above the 5 s per-address accept throttle, so its first
+// retry is not refused for coming too soon after the first try.
+int initialBackoffSeconds(ConnKind kind) { return kind == ConnKind::SEED ? 6 : 5; }
+constexpr int kMaxBackoffSeconds = 300;
+// A connection that lasted this long resets the backoff, so its loss is redialled at once.
+constexpr auto kStableConnection = std::chrono::seconds(60);
+
+} // namespace
+
+void Network::addDialTarget(const std::string& host, uint16_t port, ConnKind kind) {
+    std::lock_guard<std::mutex> lock(peersMutex);
+    for (const auto& t : dialTargets_)
+        if (t.host == host && t.port == port) return;
+    dialTargets_.push_back({host, port, kind, std::chrono::steady_clock::now(), initialBackoffSeconds(kind)});
+}
+
 void Network::addPersistentPeer(const std::string& host, uint16_t port) {
-    std::lock_guard<std::mutex> lock(peersMutex);
-    for (const auto& p : persistentPeers_)
-        if (p.host == host && p.port == port) return;
-    persistentPeers_.push_back({host, port, std::chrono::steady_clock::now(), 5});
+    addDialTarget(host, port, ConnKind::MANUAL);
 }
 
-void Network::addSeedNode(const std::string& hostPort) {
-    std::lock_guard<std::mutex> lock(peersMutex);
-    if (std::find(seedNodes.begin(), seedNodes.end(), hostPort) == seedNodes.end())
-        seedNodes.push_back(hostPort);
+bool Network::addSeedNode(const std::string& hostPort) {
+    const size_t colon = hostPort.rfind(':');
+    if (colon == std::string::npos || colon == 0) return false;
+    int port = 0;
+    try { port = std::stoi(hostPort.substr(colon + 1)); } catch (...) { return false; }
+    if (port < 1 || port > 65535) return false;
+    addDialTarget(hostPort.substr(0, colon), uint16_t(port), ConnKind::SEED);
+    return true;
 }
 
-// Called from the network thread about once a second.
+// Called from the network thread about once a second. A --connect peer is dialled whenever it
+// is missing; a seed whenever it is missing and outbound slots are free. Before, seeds were tried
+// once at start and then every 30 minutes, so a seed restart cut seed-only nodes off for that
+// long (audit NET-NEW-1).
 void Network::maintainConnections() {
     const auto now = std::chrono::steady_clock::now();
     if (now - lastMaintain_ < std::chrono::seconds(1)) return;
     lastMaintain_ = now;
 
-    struct Dial { size_t index; };
-    std::vector<size_t> due;
+    struct Link { std::string ip; uint16_t port; bool outbound; std::chrono::steady_clock::duration age; };
+    std::vector<DialTarget> targets;
+    std::vector<Link> links;
+    size_t outbound = 0;
     {
         std::lock_guard<std::mutex> lock(peersMutex);
-        for (size_t i = 0; i < persistentPeers_.size(); ++i) {
-            auto& pp = persistentPeers_[i];
-            std::string ip;
-            bool connected = false;
-            if (resolveIPv4(pp.host, ip)) {
-                for (const auto& [fd, peer] : peers) {
-                    // Outbound entries carry the dialled port; an inbound socket from the same
-                    // host also means the link exists, whichever side opened it.
-                    if (peer->getIP() == ip && peer->getState() != PeerState::DISCONNECTED) {
-                        connected = true;
-                        break;
-                    }
-                }
-            }
-            if (connected) {
-                pp.backoffSeconds = 5;
-                pp.nextAttempt = now;
-            } else if (now >= pp.nextAttempt) {
-                due.push_back(i);
-            }
+        targets = dialTargets_;
+        for (const auto& [fd, peer] : peers) {
+            if (peer->getState() == PeerState::DISCONNECTED) continue;
+            links.push_back({peer->getIP(), peer->getPort(), peer->outbound(), now - peer->getConnectionTime()});
+            if (peer->kind() == ConnKind::SEED) ++outbound;
         }
     }
-    for (size_t i : due) {
-        std::string host;
-        uint16_t port;
-        {
-            std::lock_guard<std::mutex> lock(peersMutex);
-            host = persistentPeers_[i].host;
-            port = persistentPeers_[i].port;
+
+    for (size_t i = 0; i < targets.size(); ++i) {
+        const DialTarget& t = targets[i];
+        // Resolved without peersMutex held.
+        std::string ip;
+        const Link* link = nullptr;
+        if (resolveIPv4(t.host, ip)) {
+            for (const Link& l : links) {
+                // Outbound entries carry the dialled port; an inbound socket from the same
+                // host also means the link exists, whichever side opened it.
+                if (l.ip == ip && (!l.outbound || l.port == t.port)) { link = &l; break; }
+            }
         }
-        const bool ok = connectToPeer(host, port);
+        if (link) {
+            if (link->age >= kStableConnection) {
+                std::lock_guard<std::mutex> lock(peersMutex);
+                dialTargets_[i].backoffSeconds = initialBackoffSeconds(t.kind);
+                dialTargets_[i].nextAttempt = now;
+            }
+            continue;
+        }
+        if (now < t.nextAttempt) continue;
+        if (t.kind == ConnKind::SEED && outbound >= MAX_OUTBOUND_PEERS) continue;
+
+        if (t.kind == ConnKind::SEED) Bucks::logOut() << "DEBUG: Connecting to seed node " << t.host << ":" << t.port << std::endl;
+        const bool ok = dial(t.host, t.port, t.kind);
+        if (ok && t.kind == ConnKind::SEED) ++outbound;
         std::lock_guard<std::mutex> lock(peersMutex);
-        auto& pp = persistentPeers_[i];
-        // Even a connect that succeeded is re-checked next round; back off either way so a peer
-        // that accepts and then drops us is not hammered.
-        pp.nextAttempt = now + std::chrono::seconds(pp.backoffSeconds);
-        pp.backoffSeconds = std::min(pp.backoffSeconds * 2, 300);
-        if (!ok) Bucks::logOut() << "DEBUG: cannot reach " << host << ":" << port
-                                 << ", retrying in " << pp.backoffSeconds / 2 << " s" << std::endl;
+        auto& dt = dialTargets_[i];
+        // Back off even after a connect that succeeded, so a peer that accepts and then drops
+        // us is not hammered.
+        dt.nextAttempt = now + std::chrono::seconds(dt.backoffSeconds);
+        if (!ok) Bucks::logOut() << "DEBUG: cannot reach " << t.host << ":" << t.port
+                                 << ", retrying in " << dt.backoffSeconds << " s" << std::endl;
+        dt.backoffSeconds = std::min(dt.backoffSeconds * 2, kMaxBackoffSeconds);
     }
 }
 
@@ -1168,60 +1202,16 @@ void Network::update() {
 
 // Peer Discovery Implementation (Phase 6)
 
-void Network::loadSeedNodes() {
-    seedNodes = node.params().seedNodes;
-    Bucks::logOut() << "DEBUG: Loaded " << seedNodes.size() << " seed nodes" << std::endl;
-}
-
 void Network::discoverPeers() {
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::minutes>(now - lastDiscoveryTime).count();
-    
-    // Run discovery every 30 minutes
+
+    // Run discovery every 30 minutes (seeds are dialled by maintainConnections)
     if (elapsed < 30) return;
-    
+
     lastDiscoveryTime = now;
     Bucks::logOut() << "DEBUG: Running peer discovery..." << std::endl;
-    
-    // FIX: Same deadlock fix as handleAddrMessage — Bucks v1 security patch
-    // Collect seed peers to connect under the lock, then connect outside the lock.
-    std::vector<std::pair<std::string, uint16_t>> seedsToConnect;
-    {
-        std::lock_guard<std::mutex> lock(peersMutex);
-        if (peers.size() < 3) {
-            for (const auto& seed : seedNodes) {
-                size_t colonPos = seed.find(':');
-                if (colonPos == std::string::npos) continue;
-                std::string ip  = seed.substr(0, colonPos);
-                int portNum = 0;
-                try { portNum = std::stoi(seed.substr(colonPos + 1)); } catch (...) { continue; }
-                if (portNum < 1 || portNum > 65535) continue;
-                uint16_t   port = static_cast<uint16_t>(portNum);
 
-                bool alreadyConnected = false;
-                for (const auto& [fd, peer] : peers) {
-                    if (peer->getIP() == ip) { alreadyConnected = true; break; }
-                }
-                if (!alreadyConnected && !isIPBanned(ip))
-                    seedsToConnect.emplace_back(ip, port);
-            }
-        }
-    }  // peersMutex released
-
-    for (auto& [ip, port] : seedsToConnect) {
-        Bucks::logOut() << "DEBUG: Connecting to seed node " << ip << ":" << port << std::endl;
-        connectToPeer(ip, port);
-    }
-
-    // FIX: Log clearly if no peers connected after seed attempts — Bucks v1 security patch
-    {
-        std::lock_guard<std::mutex> lock(peersMutex);
-        if (!seedsToConnect.empty() && peers.empty()) {
-            Bucks::logErr() << "Cannot connect to Bucks network. "
-                      << "Check your internet connection or run a local node." << std::endl;
-        }
-    }
-    
     // Send GETADDR to all active peers to discover more peers
     {
         std::lock_guard<std::mutex> lock(peersMutex);

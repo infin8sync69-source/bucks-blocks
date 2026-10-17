@@ -241,6 +241,38 @@ TEST(Network, PersistentPeerIsRedialled) {
     netA->stop();
 }
 
+// NET-NEW-1, NET-NEW-8: seeds used to be dialled once at start and then every 30 minutes, so a seed that was down
+// at start or restarted later left seed-only nodes alone for that long. A seed is now redialled with backoff, also
+// when it is added after start().
+TEST(Network, SeedIsRedialled) {
+    NodeHarness a, b;
+    ASSERT_TRUE(a.node && b.node);
+    Network netB(*b.node);
+    const uint16_t portA = freePort();
+    netB.start(freePort());
+    EXPECT_FALSE(netB.addSeedNode("127.0.0.1"));
+    EXPECT_FALSE(netB.addSeedNode("127.0.0.1:0"));
+    ASSERT_TRUE(netB.addSeedNode("127.0.0.1:" + std::to_string(portA)));   // nobody listens there yet
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    EXPECT_EQ(netB.peerCount(), 0u);
+
+    auto netA = std::make_unique<Network>(*a.node);
+    netA->start(portA);
+    ASSERT_TRUE(waitFor([&] { return netA->peerCount() == 1 && netB.peerCount() == 1; }, 30))
+        << "B never reached the seed";
+
+    // The seed restarts on the same port.
+    netA->stop();
+    netA.reset();
+    ASSERT_TRUE(waitFor([&] { return netB.peerCount() == 0; }, 30));
+    netA = std::make_unique<Network>(*a.node);
+    netA->start(portA);
+    EXPECT_TRUE(waitFor([&] { return netA->peerCount() == 1 && netB.peerCount() == 1; }, 60))
+        << "B did not dial the seed again";
+    netB.stop();
+    netA->stop();
+}
+
 // ---------------------------------------------------------------------------
 // Audit findings NET-1, NET-2, NET-3 (reports/audit-2026-10-14/network.md): each was proven against a live
 // node by the auditor; these tests replay the same attacks.
