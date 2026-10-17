@@ -26,7 +26,7 @@ export function mount(root) {
   let lastSig = null;
 
   function render(s) {
-    const sig = [mode, s.walletsEnabled, s.walletsError, s.wallets && s.wallets.map((w) => [w.address, w.balance]), s.selected, s.info && s.info.network];
+    const sig = [mode, s.walletsEnabled, s.walletsError, s.wallets, s.selected, s.info && s.info.network];
     if (mode === "create" || mode === "restore" || mode === "phrase") {
       // forms keep their own state; build them once per mode switch
       if (JSON.stringify(sig.slice(0, 1)) === lastSig) return;
@@ -60,7 +60,7 @@ export function mount(root) {
         h("div", { class: "stack" },
           card("Balance", h("div", { class: "stack" },
             h("div", { class: "balance", "aria-label": `Balance ${fmtBucks(w.balance)} BUCKS` }, fmtBucks(w.balance), h("small", null, "BUCKS")),
-            h("p", { class: "muted", style: "margin:0;font-size:.88rem" }, `Includes newly mined rewards, which can be spent only after ${COINBASE_MATURITY} further blocks.`),
+            balanceParts(w),
             h("div", { class: "row actions" }, h("a", { class: "btn primary", href: "#/send" }, icon("send", { size: 16 }), "Send"), h("a", { class: "btn", href: "#/history" }, icon("history", { size: 16 }), "History"))), { cls: "accent" }),
           s.wallets.length > 1 && card("Wallets on this node", h("div", { class: "list" }, s.wallets.map((x) =>
             h("button", { type: "button", class: "list-row tx-row btn ghost", style: "text-align:left;justify-content:flex-start;min-height:56px", "aria-pressed": x.address === w.address, onclick: () => selectWallet(x.address) },
@@ -69,6 +69,18 @@ export function mount(root) {
               h("span", { class: "sub hide-sm" }, "BUCKS"))))),
           notice("info", "Your keys are kept by this node. Back up your recovery phrase; the node cannot show it again.")),
         card("Receive", receive(w.address, net))));
+  }
+
+  // What of the balance can be spent now (ONB-07). Older nodes send only "balance".
+  function balanceParts(w) {
+    if (w.spendable == null) return h("p", { class: "muted", style: "margin:0;font-size:.88rem" }, `Includes newly mined rewards, which can be spent only after ${COINBASE_MATURITY} further blocks.`);
+    const amount = (v) => `${fmtBucks(v, { trim: true })} BUCKS`;
+    return kv([
+      ["Spendable now", h("strong", null, amount(w.spendable))],
+      BigInt(w.immature || 0) > 0n && ["Maturing rewards", h("span", null, amount(w.immature), h("span", { class: "sub", style: "display:block" }, `Mining rewards can be spent ${COINBASE_MATURITY} blocks after they were mined.`))],
+      BigInt(w.locked || 0) > 0n && ["In pending payments", h("span", null, amount(w.locked), h("span", { class: "sub", style: "display:block" }, "Coins spent by a payment that is not in a block yet. Its change comes back when it is."))],
+      BigInt(w.incoming || 0) > 0n && ["Incoming", h("span", null, amount(w.incoming), h("span", { class: "sub", style: "display:block" }, "Not confirmed yet; not part of the balance until it is in a block."))],
+    ]);
   }
 
   function receive(address, net) {

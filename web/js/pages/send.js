@@ -60,11 +60,17 @@ export function mount(root) {
 
     function fillFrom(s) {
       const cur = selectedWallet();
-      from.replaceChildren(...s.wallets.map((w) => h("option", { value: w.address, selected: cur && cur.address === w.address }, `${shortAddr(w.address)}  ·  ${fmtBucks(w.balance, { trim: true })}`)));
+      from.replaceChildren(...s.wallets.map((w) => h("option", { value: w.address, selected: cur && cur.address === w.address }, optionText(w))));
       fromField.hidden = s.wallets.length < 2;
     }
     const wallet = (s) => s.wallets.find((w) => w.address === from.value) || s.wallets[0];
-    const hintText = () => `Available: ${fmtBucks(wallet(state).balance, { trim: true })} BUCKS. Up to 8 decimal places.`;
+    // Spendable, not the balance: immature rewards and coins locked by a pending payment cannot be sent (ONB-07).
+    const hintText = () => {
+      const w = wallet(state);
+      const rest = w.spendable != null && BigInt(w.balance) > BigInt(w.spendable) ? ` of the ${fmtBucks(w.balance, { trim: true })} BUCKS balance (the rest is maturing rewards or in a pending payment)` : "";
+      return `Spendable now: ${fmtBucks(w.spendable ?? w.balance, { trim: true })} BUCKS${rest}. Up to 8 decimal places.`;
+    };
+    const optionText = (w) => `${shortAddr(w.address)}  ·  ${fmtBucks(w.spendable ?? w.balance, { trim: true })} spendable`;
 
     function setErr(f, input, msg) {
       f.classList.toggle("invalid", !!msg);
@@ -237,7 +243,7 @@ export function mount(root) {
       el,
       refresh(s) {
         if (from.options.length !== s.wallets.length) fillFrom(s);
-        else [...from.options].forEach((o) => { const w = s.wallets.find((x) => x.address === o.value); if (w) o.textContent = `${shortAddr(w.address)}  ·  ${fmtBucks(w.balance, { trim: true })}`; });
+        else [...from.options].forEach((o) => { const w = s.wallets.find((x) => x.address === o.value); if (w) o.textContent = optionText(w); });
         balHint.textContent = hintText();
         syncWarn.replaceChildren(...(s.info && s.info.syncing ? [notice("warn", "This node is still syncing. Balances may be out of date and payments may be rejected until it catches up.")] : []));
       },

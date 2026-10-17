@@ -1019,14 +1019,7 @@ void Server::setupRoutes() {
         if (walletUnavailable(res)) return;
         std::lock_guard<std::mutex> lock(walletMutex);
         json walletArray = json::array();
-        for (const auto& wallet : wallets) {
-            uint64_t balance = 0;
-            try { balance = wallet.getBalance(node); } catch (...) {}
-            walletArray.push_back({
-                {"address", wallet.getAddress()},
-                {"balance", balance}
-            });
-        }
+        for (const auto& wallet : wallets) walletArray.push_back(walletSummaryLocked(wallet));
         res.set_content(json{{"wallets", walletArray}}.dump(), "application/json");
     });
 
@@ -1643,6 +1636,31 @@ nlohmann::json Server::txToJSON(const Transaction& tx) const {
 // ============================================================================
 // Wallet views for the console (read-only, except the backup flag)
 // ============================================================================
+
+// One entry of GET /api/wallets. "balance" counts every confirmed coin; a payment can only use "spendable":
+// mining rewards younger than the coinbase maturity are "immature" and coins a pending payment spends are
+// "locked" (ONB-07). "incoming" is what unconfirmed transactions pay to the wallet, its own change included.
+json Server::walletSummaryLocked(const Wallet& w) const {
+    uint64_t balance = 0, coinsTotal = 0, immature = 0, spendable = 0, incoming = 0;
+    try {
+        const Hash160 key = hash160(w.getPublicKey());
+        balance = node.balance(key);
+        const uint64_t next = uint64_t(node.height()) + 1;
+        // The same coins (and limit) the wallet selects from when it pays.
+        for (const CoinRow& c : node.coinsByHash160(key, 20000)) {
+            coinsTotal += c.coin.amount;
+            if (c.coin.isCoinbase && next < uint64_t(c.coin.height) + Consensus::COINBASE_MATURITY) immature += c.coin.amount;
+        }
+        for (const CoinRow& c : node.spendableCoins(key, 20000)) spendable += c.coin.amount;
+        const Script own = w.getP2PKHScript();
+        for (const Transaction& tx : node.mempoolTransactions(5000))
+            for (const auto& o : tx.outputs) if (o.scriptPubKey == own) incoming += o.amount;
+    } catch (...) {}
+    const uint64_t usable = std::min(coinsTotal, balance);
+    const uint64_t locked = usable > immature + spendable ? usable - immature - spendable : 0;
+    return json{{"address", w.getAddress()}, {"balance", balance}, {"spendable", spendable},
+                {"immature", immature}, {"locked", locked}, {"incoming", incoming}};
+}
 
 // Fee of a payment this node's wallet just built: every input is one of the wallet's confirmed coins, so the fee
 // is their sum minus the outputs (dust change that went to the miner included).

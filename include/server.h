@@ -253,6 +253,7 @@ private:
     bool loadWalletDocument(const std::string& path, bool legacy);
 
     // ---- Wallet views for the console (read-only, except the backup flag) ----
+    nlohmann::json walletSummaryLocked(const Wallet& w) const;   // caller holds walletMutex
     bool paymentFee(const Wallet& from, const Transaction& tx, uint64_t& fee) const;
     int estimatePayment(const std::string& body, nlohmann::json& out);
 };

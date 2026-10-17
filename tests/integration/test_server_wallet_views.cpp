@@ -108,6 +108,51 @@ TEST_F(WalletViewsTest, EstimateGivesTheFeeThatSendPays) {
     server.stop();
 }
 
+TEST_F(WalletViewsTest, WalletListSplitsBalanceIntoSpendableImmatureAndLocked) {
+    Server server(*h.node, nullptr, cfg);
+    ASSERT_TRUE(server.start());
+    httplib::Client cli("127.0.0.1", server.port());
+    const std::string a = createWallet(cli);
+    const std::string b = createWallet(cli);
+    const uint64_t coin = 50ULL * 100000000ULL;
+    auto walletsNow = [&]() {
+        auto r = cli.Get("/api/wallets", auth);
+        EXPECT_TRUE(r && r->status == 200);
+        return json::parse(r->body)["wallets"];
+    };
+
+    mineTo(server, 0, 110);
+    json w = walletsNow()[0];
+    EXPECT_EQ(w["address"], a);
+    EXPECT_EQ(w["balance"], 110 * coin);
+    EXPECT_EQ(w["spendable"], 11 * coin) << "rewards of heights 1..11 are mature at height 111";
+    EXPECT_EQ(w["immature"], 99 * coin);
+    EXPECT_EQ(w["locked"], 0u);
+    EXPECT_EQ(w["incoming"], 0u);
+
+    // A pending payment locks the coin it spends; its outputs are incoming for both wallets.
+    const json sent = post(cli, "/api/transactions/send", {{"from", a}, {"to", b}, {"amount", 100000000}}, 200);
+    const uint64_t fee = sent["transaction"]["fee"];
+    json list = walletsNow();
+    EXPECT_EQ(list[0]["balance"], 110 * coin) << "confirmed balance is unchanged until the payment is mined";
+    EXPECT_EQ(list[0]["locked"], coin);
+    EXPECT_EQ(list[0]["spendable"], 10 * coin);
+    EXPECT_EQ(list[0]["incoming"], coin - 100000000 - fee) << "the change";
+    EXPECT_EQ(list[1]["incoming"], 100000000u);
+    EXPECT_EQ(list[1]["balance"], 0u);
+    EXPECT_EQ(list[1]["spendable"], 0u);
+
+    // Once mined the lock is gone and the payment is part of the balance.
+    mineTo(server, 1, 1);
+    list = walletsNow();
+    EXPECT_EQ(list[0]["locked"], 0u);
+    EXPECT_EQ(list[0]["incoming"], 0u);
+    EXPECT_EQ(list[0]["balance"], 109 * coin + coin - 100000000 - fee);
+    EXPECT_EQ(list[1]["balance"], 100000000 + coin + fee) << "the payment plus the new reward and its fee";
+    EXPECT_EQ(list[1]["spendable"], 100000000u) << "the reward itself is immature";
+    server.stop();
+}
+
 TEST_F(WalletViewsTest, EstimateValidatesLikeSend) {
     Server server(*h.node, nullptr, cfg);
     ASSERT_TRUE(server.start());
