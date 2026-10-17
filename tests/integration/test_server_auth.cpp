@@ -363,7 +363,7 @@ TEST_F(ServerAuthTest, CookieFileIsWrittenWhenNoTokenConfigured) {
     Bucks::Server server(*chain, nullptr, cfg);
     ASSERT_TRUE(server.start());
     ASSERT_FALSE(server.cookieFile().empty());
-    EXPECT_EQ(server.cookieFile(), cfg.dataDir + "/.cookie");
+    EXPECT_EQ(server.cookieFile(), cfg.dataDir + "/regtest/.cookie");   // per network (audit NEW-5)
     ASSERT_TRUE(fs::exists(server.cookieFile()));
 #ifndef _WIN32
     EXPECT_EQ(fileMode(server.cookieFile()), 0600u);
@@ -1253,6 +1253,142 @@ TEST_F(ServerAuthTest, ForwardedHeadersFromOtherHostsAreIgnored) {
     server.stop();
 }
 #endif
+
+// ---------------------------------------------------------------------------
+// Tokens, data directory and what anonymous callers see (WAL-7, WAL-8, WAL-9, NEW-5)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::unique_ptr<Bucks::Node> openMainLikeChain(const std::string& dir, std::string& err) {
+    Bucks::ChainParams mainLike = Bucks::chainParams(Bucks::NetworkId::REGTEST);
+    mainLike.id = Bucks::NetworkId::MAIN;
+    mainLike.name = "main";
+    int code = 0;
+    return Bucks::Node::open(dir, mainLike, {}, err, code);
+}
+
+} // namespace
+
+// NEW-5: two networks in one datadir each keep their own token file, and a node removes only its own.
+TEST_F(ServerAuthTest, CookiesOfTwoNetworksInOneDatadirAreSeparate) {
+    cfg.apiToken.clear();
+    std::string err;
+    auto mainChain = openMainLikeChain(dir + "/mainchain", err);
+    ASSERT_TRUE(mainChain) << err;
+
+    Bucks::Server test(*chain, nullptr, cfg);
+    ASSERT_TRUE(test.start(0));
+    Bucks::Server main(*mainChain, nullptr, cfg);
+    ASSERT_TRUE(main.start(0));
+    EXPECT_EQ(main.cookieFile(), cfg.dataDir + "/.cookie");   // where it always was
+    EXPECT_EQ(test.cookieFile(), cfg.dataDir + "/regtest/.cookie");
+    const std::string mainToken = readFile(main.cookieFile()).substr(0, 64);
+    const std::string testToken = readFile(test.cookieFile()).substr(0, 64);
+    EXPECT_NE(mainToken, testToken);
+
+    // Stopping the test node leaves the main node's token on disk, and it still works.
+    test.stop();
+    ASSERT_TRUE(fs::exists(cfg.dataDir + "/.cookie"));
+    EXPECT_FALSE(fs::exists(cfg.dataDir + "/regtest/.cookie"));
+    httplib::Client cli("127.0.0.1", main.port());
+    auto r = cli.Get("/api/wallets", {{"X-API-Token", readFile(cfg.dataDir + "/.cookie").substr(0, 64)}});
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 200);
+
+    // A token file another node has taken over is not deleted on stop.
+    const std::string path = main.cookieFile();
+    writeFile(path, std::string(64, 'b') + "\n");
+    main.stop();
+    EXPECT_TRUE(fs::exists(path));
+}
+
+// WAL-9: the token minimum applies to $BUCKS_API_TOKEN too, and a token file others can read is refused.
+TEST_F(ServerAuthTest, WeakOrExposedTokensAreRefused) {
+#ifndef _WIN32
+    cfg.apiToken.clear();
+    ::setenv("BUCKS_API_TOKEN", "a", 1);
+    {
+        Bucks::Server server(*chain, nullptr, cfg);
+        EXPECT_FALSE(server.start(0));
+    }
+    ::setenv("BUCKS_API_TOKEN", token.c_str(), 1);
+    {
+        Bucks::Server server(*chain, nullptr, cfg);
+        ASSERT_TRUE(server.start(0));
+        httplib::Client cli("127.0.0.1", server.port());
+        auto r = cli.Get("/api/wallets", tokenHeader);
+        ASSERT_TRUE(r);
+        EXPECT_EQ(r->status, 200);
+        server.stop();
+    }
+    ::unsetenv("BUCKS_API_TOKEN");
+
+    const std::string tokenFile = dir + "/token";
+    writeFile(tokenFile, token + "\n");
+    ::chmod(tokenFile.c_str(), 0644);
+    cfg.apiTokenFile = tokenFile;
+    {
+        testing::internal::CaptureStderr();
+        Bucks::Server server(*chain, nullptr, cfg);
+        const std::string said = testing::internal::GetCapturedStderr();
+        EXPECT_FALSE(server.start(0));
+        EXPECT_NE(said.find("chmod 600 " + tokenFile), std::string::npos) << said;
+    }
+    ::chmod(tokenFile.c_str(), 0600);
+    {
+        Bucks::Server server(*chain, nullptr, cfg);
+        EXPECT_TRUE(server.start(0));
+        server.stop();
+    }
+#endif
+}
+
+// WAL-8: an existing datadir keeps its mode; the node warns instead of silently chmodding it.
+TEST_F(ServerAuthTest, ExistingDataDirIsNotChmodded) {
+#ifndef _WIN32
+    fs::create_directories(cfg.dataDir);
+    ::chmod(cfg.dataDir.c_str(), 0755);
+    cfg.enableLogging = true;
+    testing::internal::CaptureStderr();
+    {
+        Bucks::Server server(*chain, nullptr, cfg);
+        EXPECT_TRUE(server.walletsEnabled());
+    }
+    const std::string said = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(fileMode(cfg.dataDir), 0755u);
+    EXPECT_NE(said.find("chmod 700 " + cfg.dataDir), std::string::npos) << said;
+    EXPECT_EQ(fileMode(cfg.dataDir + "/regtest"), 0700u);   // what the node creates is private
+#endif
+}
+
+// WAL-7: anonymous callers learn neither file paths nor the payout address.
+TEST_F(ServerAuthTest, AnonymousCallersSeeNoPathsOrPayoutAddress) {
+    writeFile(cfg.dataDir + "/regtest/wallets.json", "{ not json");
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_FALSE(server.walletsEnabled());
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+
+    auto r = cli.Get("/api/auth/status");
+    ASSERT_TRUE(r);
+    json anon = json::parse(r->body);
+    EXPECT_FALSE(anon["walletsEnabled"].get<bool>());
+    EXPECT_FALSE(anon["walletError"].get<std::string>().empty());
+    EXPECT_EQ(r->body.find(cfg.dataDir), std::string::npos) << r->body;
+    r = cli.Get("/api/auth/status", tokenHeader);
+    ASSERT_TRUE(r);
+    EXPECT_NE(json::parse(r->body)["walletError"].get<std::string>().find("wallets.json"), std::string::npos);
+
+    r = cli.Get("/api/mining/status");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200);
+    EXPECT_FALSE(json::parse(r->body).contains("minerAddress")) << r->body;
+    r = cli.Get("/api/mining/status", tokenHeader);
+    ASSERT_TRUE(r);
+    EXPECT_TRUE(json::parse(r->body).contains("minerAddress")) << r->body;
+    server.stop();
+}
 
 // ML-11 / OPS-14: the version names the network the node runs, not a fixed "testnet".
 TEST_F(ServerAuthTest, StatusReportsTheVersionOfThisNetwork) {

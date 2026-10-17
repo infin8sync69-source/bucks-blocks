@@ -1,5 +1,5 @@
 // Shared application state and polling. Everything shown comes from the node's
-// REST API. The node rate-limits to 100 requests/minute per client, so polling
+// REST API. The node rate-limits to 300 requests/minute per client, so polling
 // is deliberately slow (10 s), pauses while the tab is hidden, and fetches the
 // block list only when the tip changes.
 import { get, ApiError, onSessionExpired } from "./api.js";

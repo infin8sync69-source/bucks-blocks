@@ -62,14 +62,17 @@ struct ServerConfig {
     std::string bindAddress = "127.0.0.1";
 
     // ---- Data directory (wallet file, API cookie) ----
-    // "" = Server::defaultDataDir() (~/.bucks). Created with mode 0700.
+    // "" = Server::defaultDataDir() (~/.bucks). Created with mode 0700; an
+    // existing directory is left as it is (a warning if others can reach it).
     std::string dataDir;
     // Pre-datadir wallet file. Read once, never written (see loadWallets()).
     std::string legacyWalletFile;           // empty: never read a wallets.json from the working directory (audit WAL-1); --import-legacy-wallets sets it
 
     // ---- Authentication ----
-    // Token precedence: apiToken (argv) > apiTokenFile > $BUCKS_API_TOKEN >
-    // a random token generated at start and written to <dataDir>/.cookie.
+    // Token precedence: apiToken (argv) > apiTokenFile (mode 0600 or stricter) >
+    // $BUCKS_API_TOKEN > a random token generated at start and written to
+    // <dataDir>/.cookie (main) or <dataDir>/<network>/.cookie. Given tokens
+    // must be at least 16 characters.
     std::string apiToken;
     std::string apiTokenFile;
     std::chrono::seconds sessionLifetime{12 * 3600};
@@ -134,7 +137,8 @@ public:
     static std::string defaultDataDir();
     const std::string& dataDir() const { return dataDirPath; }
     const std::string& walletFile() const { return walletFilePath; }
-    // Path of the generated API token, "" when the token came from config/env.
+    // Path of the generated API token, "" when the token came from config/env:
+    // <dataDir>/.cookie on the main network, <dataDir>/<network>/.cookie otherwise.
     const std::string& cookieFile() const { return cookieFilePath; }
 
     // False when wallets.json could not be read; the file is then never
@@ -238,6 +242,7 @@ private:
     bool originAllowed(const std::string& origin, const std::string& hostHeader, bool tls) const;
     std::string sessionCookie(const std::string& value, long long maxAge, bool secure) const;
     bool corsOriginAllowed(const std::string& origin) const;
+    void removeOwnCookie();
     std::string createSession();
     bool validateSession(const std::string& id);
     void destroySession(const std::string& id);

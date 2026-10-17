@@ -175,20 +175,40 @@ bool readTextFile(const std::string& path, std::string& out) {
     return true;
 }
 
-// Create `path` (and parents) and make it private to the owner.
-bool ensurePrivateDir(const std::string& path, std::string* err) {
+// Create `path` (and missing parents) private to the owner. A directory that already exists is never
+// chmodded: the operator may have pointed --datadir at their home. When other users can reach it, *warning
+// says so and how to close it (audit WAL-8).
+bool ensurePrivateDir(const std::string& path, std::string* err, std::string* warning) {
     std::error_code ec;
     if (!fs::exists(path, ec)) {
+        std::vector<fs::path> created;
+        for (fs::path p = fs::path(path); !p.empty() && !fs::exists(p, ec); p = p.parent_path()) {
+            created.push_back(p);
+            if (p == p.parent_path()) break;
+        }
         fs::create_directories(path, ec);
         if (ec) { if (err) *err = ec.message(); return false; }
-    } else if (!fs::is_directory(path, ec)) {
+#ifndef _WIN32
+        for (const fs::path& p : created) {
+            if (::chmod(p.c_str(), 0700) != 0) {
+                if (err) *err = std::string("chmod 0700 failed: ") + std::strerror(errno);
+                return false;
+            }
+        }
+#endif
+        return true;
+    }
+    if (!fs::is_directory(path, ec)) {
         if (err) *err = "not a directory";
         return false;
     }
 #ifndef _WIN32
-    if (::chmod(path.c_str(), 0700) != 0) {
-        if (err) *err = std::string("chmod 0700 failed: ") + std::strerror(errno);
-        return false;
+    struct stat st {};
+    if (warning && ::stat(path.c_str(), &st) == 0 && (st.st_mode & 077) != 0) {
+        std::ostringstream w;
+        w << path << " is open to other users (mode " << std::oct << (st.st_mode & 0777)
+          << "); the node leaves it as it is. Close it with: chmod 700 " << path;
+        *warning = w.str();
     }
 #endif
     return true;
@@ -402,12 +422,14 @@ Server::Server(Node& n, Network* net, const ServerConfig& cfg)
     const std::string walletDir = (fs::path(dataDirPath) / node.params().name).string();
     walletFilePath = (fs::path(walletDir) / "wallets.json").string();
 
-    std::string err;
-    if (!ensurePrivateDir(dataDirPath, &err) || !ensurePrivateDir(walletDir, &err)) {
+    std::string err, dataWarning, walletWarning;
+    if (!ensurePrivateDir(dataDirPath, &err, &dataWarning) || !ensurePrivateDir(walletDir, &err, &walletWarning)) {
         startupError = "cannot create data directory " + dataDirPath + ": " + err;
         walletErr = startupError;
         Bucks::logErr() << "✗ " << startupError << "\n";
     } else {
+        for (const std::string* w : {&dataWarning, &walletWarning})
+            if (!w->empty() && config.enableLogging) Bucks::logErr() << "⚠ " << *w << "\n";
         loadWallets();
     }
 
@@ -449,6 +471,18 @@ bool Server::resolveApiToken() {
         return true;
     }
     if (!config.apiTokenFile.empty()) {
+#ifndef _WIN32
+        // A token other users can read is everyone's token (audit WAL-9).
+        struct stat st {};
+        if (::stat(config.apiTokenFile.c_str(), &st) == 0 && (st.st_mode & 077) != 0) {
+            std::ostringstream why;
+            why << "API token file " << config.apiTokenFile << " is open to other users (mode " << std::oct
+                << (st.st_mode & 0777) << "); restrict it with: chmod 600 " << config.apiTokenFile;
+            startupError = why.str();
+            Bucks::logErr() << "✗ " << startupError << "\n";
+            return false;
+        }
+#endif
         std::string t;
         if (!readTextFile(config.apiTokenFile, t)) {
             startupError = "cannot read API token file " + config.apiTokenFile;
@@ -466,6 +500,11 @@ bool Server::resolveApiToken() {
     const char* envToken = std::getenv("BUCKS_API_TOKEN");
     if (envToken && !trimWs(envToken).empty()) {
         apiToken = trimWs(envToken);
+        if (apiToken.size() < kMinToken) {
+            startupError = "BUCKS_API_TOKEN must be at least 16 characters";
+            Bucks::logErr() << "✗ " << startupError << "\n";
+            return false;
+        }
         return true;
     }
     try {
@@ -638,9 +677,13 @@ bool Server::start(int port) {
         }
     });
 
-    // The generated token is handed over through a private file (OPS-2/API-13).
+    // The generated token is handed over through a private file (OPS-2/API-13), one per network so that a test
+    // node sharing the datadir cannot overwrite or delete the main node's (audit NEW-5). The main network keeps
+    // <datadir>/.cookie, where it always was.
     if (tokenGenerated) {
-        cookieFilePath = (fs::path(dataDirPath) / ".cookie").string();
+        const fs::path cookieDir = node.params().id == NetworkId::MAIN ? fs::path(dataDirPath)
+                                                                        : fs::path(dataDirPath) / node.params().name;
+        cookieFilePath = (cookieDir / ".cookie").string();
         std::string err;
         if (!writePrivateFileAtomic(cookieFilePath, apiToken + "\n", &err)) {
             Bucks::logErr() << "✗ Cannot write API token cookie " << cookieFilePath << ": " << err << "\n";
@@ -659,11 +702,7 @@ bool Server::start(int port) {
     }
     if (bound <= 0) {
         Bucks::logErr() << "✗ Cannot bind API server to " << config.bindAddress << ":" << port << "\n";
-        if (!cookieFilePath.empty()) {
-            std::error_code ec;
-            fs::remove(cookieFilePath, ec);
-            cookieFilePath.clear();
-        }
+        removeOwnCookie();
         return false;
     }
     boundPort = bound;
@@ -713,10 +752,18 @@ void Server::stop() {
         serverThread->join();
     }
 
-    if (!cookieFilePath.empty()) {
+    removeOwnCookie();
+}
+
+// Deletes the token file only while it still holds this process's token: another node may have taken it over.
+void Server::removeOwnCookie() {
+    if (cookieFilePath.empty()) return;
+    std::string onDisk;
+    if (readTextFile(cookieFilePath, onDisk) && constantTimeEquals(trimWs(onDisk), apiToken)) {
         std::error_code ec;
         fs::remove(cookieFilePath, ec);
     }
+    cookieFilePath.clear();
 }
 
 bool Server::running() const {
@@ -983,11 +1030,14 @@ void Server::setupRoutes() {
         AuthKind kind = authenticate(req.get_header_value("Authorization"),
                                      req.get_header_value("X-API-Token"),
                                      req.get_header_value("Cookie"));
+        // The reason may name files on the node: only signed-in callers see it (audit WAL-7).
+        const std::string shownError = kind != AuthKind::None || walletErr.empty()
+            ? walletErr : "the wallet file could not be read; sign in to see why";
         json j = {
             {"authenticated", kind != AuthKind::None},
             {"method", kind == AuthKind::Token ? "token" : kind == AuthKind::Cookie ? "cookie" : ""},
             {"walletsEnabled", walletOk},
-            {"walletError", walletErr}
+            {"walletError", shownError}
         };
         // The location of the token file is not published to unauthenticated callers (audit WAL-7).
         if (!cookieFilePath.empty() && kind != AuthKind::None) j["cookieFile"] = cookieFilePath;
@@ -1638,13 +1688,17 @@ void Server::setupRoutes() {
         res.set_content(json{{"success", true}}.dump(), "application/json");
     });
 
-    s->Get("/api/mining/status", [this](const httplib::Request&, httplib::Response& res) {
-        res.set_content(json{
+    s->Get("/api/mining/status", [this](const httplib::Request& req, httplib::Response& res) {
+        json j{
             {"mining",       autoMining.load()},
-            {"minerAddress", minerAddress},
             {"blocksFound",  blocksFound.load()},
             {"hashRate",     hashesPerSecond.load()}
-        }.dump(), "application/json");
+        };
+        // The payout address links this public node to its owner's coins: signed-in callers only (audit WAL-7).
+        if (authenticate(req.get_header_value("Authorization"), req.get_header_value("X-API-Token"),
+                         req.get_header_value("Cookie")) != AuthKind::None)
+            j["minerAddress"] = minerAddress;
+        res.set_content(j.dump(), "application/json");
     });
 }
 

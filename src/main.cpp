@@ -68,7 +68,7 @@ static void printUsage() {
         "  --reindex-chainstate      rebuild coins, undo and statistics from the stored blocks\n"
         "  --reindex                 rebuild the block index from the stored block bytes\n"
         "  --api-bind <addr>         API bind address (default 127.0.0.1)\n"
-        "  --api-token-file <file>   read the API token from a file (0600)\n"
+        "  --api-token-file <file>   read the API token from a file (mode 0600; refused if others can read it)\n"
         "  --api-token <token>       API token on the command line (visible to other users!)\n"
         "  --api-cors-origin <o>     allow this exact origin cross-origin (repeatable)\n"
         "  --api-allowed-host <h>    accept this Host header (repeatable)\n"
@@ -79,7 +79,8 @@ static void printUsage() {
         "Signals: SIGINT and SIGTERM stop the node cleanly. SIGHUP is logged and ignored, so closing\n"
         "the terminal does not stop it (there is no configuration to reload).\n"
         "Without --api-token/--api-token-file/$BUCKS_API_TOKEN a random token is\n"
-        "written to <datadir>/.cookie at start; the web UI asks for it.\n";
+        "written at start to <datadir>/.cookie (main) or <datadir>/<network>/.cookie;\n"
+        "the web UI asks for it.\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -172,7 +173,7 @@ int main(int argc, char* argv[]) {
              apiToken = argv[++i];
              // The token stays visible in `ps` for every local user (API-13).
              Bucks::logErr() << "⚠ --api-token puts the secret on the command line, where other users can read it; "
-                          "prefer --api-token-file or the generated <datadir>/.cookie\n";
+                          "prefer --api-token-file or the generated .cookie file\n";
         } else if (arg == "--api-token-file" && i + 1 < argc) {
              apiTokenFile = argv[++i];
         } else if (arg == "--datadir" && i + 1 < argc) {
