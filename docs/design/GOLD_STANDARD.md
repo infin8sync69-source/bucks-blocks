@@ -1,16 +1,25 @@
-# Bucks Gold Standard — Vault Governance
+# Bucks Gold Standard — Vault Governance (PROPOSAL)
+
+> **PROPOSAL - not implemented, not part of the first launch. BUCKS are not backed by or redeemable
+> for gold.**
+>
+> This is an early sketch of a possible later gold-reserve module. No code in this repository reads
+> gold markers, the node reports no gold reserve, and no vault, keyholder, auditor or board exists.
+> Nothing here describes the current network or promises anything about it. The launch decision is
+> in `docs/MAINNET_INPUTS.md` (gold module not in the first launch); the later, more detailed draft
+> is `docs/design/gold-reserve-module.md`, which wins where the two differ.
 
 ## Overview
 
-Every gram of gold backing a Bucks coin is tracked on-chain via a verified
-OP_RETURN marker. No gold can be minted or redeemed without cryptographic proof
-from at least **3 of 5** authorised vault keyholders. This document records who
-those keyholders are, how the signing ceremony works, and how keys are rotated
-or revoked.
+If the module were built, each change of the reported gold reserve would be recorded
+on-chain in a signed OP_RETURN marker, and no change would be accepted without
+cryptographic proof from at least **3 of 5** vault keyholders. This sketch describes
+who those keyholders could be, how a signing ceremony could work, and how keys
+could be rotated or revoked.
 
 ---
 
-## 1. The Five Vault Keyholders
+## 1. The Five Vault Keyholders (proposed roles; none appointed)
 
 | # | Role | Responsibility |
 |---|------|----------------|
@@ -113,20 +122,22 @@ If a keyholder is compromised or unresponsive:
 
 ---
 
-## 7. Replacing Placeholder Keys Before Mainnet
+## 7. Placeholder Keys
 
-`consensus.h` currently contains placeholder pubkeys:
+`consensus.h` contains placeholder pubkeys for this proposal:
 
 ```cpp
 "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01"
 ```
 
-**Before mainnet launch**, each keyholder must:
+No code uses them, and mainnet launches without a gold module, so they do not
+hold up the launch. If the module is built later, each keyholder would, before
+it activates:
 
 1. Generate a fresh secp256k1 keypair on an air-gapped device.
 2. Export the **compressed** 33-byte public key in hex (66 characters).
 3. Deliver it to the development team through a verified out-of-band channel.
 
-The development team then replaces the placeholder entries in `consensus.h`
-and releases a signed software build. **Do not launch mainnet with placeholder
+The development team would then replace the placeholder entries and release a
+signed software build. **A gold module must never activate with placeholder
 pubkeys.**
