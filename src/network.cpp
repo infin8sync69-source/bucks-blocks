@@ -500,6 +500,7 @@ Peer::Peer(Network& net, int socket, const std::string& ip, uint16_t port, ConnK
 #endif
     connectionTime = std::chrono::steady_clock::now();
     addrTokensAt = connectionTime;
+    if (outbound()) listenPort_ = port;
     lastBlockRequestTime = connectionTime;
     lastHeadersRequestTime = connectionTime - std::chrono::seconds(60);
 
@@ -726,9 +727,12 @@ void Peer::handleMessage(const NetMessage& msg) {
                      encryptionNegotiated = true;
                      Bucks::logOut() << "DEBUG: P2P Encryption established with Peer " << ip << std::endl;
 
-                     // Now send our VERSION message (it will be encrypted)
+                     // Now send our VERSION message (it will be encrypted): height, the port we
+                     // accept connections on (0 = none) and our nonce, which shows a dial to ourselves.
                      Writer w;
                      w.u32(node.height());
+                     w.u16(network.listenPort);
+                     w.u64(network.localNonce());
                      sendMsg(NetMessage(MessageType::VERSION, w.take()));
                  }
             }
@@ -739,6 +743,20 @@ void Peer::handleMessage(const NetMessage& msg) {
                 Reader r(decrypted.payload);
                 const uint32_t peerHeight = r.u32();
                 Bucks::logOut() << "DEBUG: Peer " << ip << " version: height=" << peerHeight << std::endl;
+                if (r.remaining() >= 10) {
+                    const uint16_t peerListenPort = r.u16();
+                    if (r.u64() == network.localNonce()) {
+                        Bucks::logOut() << "DEBUG: Connected to ourselves through " << address() << "; dropping it" << std::endl;
+                        if (outbound()) network.markSelf(address());
+                        disconnect();
+                        break;
+                    }
+                    // An inbound peer that listens: its address is worth knowing and passing on.
+                    if (!outbound() && peerListenPort != 0 && listenPort_ == 0) {
+                        listenPort_ = peerListenPort;
+                        if (auto a = listenAddress()) network.learnAddress(*a, ip, socket_fd);
+                    }
+                }
                 if (peerHeight > node.height()) requestHeaders();
             } else {
                 misbehavior(10); // Penalty for invalid VERSION payload
@@ -750,9 +768,12 @@ void Peer::handleMessage(const NetMessage& msg) {
             if (state == PeerState::ACTIVE) break;
             state = PeerState::ACTIVE;
             Bucks::logOut() << "DEBUG: Peer " << ip << " is now ACTIVE" << std::endl;
-            // An address we dialled and shook hands with is worth keeping and passing on.
-            NetAddress a;
-            if (outbound() && NetAddress::parse(address(), a)) network.addresses().good(a, unixNow());
+            // An address we dialled and shook hands with is worth keeping and passing on; ask it
+            // for more (audit NET-NEW-2: before, getaddr went out every 30 minutes only).
+            if (outbound()) {
+                if (auto a = listenAddress()) network.addresses().good(*a, unixNow());
+                askForAddresses();
+            }
             break;
         }
         case MessageType::INV: {
@@ -877,11 +898,16 @@ void Peer::handleMessage(const NetMessage& msg) {
             sendMsg(NetMessage(MessageType::PONG, decrypted.payload));
             break;
         case MessageType::GETADDR: {
-            // A sample of the address table; this peer's own entry is left out.
+            // A sample of the address table, once per connection and only to peers that dialled
+            // us (as Bitcoin Core does), so the table cannot be scraped; the peer's own entry is
+            // left out.
+            if (outbound() || answeredGetAddr_) break;
+            answeredGetAddr_ = true;
             Bucks::logOut() << "DEBUG: Peer " << ip << " requested peer addresses" << std::endl;
+            const std::optional<NetAddress> self = listenAddress();
             std::vector<std::string> addresses;
             for (const NetAddress& a : network.addresses().sample(kGetAddrReplySize, unixNow())) {
-                if (a.toString() != address()) addresses.push_back(a.toString());
+                if (!self || !(a == *self)) addresses.push_back(a.toString());
             }
             Writer w;
             w.u32(uint32_t(addresses.size()));
@@ -923,7 +949,13 @@ void Peer::handleMessage(const NetMessage& msg) {
                 addrTokens -= 1;
                 pos += addrLen;
             }
-            network.addAddresses(addresses, ip);
+            std::vector<NetAddress> fresh;
+            network.addAddresses(addresses, ip, &fresh);
+            // A short unsolicited ADDR is news (a node announcing itself): pass on what we did
+            // not know yet. Known addresses are not relayed again, so this dies out.
+            if (count <= 10) {
+                for (const NetAddress& a : fresh) network.relayAddress(a, socket_fd);
+            }
             break;
         }
         default:
@@ -933,6 +965,12 @@ void Peer::handleMessage(const NetMessage& msg) {
 
 std::string Peer::address() const {
     return ip + ":" + std::to_string(port);
+}
+
+std::optional<NetAddress> Peer::listenAddress() const {
+    NetAddress a;
+    if (listenPort_ == 0 || !NetAddress::parse(ip + ":" + std::to_string(listenPort_), a)) return std::nullopt;
+    return a;
 }
 
 // ------------------------------------------------------------
@@ -947,7 +985,9 @@ Network::Network(Node& n)
 #endif
     
     // Initialize peer discovery
-    lastDiscoveryTime = std::chrono::steady_clock::now();
+    std::random_device rd;
+    localNonce_ = uint64_t(rd()) << 32 | rd();
+    relayRng_.seed(rd());
     lastMaintain_ = std::chrono::steady_clock::now() - std::chrono::seconds(1);   // first round at once
     for (const std::string& seed : node.params().seedNodes) {
         if (!addSeedNode(seed)) Bucks::logErr() << "WARNING: ignoring malformed seed node '" << seed << "'" << std::endl;
@@ -1246,6 +1286,8 @@ void Network::maintainConnections() {
     if (now - lastMaintain_ < std::chrono::seconds(1)) return;
     lastMaintain_ = now;
 
+    // Every connection with the address it listens on (port 0: an inbound peer that has not
+    // said), so an address is never dialled while it is connected in either direction.
     struct Link { std::string ip; uint16_t port; bool outbound; std::chrono::steady_clock::duration age; };
     std::vector<DialTarget> targets;
     std::vector<Link> links;
@@ -1255,7 +1297,9 @@ void Network::maintainConnections() {
         targets = dialTargets_;
         for (const auto& [fd, peer] : peers) {
             if (peer->getState() == PeerState::DISCONNECTED) continue;
-            links.push_back({peer->getIP(), peer->getPort(), peer->outbound(), now - peer->getConnectionTime()});
+            const std::optional<NetAddress> listen = peer->listenAddress();
+            links.push_back({peer->getIP(), listen ? listen->port : uint16_t(0), peer->outbound(),
+                             now - peer->getConnectionTime()});
             if (peer->kind() == ConnKind::SEED || peer->kind() == ConnKind::AUTO) ++outbound;
         }
     }
@@ -1268,11 +1312,12 @@ void Network::maintainConnections() {
         const DialTarget& t = targets[i];
         std::string ip;
         if (!lookupHost(t.host, ip)) continue;   // the resolver thread is on it
+        NetAddress target;
+        if (NetAddress::parse(ip + ":" + std::to_string(t.port), target) && selfAddresses_.count(target)) continue;
         const Link* link = nullptr;
         for (const Link& l : links) {
-            // Outbound entries carry the dialled port; an inbound socket from the same
-            // host also means the link exists, whichever side opened it.
-            if (l.ip == ip && (!l.outbound || l.port == t.port)) { link = &l; break; }
+            // An inbound peer from that host that has not told its port yet counts too.
+            if (l.ip == ip && (l.port == t.port || l.port == 0)) { link = &l; break; }
         }
         if (link) {
             if (link->age >= kStableConnection) {
@@ -1301,10 +1346,10 @@ void Network::maintainConnections() {
         dt.backoffSeconds = std::min(dt.backoffSeconds * 2, kMaxBackoffSeconds);
     }
 
-    std::set<NetAddress> linked;
+    std::set<NetAddress> linked(selfAddresses_.begin(), selfAddresses_.end());
     for (const Link& l : links) {
         NetAddress a;
-        if (l.outbound && NetAddress::parse(l.ip + ":" + std::to_string(l.port), a)) linked.insert(a);
+        if (NetAddress::parse(l.ip + ":" + std::to_string(l.port), a)) linked.insert(a);
     }
     dialFromAddressTable(outbound, linked);
 }
@@ -1371,7 +1416,6 @@ void Network::run() {
         for (size_t i = firstPending; i < fds.size(); ++i) dialEvents.push_back(fds[i].revents);
         completeConnects(dialEvents);
         pruneZombiePeers();
-        maintainConnections();
         update();
 
         if (fds[0].revents & POLLIN) {
@@ -1435,8 +1479,12 @@ void Network::acceptNewConnection() {
             return;
         }
 
+        // The throttle slows one remote host's reconnect loop. Loopback connections come from this
+        // machine (several local nodes discovering each other) and are not throttled.
         auto now = std::chrono::steady_clock::now();
-        if (lastConnectionTimes.count(ip) > 0) {
+        uint32_t ipNumber = 0;
+        const bool loopback = NetAddress::parseIP(ip, ipNumber) && NetAddress{ipNumber, 1}.isLoopback();
+        if (!loopback && lastConnectionTimes.count(ip) > 0) {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastConnectionTimes[ip]).count();
             if (elapsed < 5) {
                 Bucks::logOut() << "DEBUG: Throttling connection attempt from " << ip << " (too fast)" << std::endl;
@@ -1591,48 +1639,61 @@ void Network::broadcast(const NetMessage& msg) {
     }
 }
 
+// Periodic work of the network thread.
 void Network::update() {
-    // Run periodic peer discovery
-    discoverPeers();
+    maintainConnections();
 }
 
 // Peer Discovery Implementation (Phase 6)
 
-void Network::discoverPeers() {
-    auto now = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::minutes>(now - lastDiscoveryTime).count();
-
-    // Run discovery every 30 minutes (seeds are dialled by maintainConnections)
-    if (elapsed < 30) return;
-
-    lastDiscoveryTime = now;
-    Bucks::logOut() << "DEBUG: Running peer discovery..." << std::endl;
-
-    // Ask every active peer for addresses
-    {
-        std::lock_guard<std::mutex> lock(peersMutex);
-        for (auto& [fd, peer] : peers) {
-            if (peer->getState() == PeerState::ACTIVE) {
-                Bucks::logOut() << "DEBUG: Sending GETADDR to " << peer->getIP() << std::endl;
-                peer->askForAddresses();
-            }
-        }
-    }
-}
-
-size_t Network::addAddresses(const std::vector<std::string>& addresses, const std::string& sourceIp) {
+size_t Network::addAddresses(const std::vector<std::string>& addresses, const std::string& sourceIp,
+                             std::vector<NetAddress>* fresh) {
     uint32_t source = 0;
     if (!NetAddress::parseIP(sourceIp, source)) return 0;
     const int64_t now = unixNow();
     size_t added = 0;
     for (const std::string& s : addresses) {
         NetAddress a;
-        if (!NetAddress::parse(s, a) || !a.acceptableFrom(source)) continue;
-        if (addrman_.add(a, source >> 16, now)) ++added;
+        if (!NetAddress::parse(s, a) || !a.acceptableFrom(source) || selfAddresses_.count(a)) continue;
+        if (!addrman_.add(a, source >> 16, now)) continue;
+        ++added;
+        if (fresh) fresh->push_back(a);
     }
     if (!addresses.empty())
         Bucks::logOut() << "DEBUG: " << added << " new of " << addresses.size() << " addresses from " << sourceIp << std::endl;
     return added;
+}
+
+void Network::learnAddress(const NetAddress& a, const std::string& sourceIp, int fromFd) {
+    std::vector<NetAddress> fresh;
+    addAddresses({a.toString()}, sourceIp, &fresh);
+    for (const NetAddress& f : fresh) relayAddress(f, fromFd);
+}
+
+// Called by message handlers, under peersMutex: the address goes to two random active peers.
+void Network::relayAddress(const NetAddress& a, int exceptFd) {
+    std::vector<Peer*> to;
+    for (auto& [fd, peer] : peers) {
+        if (fd != exceptFd && peer->getState() == PeerState::ACTIVE) to.push_back(peer.get());
+    }
+    std::shuffle(to.begin(), to.end(), relayRng_);
+    if (to.size() > 2) to.resize(2);
+    if (to.empty()) return;
+    const std::string s = a.toString();
+    Writer w;
+    w.u32(1);
+    w.u16(uint16_t(s.size()));
+    w.bytes(reinterpret_cast<const uint8_t*>(s.data()), s.size());
+    const NetMessage msg(MessageType::ADDR, w.take());
+    for (Peer* p : to) p->sendMsg(msg);
+}
+
+// Our own address, learned by dialling it: never dialled or passed on again.
+void Network::markSelf(const std::string& hostPort) {
+    NetAddress a;
+    if (!NetAddress::parse(hostPort, a)) return;
+    selfAddresses_.insert(a);
+    addrman_.remove(a);
 }
 
 } // namespace Bucks

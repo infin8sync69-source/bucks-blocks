@@ -230,6 +230,9 @@ public:
     uint16_t getPort() const { return port; }
     ConnKind kind() const { return kind_; }
     bool outbound() const { return kind_ != ConnKind::INBOUND; }
+    // Where the peer accepts connections: the port we dialled, or the one its VERSION gave.
+    // Empty for an inbound peer that does not listen (or has not said yet).
+    std::optional<NetAddress> listenAddress() const;
 
     // Misbehavior tracking
     void misbehavior(int penalty);
@@ -265,6 +268,8 @@ private:
     // when we ask it (getaddr). The rest of an ADDR is dropped (audit NET-NEW-4).
     double addrTokens = 10;
     std::chrono::steady_clock::time_point addrTokensAt;
+    uint16_t listenPort_ = 0;
+    bool answeredGetAddr_ = false;
 
     // Encryption (Phase 5)
     std::unique_ptr<P2PSessionEncryption> encryption;
@@ -303,7 +308,7 @@ public:
     // Message relay
     void broadcast(const NetMessage& msg);
 
-    // Messaging loop integration
+    // Messaging loop integration: periodic work of the network thread
     void update();
 
     Node& getNode() { return node; }
@@ -326,8 +331,16 @@ public:
     // Peer discovery: addresses a peer at `sourceIp` told us about go into the address table
     // (never dialled straight away); entries that do not parse or that this source may not
     // give us are dropped. Returns how many were new.
-    size_t addAddresses(const std::vector<std::string>& addresses, const std::string& sourceIp);
+    size_t addAddresses(const std::vector<std::string>& addresses, const std::string& sourceIp,
+                        std::vector<NetAddress>* fresh = nullptr);
     AddrMan& addresses() { return addrman_; }
+    // For message handlers (network thread, under peersMutex): an address a peer announced
+    // (its own, from VERSION) goes into the table and, if it is news, to two other peers.
+    void learnAddress(const NetAddress& a, const std::string& sourceIp, int fromFd);
+    void relayAddress(const NetAddress& a, int exceptFd);
+    // Random per process; a VERSION carrying it means we dialled ourselves.
+    uint64_t localNonce() const { return localNonce_; }
+    void markSelf(const std::string& hostPort);
 
     // Peer discovery access (for Peer class)
     std::mutex peersMutex;
@@ -352,9 +365,10 @@ private:
     mutable std::mutex securityMutex;
 
     // Peer Discovery (Phase 6)
-    std::chrono::steady_clock::time_point lastDiscoveryTime;
-    void discoverPeers();
     AddrMan addrman_;
+    uint64_t localNonce_ = 0;
+    std::mt19937_64 relayRng_;              // network thread only
+    std::set<NetAddress> selfAddresses_;    // network thread only
     void dialFromAddressTable(size_t outbound, const std::set<NetAddress>& linked);
 
     // --connect peers (MANUAL) and seeds (SEED), redialled by maintainConnections. Guarded by

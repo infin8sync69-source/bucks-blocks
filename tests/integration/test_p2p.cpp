@@ -419,7 +419,7 @@ TEST(P2pAudit, AddressFromAPeerIsDialledFromTheTable) {
     ASSERT_TRUE(waitFor([&] { return netA.peerCount() == 1 && netB.peerCount() == 1; }));
 
     sendToAll(netB, NetMessage(MessageType::ADDR, addrPayload({"127.0.0.1:" + std::to_string(portC)})));
-    EXPECT_TRUE(waitFor([&] { return netC.peerCount() == 1 && netA.peerCount() == 2; }))
+    EXPECT_TRUE(waitFor([&] { return netC.peerCount() >= 1 && netA.peerCount() >= 2; }))
         << "A did not dial the address B gave it";
     NetAddress ac;
     ASSERT_TRUE(NetAddress::parse("127.0.0.1:" + std::to_string(portC), ac));
@@ -431,17 +431,76 @@ TEST(P2pAudit, AddressFromAPeerIsDialledFromTheTable) {
     netA.stop();
 }
 
+// A node that learns its own address (here from a peer) dials it once, sees its own nonce in the
+// VERSION and never uses that address again.
+TEST(P2pAudit, DialToSelfIsDetected) {
+    TwoNodes t;
+    ASSERT_TRUE(t.start());
+    ASSERT_TRUE(t.connectBToA());
+    const std::string selfA = "127.0.0.1:" + std::to_string(t.portA);
+    sendToAll(*t.netB, NetMessage(MessageType::ADDR, addrPayload({selfA})));
+    NetAddress a;
+    ASSERT_TRUE(NetAddress::parse(selfA, a));
+    ASSERT_TRUE(waitFor([&] { return !t.netA->addresses().find(a); }, 15)) << "A kept its own address";
+    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+    EXPECT_EQ(t.netA->peerCount(), 1u);
+    EXPECT_FALSE(t.netA->addresses().find(a));
+    // Learning it again changes nothing.
+    sendToAll(*t.netB, NetMessage(MessageType::ADDR, addrPayload({selfA})));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    EXPECT_FALSE(t.netA->addresses().find(a));
+    EXPECT_EQ(t.netA->peerCount(), 1u);
+}
+
+// NET-NEW-2: nodes that know only the seed find each other through it, so the network is not a star
+// around the seed and survives the seed going away and coming back.
+TEST(Network, NodesFindEachOtherThroughTheSeed) {
+    NodeHarness hs, ha, hb, hc;
+    ASSERT_TRUE(hs.node && ha.node && hb.node && hc.node);
+    const uint16_t portS = freePort();
+    auto netS = std::make_unique<Network>(*hs.node);
+    netS->start(portS);
+    std::vector<std::unique_ptr<Network>> nets;
+    for (NodeHarness* h : {&ha, &hb, &hc}) {
+        nets.push_back(std::make_unique<Network>(*h->node));
+        ASSERT_TRUE(nets.back()->addSeedNode("127.0.0.1:" + std::to_string(portS)));
+        nets.back()->start(freePort());
+    }
+    auto meshed = [&] {
+        for (auto& n : nets)
+            if (n->peerCount() < 3) return false;   // the seed and the two others
+        return true;
+    };
+    ASSERT_TRUE(waitFor(meshed, 30)) << nets[0]->peerCount() << " " << nets[1]->peerCount() << " "
+                                     << nets[2]->peerCount();
+
+    // Without the seed the three stay connected.
+    netS->stop();
+    netS.reset();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    for (auto& n : nets) EXPECT_GE(n->peerCount(), 2u);
+
+    // The seed comes back and every node dials it again.
+    netS = std::make_unique<Network>(*hs.node);
+    netS->start(portS);
+    EXPECT_TRUE(waitFor([&] { return netS->peerCount() >= 3 && meshed(); }, 60))
+        << "seed has " << netS->peerCount() << " peers";
+    for (auto& n : nets) n->stop();
+    netS->stop();
+}
+
 // NET-NEW-4: a peer cannot fill the table; what is beyond its allowance is dropped unread.
 TEST(P2pAudit, AddressFloodIsRateLimited) {
     TwoNodes t;
     ASSERT_TRUE(t.start());
     ASSERT_TRUE(t.connectBToA());
+    const size_t before = t.netA->addresses().size();   // B's own listen address
     std::vector<std::string> flood;
     for (int i = 0; i < 1000; ++i) flood.push_back("11." + std::to_string(i / 256) + "." + std::to_string(i % 256) + ".1:8733");
     sendToAll(*t.netB, NetMessage(MessageType::ADDR, addrPayload(flood)));
-    ASSERT_TRUE(waitFor([&] { return t.netA->addresses().size() >= 10; }));
+    ASSERT_TRUE(waitFor([&] { return t.netA->addresses().size() >= before + 10; }));
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    EXPECT_EQ(t.netA->addresses().size(), 10u);
+    EXPECT_EQ(t.netA->addresses().size(), before + 10);
     EXPECT_EQ(t.netA->peerCount(), 1u) << "the flooding peer is not punished for an unsolicited ADDR";
 }
 
