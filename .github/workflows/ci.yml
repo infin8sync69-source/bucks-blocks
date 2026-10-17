@@ -2,10 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [main, master, 'chain-v2-*']
+    # claude/** carries the launch-readiness work: it needs green runs before it is merged (audit HYG-7).
+    branches: [main, master, 'chain-v2-*', 'claude/**']
   pull_request:
   schedule:
-    - cron: '17 3 * * *'      # nightly: longer fuzzing
+    # Nightly: longer fuzzing and soak. GitHub runs schedules only on the default branch, so they
+    # start once that branch holds this workflow (docs/MAINNET_INPUTS.md, GitHub default branch).
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 jobs:
@@ -46,14 +49,16 @@ jobs:
 
   fuzz:
     name: fuzz (${{ github.event_name == 'schedule' && '10 min' || '1 min' }} per target)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
-      CC: clang
-      CXX: clang++
+      # clang and its libFuzzer runtime must be the same version; Ubuntu's clang package does not
+      # pull the runtime in, and without it the job used to pass by replaying the corpus (audit SAN-5).
+      CC: clang-18
+      CXX: clang++-18
       BUCKS_FUZZ_SECONDS: ${{ github.event_name == 'schedule' && '600' || '60' }}
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev clang
+      - run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev clang-18 libclang-rt-18-dev
       - run: tools/ci.sh fuzz
       - name: Keep reproducers of findings
         if: failure()
@@ -61,3 +66,21 @@ jobs:
         with:
           name: fuzz-findings
           path: build-ci-fuzz/fuzz-work/*/crashes/
+
+  soak:
+    name: three-node soak (${{ github.event_name == 'schedule' && '15 min' || '3 min' }})
+    runs-on: ubuntu-latest
+    env:
+      BUCKS_SOAK_SECONDS: ${{ github.event_name == 'schedule' && '900' || '180' }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev python3 curl
+      - run: tools/ci.sh soak
+        env:
+          TMPDIR: ${{ runner.temp }}   # soak.sh keeps a failed run's datadirs and logs here
+      - name: Keep the node logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-logs
+          path: ${{ runner.temp }}/bucks-soak.*/
