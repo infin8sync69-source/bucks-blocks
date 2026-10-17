@@ -48,8 +48,13 @@ private:
 std::string hexOf(const Hash256& h) { return hexStr(std::vector<uint8_t>(h.begin(), h.end())); }
 
 // A chain of `n` coinbase-only blocks on a fresh database.
+// The block is extended before the tip is read: the operands of == are unsequenced, and GCC
+// reads the right-hand side first, which compared the new block with the old tip.
 void grow(PersistentChain& c, int n) {
-    for (int i = 0; i < n; ++i) ASSERT_TRUE(c.extend().getHash() == c.state().tip()->hash);
+    for (int i = 0; i < n; ++i) {
+        const Block b = c.extend();
+        ASSERT_TRUE(b.getHash() == c.state().tip()->hash);
+    }
 }
 
 } // namespace
