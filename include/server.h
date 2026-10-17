@@ -256,6 +256,8 @@ private:
     nlohmann::json walletSummaryLocked(const Wallet& w) const;   // caller holds walletMutex
     bool paymentFee(const Wallet& from, const Transaction& tx, uint64_t& fee) const;
     int estimatePayment(const std::string& body, nlohmann::json& out);
+    int walletHistory(const std::string& address, const std::string& limit, const std::string& depth,
+                      nlohmann::json& out);
 };
 
 } // namespace Bucks

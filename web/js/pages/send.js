@@ -1,7 +1,7 @@
 import { h, icon, copyButton, pageHead, skeletonRows, errorState, notice, field, busy, netBadge } from "../ui.js";
-import { post, ApiError } from "../api.js";
+import { get, post, ApiError } from "../api.js";
 import { state, loadWallets, selectWallet, selectedWallet, emit } from "../store.js";
-import { fmtBucks, parseBucks, amountProblem, validateAddress, MIN_FEE_UNITS, DUST_LIMIT_UNITS, COINBASE_MATURITY, NETWORKS, shortAddr } from "../util.js";
+import { fmtBucks, fmtInt, parseBucks, amountProblem, validateAddress, MIN_FEE_UNITS, DUST_LIMIT_UNITS, COINBASE_MATURITY, NETWORKS, shortAddr } from "../util.js";
 
 export function mount(root) {
   const holder = h("div", { class: "stack" });
@@ -201,7 +201,8 @@ export function mount(root) {
     function explain(ex, sending = true) {
       if (ex instanceof ApiError) {
         if (ex.offline && !sending) return "Cannot reach the node. Nothing was sent.";
-        if (ex.offline) return "The node did not confirm the payment. It may or may not have been sent. Check the History page before trying again.";
+        // History now lists this wallet's pending payments, so it can answer whether this one went out (ONB-05).
+        if (ex.offline) return "The node did not answer, so this payment may or may not have been sent. Do not send it again yet: when the node is reachable, open History. A payment that went out is listed there as pending or confirmed.";
         const m = ex.message || "";
         if (/insufficient|no spendable/i.test(m)) return `${m}. Newly mined rewards can be spent only after ${COINBASE_MATURITY} further blocks, and coins in a pending payment are locked until it is mined.`;
         if (/address|base58|checksum|version/i.test(m)) return `The node rejected the recipient address: ${m}`;
@@ -214,20 +215,50 @@ export function mount(root) {
 
     // ----- done -----
     const doneBox = h("div");
+    let watch = null; // { txid, from, el, key }: the sent payment, followed until it confirms (ONB-05)
     function showDone(tx, units, dest, fromAddress) {
       const txid = tx && tx.hash;
+      const statusEl = h("div", { role: "status" });
+      watch = txid ? { txid, from: fromAddress, el: statusEl, key: "" } : null;
+      paintStatus({ status: "pending" });
       doneBox.replaceChildren(h("section", { class: "card" }, h("div", { class: "stack" },
-        notice("ok", h("strong", null, "Payment submitted. "), "It is in the node's mempool and will be confirmed when the next block includes it."),
+        h("div", { class: "row between" }, h("h2", { tabindex: "-1" }, "Payment submitted"), netBadge(net)),
+        statusEl,
         h("div", { class: "review" },
           h("div", null, h("span", { class: "k" }, "Amount"), h("span", null, `${fmtBucks(units)} BUCKS`)),
           h("div", null, h("span", { class: "k" }, "To"), h("span", { class: "mono wrap" }, dest)),
           tx && tx.fee != null && h("div", null, h("span", { class: "k" }, "Network fee"), h("span", null, `${fmtBucks(tx.fee)} BUCKS`)),
           h("div", null, h("span", { class: "k" }, "Transaction ID"), h("span", { class: "row" }, h("span", { class: "mono wrap" }, txid || "unknown"), txid && copyButton(txid, "Copy", { what: "transaction id", compact: true })))),
         h("div", { class: "row actions" },
-          h("button", { type: "button", class: "btn primary", onclick: () => { step = "form"; show(); to.focus(); } }, "Send another"),
+          h("button", { type: "button", class: "btn primary", onclick: () => { step = "form"; watch = null; show(); to.focus(); } }, "Send another"),
           h("a", { class: "btn", href: "#/history" }, "View history"),
           h("a", { class: "btn ghost", href: "#/wallet" }, "Back to wallet")))));
       show();
+      const head = doneBox.querySelector("h2");
+      if (head) head.focus({ preventScroll: true });
+    }
+
+    function paintStatus(entry) {
+      if (!watch) return;
+      const conf = entry && entry.confirmations;
+      watch.el.replaceChildren(!entry
+        ? notice("warn", "This payment is not in the wallet's recent activity. If it does not show up in History after a few blocks, the node dropped it and the coins are free again.")
+        : entry.status === "pending"
+          ? notice("info", h("strong", null, "Pending. "), "It is in the node's mempool and is confirmed when a block includes it. This page updates by itself.")
+          : notice("ok", h("strong", null, "Confirmed. "), `In block #${fmtInt(entry.height)}, ${fmtInt(conf)} confirmation${conf === 1 ? "" : "s"}.`));
+    }
+
+    // Looks the payment up again whenever a block arrives or the mempool changes.
+    async function followPayment(s) {
+      if (!watch || step !== "done" || !s.info) return;
+      const key = `${s.info.tipHash}/${s.info.mempoolSize}`;
+      if (key === watch.key) return;
+      watch.key = key;
+      const w = watch;
+      try {
+        const r = await get(`/api/wallets/${encodeURIComponent(w.from)}/history?limit=50&depth=200`);
+        if (w === watch) paintStatus((r.activity || []).find((a) => a.txid === w.txid) || null);
+      } catch { if (w === watch) w.key = ""; }
     }
 
     const syncWarn = h("div");
@@ -246,6 +277,7 @@ export function mount(root) {
         else [...from.options].forEach((o) => { const w = s.wallets.find((x) => x.address === o.value); if (w) o.textContent = optionText(w); });
         balHint.textContent = hintText();
         syncWarn.replaceChildren(...(s.info && s.info.syncing ? [notice("warn", "This node is still syncing. Balances may be out of date and payments may be rejected until it catches up.")] : []));
+        followPayment(s);
       },
     };
   }

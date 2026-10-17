@@ -1291,6 +1291,11 @@ void Server::setupRoutes() {
         const int status = estimatePayment(req.body, out);
         reply(res, status, out);
     });
+    s->Get(R"(/api/wallets/([1-9A-HJ-NP-Za-km-z]+)/history)", [this](const httplib::Request& req, httplib::Response& res) {
+        json out;
+        const int status = walletHistory(req.matches[1], req.get_param_value("limit"), req.get_param_value("depth"), out);
+        reply(res, status, out);
+    });
 
     // Mine Block
     s->Post("/api/mining/mine", [this](const httplib::Request& req, httplib::Response& res) {
@@ -1725,6 +1730,123 @@ int Server::estimatePayment(const std::string& body, json& out) {
     } catch (const std::exception& e) {
         out = errorJson(e.what());
         return 400;
+    }
+}
+
+// GET /api/wallets/<address>/history[?limit=50&depth=1000]: what one wallet sent and received, newest first:
+// its transactions in the mempool ("pending"), then those in the newest `depth` blocks ("confirmed"). The node
+// has no address index yet (docs/design/storage-concurrency.md Q2), so the blocks are scanned and the reply
+// says how far back ("scannedFrom", "complete"). A payment from the wallet is recognised by its unlock
+// script, which carries the wallet's public key (ONB-05, NEW-7).
+int Server::walletHistory(const std::string& address, const std::string& limitText, const std::string& depthText,
+                          json& out) {
+    if (!walletOk) {
+        out = errorJson("Wallet subsystem disabled: " + walletErr);
+        return 503;
+    }
+    auto number = [](const std::string& text, size_t fallback, size_t max, size_t& value) {
+        if (text.empty()) { value = fallback; return true; }
+        if (text.size() > 6 || text.find_first_not_of("0123456789") != std::string::npos) return false;
+        value = std::stoul(text);
+        return value >= 1 && value <= max;
+    };
+    size_t limit = 0, depth = 0;
+    if (!number(limitText, 50, 500, limit) || !number(depthText, 1000, 100000, depth)) {
+        out = errorJson("limit must be 1-500 and depth 1-100000");
+        return 400;
+    }
+    Wallet w;
+    json summary;
+    {
+        std::lock_guard<std::mutex> lock(walletMutex);
+        auto it = std::find_if(wallets.begin(), wallets.end(), [&](const Wallet& x) { return x.getAddress() == address; });
+        if (it == wallets.end()) {
+            out = errorJson("No wallet with that address on this node");
+            return 404;
+        }
+        w = *it;
+        summary = walletSummaryLocked(w);
+    }
+    const Script own = w.getP2PKHScript();
+    const PublicKey& pub = w.getPublicKey();
+    const uint8_t version = node.params().p2pkhAddressVersion;
+
+    // One activity entry for `tx`, or false when it neither pays nor spends this wallet.
+    auto describe = [&](const Transaction& tx, json& e) {
+        uint64_t toSelf = 0, toOthers = 0;
+        std::string firstOther;
+        for (const auto& o : tx.outputs) {
+            Hash160 h{};
+            if (o.scriptPubKey == own) toSelf += o.amount;
+            else if (isP2PKH(o.scriptPubKey, &h)) {
+                toOthers += o.amount;
+                if (firstOther.empty()) firstOther = base58CheckEncode(version, std::vector<uint8_t>(h.begin(), h.end()));
+            }
+        }
+        bool fromSelf = false;
+        if (!tx.isCoinbase()) {
+            for (const auto& in : tx.inputs) {
+                std::vector<uint8_t> sig;
+                CompressedPubKey key{};
+                if (parseP2PKHUnlock(in.scriptSig, sig, key) && std::equal(key.begin(), key.end(), pub.begin(), pub.end())) {
+                    fromSelf = true;
+                    break;
+                }
+            }
+        }
+        if (!fromSelf && toSelf == 0) return false;
+        e = json{{"txid", hash256ToHex(tx.txid())}};
+        if (tx.isCoinbase()) { e["kind"] = "mined"; e["amount"] = toSelf; }
+        else if (fromSelf && toOthers) { e["kind"] = "sent"; e["amount"] = toOthers; e["to"] = firstOther; e["change"] = toSelf; }
+        else if (fromSelf) { e["kind"] = "self"; e["amount"] = toSelf; }
+        else { e["kind"] = "received"; e["amount"] = toSelf; }
+        return true;
+    };
+
+    json activity = json::array();
+    try {
+        for (const Transaction& tx : node.mempoolTransactions(5000)) {
+            if (activity.size() >= limit) break;
+            json e;
+            if (!describe(tx, e)) continue;
+            e["status"] = "pending";
+            if (e["kind"] == "sent" || e["kind"] == "self") {
+                uint64_t fee = 0;
+                if (paymentFee(w, tx, fee)) e["fee"] = fee;
+            }
+            activity.push_back(e);
+        }
+        const uint32_t tip = node.height();
+        uint32_t lowest = tip;
+        size_t scanned = 0;
+        bool reachedGenesis = false;
+        for (uint32_t height = tip; scanned < depth && activity.size() < limit; --height) {
+            ++scanned;
+            lowest = height;
+            if (auto block = node.blockByHeight(height)) {
+                for (auto it = block->transactions.rbegin(); it != block->transactions.rend() && activity.size() < limit; ++it) {
+                    json e;
+                    if (!describe(*it, e)) continue;
+                    e["status"] = "confirmed";
+                    e["height"] = height;
+                    e["confirmations"] = tip - height + 1;
+                    e["time"] = block->header.timestamp;
+                    activity.push_back(e);
+                }
+            }
+            if (height == 0) { reachedGenesis = true; break; }
+        }
+        out = summary;
+        out["success"] = true;
+        out["tipHeight"] = tip;
+        out["scannedFrom"] = lowest;
+        out["scannedBlocks"] = scanned;
+        out["complete"] = reachedGenesis && activity.size() < limit;
+        out["activity"] = activity;
+        return 200;
+    } catch (const std::exception& e) {
+        out = errorJson(std::string("Could not read the chain: ") + e.what());
+        return 500;
     }
 }
 

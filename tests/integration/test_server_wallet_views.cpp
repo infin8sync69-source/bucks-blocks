@@ -153,6 +153,89 @@ TEST_F(WalletViewsTest, WalletListSplitsBalanceIntoSpendableImmatureAndLocked) {
     server.stop();
 }
 
+TEST_F(WalletViewsTest, HistoryListsSentReceivedAndPendingPaymentsOfOneWallet) {
+    Server server(*h.node, nullptr, cfg);
+    ASSERT_TRUE(server.start());
+    httplib::Client cli("127.0.0.1", server.port());
+    const std::string a = createWallet(cli);
+    const std::string b = createWallet(cli);
+    auto history = [&](const std::string& addr, const std::string& query = "", int expect = 200) {
+        auto r = cli.Get(("/api/wallets/" + addr + "/history" + query).c_str(), auth);
+        EXPECT_TRUE(r);
+        if (!r) return json();
+        EXPECT_EQ(r->status, expect) << r->body;
+        return json::parse(r->body, nullptr, false);
+    };
+
+    // Nothing yet: the whole (one-block) chain was scanned.
+    json hb = history(b);
+    EXPECT_TRUE(hb["activity"].empty());
+    EXPECT_TRUE(hb["complete"].get<bool>());
+    EXPECT_EQ(hb["address"], b);
+
+    mineTo(server, 0, 110);
+    const json sent = post(cli, "/api/transactions/send", {{"from", a}, {"to", b}, {"amount", 100000000}}, 200);
+    const std::string txid = sent["transaction"]["hash"];
+    const uint64_t fee = sent["transaction"]["fee"];
+
+    // Pending: listed first for both sides, with the fee for the payer.
+    json ha = history(a);
+    ASSERT_FALSE(ha["activity"].empty());
+    json first = ha["activity"][0];
+    EXPECT_EQ(first["txid"], txid);
+    EXPECT_EQ(first["status"], "pending");
+    EXPECT_EQ(first["kind"], "sent");
+    EXPECT_EQ(first["amount"], 100000000u);
+    EXPECT_EQ(first["to"], b);
+    EXPECT_EQ(first["fee"], fee);
+    EXPECT_EQ(ha["locked"], 50ULL * 100000000ULL) << "the summary rides along";
+    hb = history(b);
+    ASSERT_EQ(hb["activity"].size(), 1u);
+    EXPECT_EQ(hb["activity"][0]["kind"], "received");
+    EXPECT_EQ(hb["activity"][0]["status"], "pending");
+
+    // Confirmed: in block 111 with one confirmation; the rest of A's list is its mining rewards.
+    mineTo(server, 1, 1);
+    ha = history(a);
+    first = ha["activity"][0];
+    EXPECT_EQ(first["txid"], txid);
+    EXPECT_EQ(first["status"], "confirmed");
+    EXPECT_EQ(first["height"], 111u);
+    EXPECT_EQ(first["confirmations"], 1u);
+    EXPECT_GT(first["time"].get<uint64_t>(), 0u);
+    EXPECT_EQ(ha["activity"].size(), 50u) << "default limit";
+    EXPECT_EQ(ha["activity"][1]["kind"], "mined");
+    EXPECT_EQ(ha["activity"][1]["height"], 110u);
+    EXPECT_FALSE(ha["complete"].get<bool>());
+    hb = history(b);
+    ASSERT_EQ(hb["activity"].size(), 2u);
+    EXPECT_EQ(hb["activity"][0]["kind"], "received");
+    EXPECT_EQ(hb["activity"][1]["kind"], "mined");
+    EXPECT_TRUE(hb["complete"].get<bool>());
+    EXPECT_EQ(hb["scannedFrom"], 0u);
+    EXPECT_EQ(hb["scannedBlocks"], 112u);
+
+    // The scan is bounded and says so.
+    ha = history(a, "?depth=5&limit=500");
+    EXPECT_EQ(ha["scannedBlocks"], 5u);
+    EXPECT_EQ(ha["scannedFrom"], 107u);
+    EXPECT_FALSE(ha["complete"].get<bool>());
+    EXPECT_EQ(ha["activity"].size(), 5u) << "the payment and four rewards";
+
+    // A payment to itself.
+    post(cli, "/api/transactions/send", {{"from", a}, {"to", a}, {"amount", 100000000}}, 200);
+    EXPECT_EQ(history(a)["activity"][0]["kind"], "self");
+
+    history(a, "?limit=0", 400);
+    history(a, "?depth=abc", 400);
+    history(a, "?limit=501", 400);
+    history("tUnknownAddress1111111111111", "", 404);
+    auto r = cli.Get(("/api/wallets/" + a + "/history").c_str());
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 401);
+    server.stop();
+}
+
 TEST_F(WalletViewsTest, EstimateValidatesLikeSend) {
     Server server(*h.node, nullptr, cfg);
     ASSERT_TRUE(server.start());

@@ -75,6 +75,20 @@ export function amountProblem(units, { balance, spendable, fee = MIN_FEE_UNITS, 
   return "";
 }
 
+/**
+ * How one entry of GET /api/wallets/<address>/history is shown: label, sign of the amount, status text and
+ * pill tone. A mining reward is spendable once it has `maturity` confirmations.
+ */
+export function describeActivity(t, maturity = COINBASE_MATURITY) {
+  const label = { sent: "Sent", received: "Received", mined: "Mining reward", self: "To yourself" }[t.kind] || "Transaction";
+  const sign = t.kind === "sent" ? "-" : t.kind === "self" ? "" : "+";
+  if (t.status === "pending") return { label, sign, status: "Pending", tone: "warn" };
+  const conf = Number(t.confirmations) || 0;
+  const left = maturity - conf;
+  if (t.kind === "mined" && left > 0) return { label, sign, status: `Matures in ${left} block${left === 1 ? "" : "s"}`, tone: "warn" };
+  return { label, sign, status: `${fmtInt(conf)} confirmation${conf === 1 ? "" : "s"}`, tone: "ok" };
+}
+
 export function fmtInt(n) {
   return Number.isFinite(Number(n)) ? grouper(String(Math.trunc(Number(n)))) : "—";
 }
