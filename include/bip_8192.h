@@ -178,14 +178,25 @@ std::string mnemonicFromEntropy(const std::vector<uint8_t>& entropy,
 
 /**
  * phrase -> entropy. Words are split on ASCII whitespace and matched through
- * each list's normalizer. With lang == "" the language is auto-detected:
- * exactly one loaded list must accept every word AND pass the checksum.
- * On success entropyOut holds the raw entropy and *langOut the list used.
+ * each list's normalizer. With lang == "" the language is auto-detected: the
+ * loaded lists that accept every word AND pass the checksum must all give the
+ * same entropy (AMBIGUOUS_LANGUAGE otherwise); *langOut is the first of them
+ * in manifest order. On success entropyOut holds the raw entropy.
  */
 MnemonicError mnemonicToEntropy(const std::string& phrase,
                                 std::vector<uint8_t>& entropyOut,
                                 std::string* langOut = nullptr,
                                 const std::string& lang = "");
+
+/**
+ * Auto-detection as above, but only the lists tagged in `langs` are candidates
+ * (tags that are not loaded are ignored). Used to keep placeholder lists away
+ * from the main network.
+ */
+MnemonicError mnemonicToEntropyAmong(const std::string& phrase,
+                                     const std::vector<std::string>& langs,
+                                     std::vector<uint8_t>& entropyOut,
+                                     std::string* langOut = nullptr);
 
 MnemonicError validateMnemonic(const std::string& phrase,
                                std::string* langOut = nullptr,

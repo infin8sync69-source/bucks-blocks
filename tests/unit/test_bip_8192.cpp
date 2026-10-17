@@ -595,9 +595,9 @@ TEST_F(MultiLanguage, AutoDetectAndIdenticalSeeds) {
     EXPECT_EQ(validateMnemonic(kat128().phrase, nullptr, "ar-dev"), MnemonicError::OK);
 }
 
-TEST_F(MnemonicDir, AmbiguousLanguageIsAnError) {
-    // Two lists with the same words: a phrase valid in both must be refused
-    // unless the language is given explicitly.
+TEST_F(MnemonicDir, ListsThatAgreeOnTheEntropyAreOneMatch) {
+    // Two lists with the same words at the same indices: a phrase valid in both is the same wallet either
+    // way, so it is not ambiguous (gate WORDLIST-2). The first list in manifest order is reported.
     TempDir two;
     two.write("a.txt", syntheticLatinList());
     two.write("b.txt", syntheticLatinList());
@@ -608,16 +608,64 @@ TEST_F(MnemonicDir, AmbiguousLanguageIsAnError) {
     setWordlistDir(two.str());
     std::string phrase = latinPhrase(kat128().indices);
     std::vector<uint8_t> entropy;
-    EXPECT_EQ(mnemonicToEntropy(phrase, entropy), MnemonicError::AMBIGUOUS_LANGUAGE);
-    EXPECT_TRUE(entropy.empty());
-    EXPECT_EQ(mnemonicToEntropy(phrase, entropy, nullptr, "bb"), MnemonicError::OK);
+    std::string lang;
+    EXPECT_EQ(mnemonicToEntropy(phrase, entropy, &lang), MnemonicError::OK);
+    EXPECT_EQ(lang, "aa");
     EXPECT_EQ(hexStr(entropy), kat128().entropyHex);
-    // Upper case is only valid under the latin list, so it is unambiguous.
+    EXPECT_EQ(mnemonicToEntropy(phrase, entropy, &lang, "bb"), MnemonicError::OK);
+    EXPECT_EQ(lang, "bb");
+    EXPECT_EQ(hexStr(entropy), kat128().entropyHex);
+    // Restricting the candidates reports the list that was allowed.
+    EXPECT_EQ(mnemonicToEntropyAmong(phrase, {"bb"}, entropy, &lang), MnemonicError::OK);
+    EXPECT_EQ(lang, "bb");
+    EXPECT_EQ(mnemonicToEntropyAmong(phrase, {"zz"}, entropy, &lang), MnemonicError::INVALID_WORD);
+    EXPECT_TRUE(entropy.empty());
+    // Upper case is only valid under the latin list.
     std::string upper = phrase;
     std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
-    std::string lang;
     EXPECT_EQ(mnemonicToEntropy(upper, entropy, &lang), MnemonicError::OK);
     EXPECT_EQ(lang, "aa");
+}
+
+TEST_F(MnemonicDir, ListsThatDisagreeOnTheEntropyAreAmbiguous) {
+    // The same words in reverse order: a phrase whose checksum happens to hold under both lists means two
+    // different wallets, so auto-detection must refuse it.
+    std::string reversed;
+    for (int i = 2047; i >= 0; --i) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "w%04d\n", i);
+        reversed += buf;
+    }
+    TempDir two;
+    two.write("a.txt", syntheticLatinList());
+    two.write("b.txt", reversed);
+    two.write("manifest.json",
+        "{\"version\":2,\"lists\":["
+        "{\"lang\":\"aa\",\"file\":\"a.txt\",\"normalizer\":\"latin\",\"status\":\"dev\"},"
+        "{\"lang\":\"bb\",\"file\":\"b.txt\",\"normalizer\":\"latin\",\"status\":\"dev\"}]}");
+    setWordlistDir(two.str());
+
+    // About one entropy in 2^15 gives such a phrase; search deterministically.
+    std::string phrase;
+    std::vector<uint8_t> entropy;
+    for (uint32_t i = 0; i < 2000000 && phrase.empty(); ++i) {
+        const std::vector<uint8_t> seed{uint8_t(i), uint8_t(i >> 8), uint8_t(i >> 16), uint8_t(i >> 24)};
+        const Hash256 h = sha256(seed);
+        const std::vector<uint8_t> candidate(h.begin(), h.begin() + 16);
+        const std::string p = mnemonicFromEntropy(candidate, "aa");
+        if (validateMnemonic(p, nullptr, "bb") == MnemonicError::OK) phrase = p;
+    }
+    ASSERT_FALSE(phrase.empty());
+    EXPECT_EQ(mnemonicToEntropy(phrase, entropy), MnemonicError::AMBIGUOUS_LANGUAGE);
+    EXPECT_TRUE(entropy.empty());
+    std::vector<uint8_t> a, b;
+    EXPECT_EQ(mnemonicToEntropy(phrase, a, nullptr, "aa"), MnemonicError::OK);
+    EXPECT_EQ(mnemonicToEntropy(phrase, b, nullptr, "bb"), MnemonicError::OK);
+    EXPECT_NE(a, b);
+    std::string lang;
+    EXPECT_EQ(mnemonicToEntropyAmong(phrase, {"bb"}, entropy, &lang), MnemonicError::OK);
+    EXPECT_EQ(lang, "bb");
+    EXPECT_EQ(entropy, b);
 }
 
 TEST(MnemonicErrors, StringsNeverEmpty) {
