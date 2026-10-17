@@ -84,9 +84,10 @@ struct ServerConfig {
     // Behind a reverse proxy on this host: believe X-Forwarded-For (rate limit key) and
     // X-Forwarded-Proto, but only on connections from loopback, where the proxy runs.
     bool trustProxy = false;
-    // The browser reaches the node over TLS (a proxy in front): the session cookie is always
-    // Secure and only https origins pass the CSRF check. Also on per request when a trusted
-    // proxy sends X-Forwarded-Proto: https, or when the login comes from an https origin.
+    // --api-secure-cookie: the browser reaches the node over TLS (a proxy in front), so the
+    // session cookie is always Secure and only https origins pass the CSRF check. Without it the
+    // cookie is still Secure for a login from an https page or through a trusted proxy that
+    // sends X-Forwarded-Proto: https.
     bool secureCookie = false;
     // Sent on every response. The bundled UI in web/ is dependency-free ES
     // modules served by the node itself: no CDN, no inline script or style,
