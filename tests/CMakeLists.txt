@@ -29,6 +29,23 @@ add_custom_target(tests ALL
 add_test(NAME wordlists
     COMMAND bucks-check-wordlists ${CMAKE_SOURCE_DIR}/wordlists)
 
+# The genesis of every network in src/chainparams.cpp, recomputed with Python's hashlib and no code from src/
+# (tools/verify_genesis.py); main is checked as soon as it is set. The second run shows a wrong value is caught.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME genesis_independent
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/verify_genesis.py
+                --chainparams ${CMAKE_SOURCE_DIR}/src/chainparams.cpp)
+    add_test(NAME genesis_independent_catches_a_wrong_nonce
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/verify_genesis.py
+                --time 1767225600 --nonce 1 --bits 207fffff "--inscription=Bucks regtest genesis"
+                --hash 3491115920c29000d16f7d776bbab4a3399e5065abeeaf73fa23a273406bf520)
+    set_tests_properties(genesis_independent_catches_a_wrong_nonce PROPERTIES
+        PASS_REGULAR_EXPRESSION "FAIL: hash differs")
+else()
+    message(STATUS "Python 3 not found: tools/verify_genesis.py is not run by ctest")
+endif()
+
 # bucks-mine-genesis reproduces the regtest genesis, and refuses an inscription the node would refuse.
 add_test(NAME mine_genesis_regtest
     COMMAND bucks-mine-genesis --network=regtest --time=1767225600 "--inscription=Bucks regtest genesis" --threads=1)
