@@ -6,8 +6,6 @@
 // Prints the values to paste into src/chainparams.cpp. If the 32-bit nonce
 // space is exhausted the time is incremented by one and the search restarts.
 
-#include <openssl/sha.h>
-
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
@@ -19,36 +17,10 @@
 #include "chainparams.h"
 #include "crypto.h"
 #include "genesis.h"
+#include "miner.h"
 #include "pow.h"
 
 using namespace Bucks;
-
-// SHA256d of header (84 bytes) with a given nonce, using the low-level API so
-// threads do not contend on OpenSSL 3 provider lookups. The first 64 bytes are
-// hashed once (midstate); only the tail and the second hash run per nonce.
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-struct Midstate {
-    SHA256_CTX ctx;
-    uint8_t tail[20];
-    explicit Midstate(const std::vector<uint8_t>& header) {
-        SHA256_Init(&ctx);
-        SHA256_Update(&ctx, header.data(), 64);
-        std::memcpy(tail, header.data() + 64, 20);
-    }
-    Hash256 hash(uint32_t nonce) const {
-        uint8_t t[20];
-        std::memcpy(t, tail, 16);
-        for (int b = 0; b < 4; ++b) t[16 + b] = uint8_t(nonce >> (8 * b));
-        SHA256_CTX c = ctx;
-        SHA256_Update(&c, t, 20);
-        uint8_t first[32];
-        SHA256_Final(first, &c);
-        Hash256 out;
-        SHA256(first, 32, out.data());
-        return out;
-    }
-};
 
 static std::string hex(const Hash256& h) {
     return hexStr(std::vector<uint8_t>(h.begin(), h.end()));
@@ -101,10 +73,15 @@ int main(int argc, char* argv[]) {
         std::atomic<bool> found{false};
         std::atomic<uint32_t> winner{0};
 
+        U256 target;
+        if (!Pow::bitsValid(genesis.header.bits, params.powLimit, &target)) {
+            std::cerr << "powLimitBits do not decode to a valid target\n";
+            return 3;
+        }
         auto worker = [&](unsigned index) {
-            const Midstate mid(genesis.header.serialize());  // 84 bytes, nonce at 80
+            const HeaderHasher hasher(genesis.header);   // the node miner's midstate SHA256d
             for (uint64_t n = index; n <= 0xFFFFFFFFull && !found.load(); n += threads) {
-                if (Pow::checkProofOfWork(mid.hash(uint32_t(n)), genesis.header.bits, params.powLimit)) {
+                if (hasher.meetsTarget(uint32_t(n), target)) {
                     bool expected = false;
                     if (found.compare_exchange_strong(expected, true)) winner = uint32_t(n);
                     return;
