@@ -86,8 +86,17 @@ flood. Exit codes 2 (bad option), 3 (wrong network or genesis, also "mainnet gen
 
 ## Checked
 
-`systemd-analyze verify` (all units), `systemd-analyze security` (bucks.service: exposure 1.4, "OK"),
-`bash -n` and `shellcheck` on the scripts, `nginx -t` on the rendered site, and an end-to-end run of
-nginx in front of a regtest node with the console flags (401 without basic auth, login over HTTP/2 + TLS,
-foreign Origin refused, HTTP redirected to HTTPS, wrong Host refused by the node). ctest's `deploy_kit`
-test keeps these files consistent with the node's options and with the rules above.
+- `systemd-analyze verify` (all units) and `systemd-analyze security` (bucks.service: exposure 1.4, "OK");
+  the syscalls of a mining node all pass the unit's filter.
+- `bash -n` and `shellcheck` on the scripts; `nginx -t` on the rendered site.
+- `bootstrap-ubuntu.sh` run in a sandbox (overlays over /etc, /opt, /var and /usr/local; apt-get,
+  systemctl and ufw stubbed): a first install, a second run that changes nothing, and an upgrade to a
+  newer commit that keeps the previous release.
+- nginx in front of a regtest node started with `roles/console.env` as rendered, on ports 443/80 in a
+  private network namespace: 401 without basic auth, token login over HTTP/2 with an HttpOnly, Secure,
+  SameSite=Strict session cookie, foreign and `http://` origins refused, HTTP redirected to HTTPS,
+  another Host refused by the node.
+- `roles/miner.env`: the placeholder payout address stops the node with exit 2; a real address mines
+  without any wallet on the node.
+
+ctest's `deploy_kit` test keeps these files consistent with the node's options and with the rules above.
