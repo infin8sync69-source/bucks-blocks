@@ -68,7 +68,12 @@ TEST(Params, BadCheckpointsAndLimitMismatch) {
 }
 
 TEST(Params, GenesisConfiguration) {
-    EXPECT_FALSE(chainParams(NetworkId::MAIN).genesisConfigured());
+    // An all-zero genesis hash means "not configured" (mainnet until launch). A copy keeps the test the same
+    // before and after the launch commit fills in makeMain() (audit ML-5).
+    ChainParams unset = chainParams(NetworkId::MAIN);
+    unset.genesisHash = Hash256{};
+    EXPECT_FALSE(unset.genesisConfigured());
+    EXPECT_TRUE(chainParams(NetworkId::TEST).genesisConfigured());
     EXPECT_TRUE(chainParams(NetworkId::REGTEST).genesisConfigured());
     EXPECT_EQ(chainParams(NetworkId::REGTEST).checkpoints.at(0).hash,
               chainParams(NetworkId::REGTEST).genesisHash);

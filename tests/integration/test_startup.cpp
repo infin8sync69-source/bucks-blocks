@@ -197,8 +197,12 @@ TEST(Startup, GenesisMismatch) {
     EXPECT_EQ(r.exitCode, EXIT_PARAMS_MISMATCH);
     EXPECT_NE(r.error.find("genesis"), std::string::npos) << r.error;
 
-    // And a build without a configured genesis (mainnet today) cannot start at all.
-    ChainState mainState(chainParams(NetworkId::MAIN), *store, [] { return int64_t(2'000'000'000); });
+    // And a build without a configured genesis (mainnet before launch) cannot start at all. A copy with the
+    // genesis cleared keeps this tested after the launch commit (audit ML-5).
+    ChainParams unset = chainParams(NetworkId::MAIN);
+    unset.genesisHash = Hash256{};
+    unset.checkpoints = {Checkpoint{0, Hash256{}}};
+    ChainState mainState(unset, *store, [] { return int64_t(2'000'000'000); });
     r = mainState.load();
     EXPECT_FALSE(r.ok);
     EXPECT_EQ(r.exitCode, EXIT_PARAMS_MISMATCH);

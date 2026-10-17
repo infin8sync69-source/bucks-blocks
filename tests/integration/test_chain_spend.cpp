@@ -151,13 +151,18 @@ TEST(NodeFatal, FailedWriteHaltsTheNode) {
 }
 
 TEST(NodeOpen, UnconfiguredMainnetRefusesToStart) {
-    // Mainnet has no genesis yet: opening it fails with exit code 3 (ST-7).
+    // A network without a genesis (mainnet before launch): opening it fails with exit code 3 (ST-7). A copy with
+    // the genesis cleared keeps this tested after the launch commit (audit ML-5).
+    ChainParams unset = chainParams(NetworkId::MAIN);
+    unset.genesisHash = Hash256{};
+    unset.checkpoints = {Checkpoint{0, Hash256{}}};
     std::string root = (std::filesystem::temp_directory_path() / ("bucks-test-main-" + std::to_string(getpid()))).string();
     std::filesystem::remove_all(root);
     std::string err;
     int code = 0;
-    auto node = Node::open(root + "/main", chainParams(NetworkId::MAIN), {}, err, code);
+    auto node = Node::open(root + "/main", unset, {}, err, code);
     EXPECT_EQ(node, nullptr);
     EXPECT_EQ(code, EXIT_PARAMS_MISMATCH) << err;
+    EXPECT_NE(err.find("not configured"), std::string::npos) << err;
     std::filesystem::remove_all(root);
 }
