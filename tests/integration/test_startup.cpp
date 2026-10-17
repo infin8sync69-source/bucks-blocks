@@ -315,6 +315,25 @@ TEST(Startup, MissingBodyIsCaughtBySelfCheck) {
     EXPECT_NE(r.error.find("block_data"), std::string::npos) << r.error;
 }
 
+// Audit CON-3: a crash right after the block bytes were stored used to leave them without HAVE_DATA, and the next
+// start refused the database (exit 6) until a --reindex. The flag now commits with the bytes.
+TEST(Startup, CrashRightAfterStoringABlockRecovers) {
+    PersistentChain c;
+    ASSERT_TRUE(c.open().ok);
+    grow(c, 3);
+    const Block b = c.build(c.state().tip());
+    ASSERT_TRUE(c.state().ProcessNewBlockHeaders({b.header}).valid());
+    ASSERT_TRUE(c.store().putBlock(b.getHash(), b.serialize()));   // the process dies before its own status write
+    {
+        RawDb raw(c.dbPath());
+        EXPECT_EQ(raw.scalar("SELECT status & 6 FROM block_index WHERE height = 4"), 6);   // HAVE_DATA | DATA_CHECKED
+    }
+    c.close(false);
+    LoadResult r = c.open();
+    ASSERT_TRUE(r.ok) << r.error;
+    EXPECT_EQ(c.state().tip()->hash, b.getHash());   // and startup connects it
+}
+
 TEST(Startup, UncleanShutdownRunsHeavierChecks) {
     PersistentChain c;
     ASSERT_TRUE(c.open().ok);

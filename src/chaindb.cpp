@@ -600,11 +600,15 @@ bool SqliteChainStore::putBlock(const Hash256& hash, const std::vector<uint8_t>&
         Stmt ins(db_, "INSERT INTO block_data(hash, data) VALUES (?1, ?2)");
         ins.blob(1, hash);
         ins.blob(2, bytes);
-        Stmt upd(db_, "UPDATE block_index SET tx_count = ?2, size = ?3 WHERE hash = ?1");
+        // The status flag commits with the bytes. Written separately, a crash in between left a body without
+        // HAVE_DATA, and startup refused the database (exit 6) until a --reindex (audit CON-3).
+        Stmt upd(db_, "UPDATE block_index SET tx_count = ?2, size = ?3, status = status | ?4 WHERE hash = ?1");
         upd.num(2, txCount);
         upd.num(3, int64_t(bytes.size()));
+        upd.num(4, HAVE_DATA | DATA_CHECKED);
         upd.blob(1, hash);
-        ok = ins.ok() && upd.ok() && ins.step() == SQLITE_DONE && upd.step() == SQLITE_DONE;
+        ok = ins.ok() && upd.ok() && ins.step() == SQLITE_DONE && upd.step() == SQLITE_DONE &&
+             sqlite3_changes(db_) == 1;
         if (!ok) lastError_ = sqlite3_errmsg(db_);
     }
     if (!ok) {

@@ -14,6 +14,8 @@ class MemoryChainStore : public ChainStore {
 public:
     bool putBlock(const Hash256& hash, const std::vector<uint8_t>& bytes) override {
         blocks_[hash] = bytes;
+        auto it = rows_.find(hash);
+        if (it != rows_.end()) it->second.status |= HAVE_DATA | DATA_CHECKED;
         return true;
     }
     bool getBlock(const Hash256& hash, std::vector<uint8_t>& bytes) const override {
