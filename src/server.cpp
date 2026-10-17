@@ -1719,9 +1719,10 @@ void Server::handleEconomyStatus(std::function<void(const std::string&)> respons
         {"supply_fmt", (double)supply / 100000000.0},
         {"gold_reserve", gold},
         {"gold_reserve_unit", "g"},
-        // The reserve is whatever the vault signers recorded on-chain; the
-        // node cannot verify physical gold, so UIs must label it "reported".
-        {"reserve_source", "vault-signed OP_RETURN markers (reported, not audited by the node)"},
+        // The gold module is a later phase (Node::goldReserve() is a stub): name no reserve source the node does
+        // not read, and say plainly that nothing backs the coin (gate HYG-9).
+        {"gold_module_active", false},
+        {"reserve_source", "none: the gold module is not active, so no gold reserve backs BUCKS"},
         {"price_per_buck", price}
     };
     response(j.dump());

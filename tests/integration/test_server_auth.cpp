@@ -1390,6 +1390,23 @@ TEST_F(ServerAuthTest, AnonymousCallersSeeNoPathsOrPayoutAddress) {
     server.stop();
 }
 
+// HYG-9: while the gold module is inactive the economy status names no reserve source.
+TEST_F(ServerAuthTest, EconomyStatusClaimsNoGoldReserve) {
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+    auto r = cli.Get("/api/economy/status");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200);
+    json e = json::parse(r->body);
+    EXPECT_FALSE(e["gold_module_active"].get<bool>());
+    EXPECT_EQ(e["gold_reserve"], 0);
+    EXPECT_EQ(e["reserve_source"].get<std::string>().rfind("none", 0), 0u) << r->body;
+    EXPECT_EQ(r->body.find("vault"), std::string::npos) << r->body;
+    EXPECT_EQ(r->body.find("OP_RETURN"), std::string::npos) << r->body;
+    server.stop();
+}
+
 // ML-11 / OPS-14: the version names the network the node runs, not a fixed "testnet".
 TEST_F(ServerAuthTest, StatusReportsTheVersionOfThisNetwork) {
     Bucks::Server server(*chain, nullptr, cfg);
