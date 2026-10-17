@@ -281,9 +281,17 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Main loop
+    // Main loop. A fatal chain-state error (a failed write, stored data that cannot be read back) stops the
+    // node: a miner, API and peers working on a chain that can no longer move would be misled (audit CON-4).
+    int exitCode = 0;
     while (running.load()) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::string why;
+        if ((exitCode = node.fatalError(why)) != 0) {
+            Bucks::logErr() << "FATAL: " << why << "; stopping with exit code " << exitCode
+                            << " (the next start runs the crash checks)\n";
+            break;
+        }
     }
 
     Bucks::logOut() << "\nShutting down...\n";
@@ -294,6 +302,7 @@ int main(int argc, char* argv[]) {
     network.stop();
     node.shutdown();
 
+    if (exitCode) return exitCode;
     Bucks::logOut() << "✓ Node stopped cleanly\n";
     return 0;
 }

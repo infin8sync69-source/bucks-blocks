@@ -63,7 +63,16 @@ public:
     LoadResult load(const LoadOptions& options = {});
 
     // Orderly shutdown: marks the store clean so the next start runs the light checks.
+    // After a fatal error nothing is written, so the next start runs the crash checks.
     void shutdown();
+
+    // A fatal error (a failed write to the store, stored data that cannot be read
+    // back or connected) halts the chain state for good: every entry point then
+    // returns INTERNAL and the node must stop (storage spec section 4, "FATAL").
+    // fatalExitCode() is 0 while the chain state is healthy, otherwise the exit
+    // code (4 storage failure, 6 corrupt) and fatalError() says why.
+    int fatalExitCode() const { return fatalExitCode_; }
+    const std::string& fatalError() const { return fatalError_; }
 
     // Headers in a batch must link (the first entry's parent is known).
     ValidationState ProcessNewBlockHeaders(const std::vector<BlockHeader>& headers);
@@ -124,6 +133,7 @@ private:
     ValidationState acceptBlock(const Block& block, bool requested, BlockIndex*& entry);
 
     void markFailed(BlockIndex* e, const ValidationState& reason);
+    void fail(int exitCode, const std::string& why);   // records the first fatal error
     bool approvedReorgTo(const BlockIndex* best) const;
     void propagateHaveChainData(BlockIndex* e);
     BlockIndex* pickCandidate();
@@ -147,7 +157,8 @@ private:
     std::map<Hash256, ValidationState> rejects_;
     ForkAlert alert_;
     int64_t lastTipMove_ = 0;          // clock when the tip last changed after load; 0 = not since
-    bool storeFailed_ = false;         // a write to the store failed: the chain state is not trustworthy
+    int fatalExitCode_ = 0;            // set once by fail(): the chain state is not trustworthy
+    std::string fatalError_;
     DisconnectHook onDisconnect_;
     StepHook onStep_;
 };

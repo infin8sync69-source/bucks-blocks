@@ -89,8 +89,15 @@ void Node::shutdown() {
     std::lock_guard<std::mutex> lock(mu_);
     if (shutDown_ || !state_) return;
     shutDown_ = true;
+    if (state_->fatalExitCode()) return;   // write nothing after a fatal error
     saveMempoolFile();
     state_->shutdown();
+}
+
+int Node::fatalError(std::string& why) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    why = state_->fatalError();
+    return state_->fatalExitCode();
 }
 
 // ---------------------------------------------------------------- chain reads

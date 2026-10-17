@@ -107,7 +107,12 @@ public:
     void removeTxListener(size_t id);
 
     // Orderly shutdown: marks the store clean. Called by the destructor too.
+    // After a fatal chain-state error nothing more is written.
     void shutdown();
+
+    // 0 while the chain state is healthy; otherwise the exit code the process must
+    // stop with (4 storage failure, 6 corrupt) and `why`. The caller stops the node.
+    int fatalError(std::string& why) const;
 
 private:
     Node() = default;

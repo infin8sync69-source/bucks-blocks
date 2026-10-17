@@ -2,6 +2,7 @@
 
 #include "consensus.h"
 #include "node_harness.h"
+#include "sqlite3.h"
 #include "wallet.h"
 
 using namespace Bucks;
@@ -95,6 +96,58 @@ TEST(NodeSpend, WalletAddressesUseTheNetworkVersion) {
     EXPECT_NO_THROW(Wallet::addressToP2PKHScript(w.getAddress(), w.addressVersion()));
     // Sending to the wrong network's address fails before any coin is touched.
     EXPECT_THROW(w.createTransaction(other.getAddress(), 1000, *h.node), std::runtime_error);
+}
+
+// Audit CON-4: a write that fails (here a trigger stands in for a full or failing disk) halts the node: the
+// miner stops, nothing more is written, and fatalError() gives main() the exit code to stop with.
+TEST(NodeFatal, FailedWriteHaltsTheNode) {
+    NodeHarness h;
+    ASSERT_TRUE(h.node) << h.error;
+    Node& node = *h.node;
+    Wallet w;
+    w.generateKeys();
+    std::string err;
+    ASSERT_TRUE(mine(node, w, err)) << err;
+    ASSERT_TRUE(mine(node, w, err)) << err;
+    std::string why;
+    EXPECT_EQ(node.fatalError(why), 0);
+
+    const std::string db = h.root() + "/chain/chain.sqlite";
+    auto exec = [&](const char* sql) {
+        sqlite3* raw = nullptr;
+        bool ok = sqlite3_open(db.c_str(), &raw) == SQLITE_OK &&
+                  sqlite3_exec(raw, sql, nullptr, nullptr, nullptr) == SQLITE_OK;
+        sqlite3_close(raw);
+        return ok;
+    };
+    ASSERT_TRUE(exec("CREATE TRIGGER disk_full_u BEFORE UPDATE ON chain_state BEGIN SELECT RAISE(ABORT, 'disk full'); END;"
+                     "CREATE TRIGGER disk_full_i BEFORE INSERT ON chain_state BEGIN SELECT RAISE(ABORT, 'disk full'); END;"));
+
+    EXPECT_FALSE(mine(node, w, err));
+    EXPECT_EQ(node.fatalError(why), EXIT_STORAGE_FAILURE);
+    EXPECT_FALSE(why.empty());
+    EXPECT_FALSE(mine(node, w, err));
+    EXPECT_NE(err.find("halted"), std::string::npos) << err;
+    EXPECT_EQ(node.height(), 2u);
+
+    ASSERT_TRUE(exec("DROP TRIGGER disk_full_u; DROP TRIGGER disk_full_i;"));
+    node.shutdown();
+    h.node.reset();
+    {
+        sqlite3* raw = nullptr;
+        ASSERT_EQ(sqlite3_open(db.c_str(), &raw), SQLITE_OK);
+        sqlite3_stmt* s = nullptr;
+        sqlite3_prepare_v2(raw, "SELECT value FROM chain_state WHERE name = 'clean_shutdown'", -1, &s, nullptr);
+        ASSERT_EQ(sqlite3_step(s), SQLITE_ROW);
+        EXPECT_EQ(sqlite3_column_int64(s, 0), 0);   // the next start runs the crash checks
+        sqlite3_finalize(s);
+        sqlite3_close(raw);
+    }
+    int code = 0;
+    auto again = Node::open(h.root() + "/chain", chainParams(NetworkId::REGTEST), {}, err, code);
+    ASSERT_NE(again, nullptr) << err;
+    EXPECT_EQ(again->height(), 3u);   // the block whose commit failed was stored and connects now
+    EXPECT_EQ(again->fatalError(why), 0);
 }
 
 TEST(NodeOpen, UnconfiguredMainnetRefusesToStart) {

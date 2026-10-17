@@ -18,6 +18,10 @@ constexpr int64_t MAX_UNREQUESTED_AHEAD = 288;
 constexpr size_t MAX_REJECT_STATES = 1000;
 constexpr uint32_t MAX_STEP_CONNECTS = 32;
 
+std::string describeHash(const Hash256& h) {
+    return hexStr(std::vector<uint8_t>(h.begin(), h.end()));
+}
+
 ValidationState internalError(const std::string& code, const std::string& detail) {
     ValidationState st;
     st.result = ValidationResult::INTERNAL;
@@ -99,6 +103,7 @@ bool ChainState::hasMoreWork(const Hash256& a, const Hash256& b) const {
 }
 
 std::string ChainState::miningBlockedReason() const {
+    if (fatalExitCode_) return "the chain state has halted: " + fatalError_;
     if (params_.id == NetworkId::REGTEST) return {};
     const BlockIndex* tip = chain_.tip();
     if (!tip) return "no chain tip";
@@ -159,7 +164,7 @@ BlockIndex* ChainState::acceptHeader(const BlockHeader& header, ValidationState&
 
 ValidationState ChainState::ProcessNewBlockHeaders(const std::vector<BlockHeader>& headers) {
     ValidationState st;
-    if (storeFailed_) return internalError("store-write-failed", "an earlier write to the store failed");
+    if (fatalExitCode_) return internalError("chainstate-halted", fatalError_);
     if (headers.size() > MAX_HEADERS_PER_MESSAGE) {
         st.invalid(ValidationResult::MALFORMED, "too-many-headers");
         return st;
@@ -173,7 +178,7 @@ ValidationState ChainState::ProcessNewBlockHeaders(const std::vector<BlockHeader
     for (const BlockHeader& h : headers) {
         ValidationState hs;
         if (!acceptHeader(h, hs) && hs.result != ValidationResult::DUPLICATE) return hs;
-        if (storeFailed_) return internalError("store-write-failed", "cannot persist a header");
+        if (fatalExitCode_) return internalError("store-write-failed", fatalError_);
     }
     return st;  // VALID
 }
@@ -219,7 +224,10 @@ ValidationState ChainState::acceptBlock(const Block& block, bool requested, Bloc
         return dst;
     }
 
-    if (!store_.putBlock(e->hash, block.serialize())) return internalError("store-block-failed", "");
+    if (!store_.putBlock(e->hash, block.serialize())) {
+        fail(EXIT_STORAGE_FAILURE, "cannot store the data of block " + describeHash(e->hash));
+        return internalError("store-block-failed", fatalError_);
+    }
     e->status |= HAVE_DATA | DATA_CHECKED;
     e->txCount = uint32_t(block.transactions.size());
     e->sequenceId = ++sequence_;
@@ -229,14 +237,17 @@ ValidationState ChainState::acceptBlock(const Block& block, bool requested, Bloc
 }
 
 ValidationState ChainState::ProcessNewBlock(const Block& block, bool requested) {
-    if (storeFailed_) return internalError("store-write-failed", "an earlier write to the store failed");
+    if (fatalExitCode_) return internalError("chainstate-halted", fatalError_);
     BlockIndex* e = nullptr;
     ValidationState st = acceptBlock(block, requested, e);
-    if (storeFailed_) return internalError("store-write-failed", "cannot persist a block or its status");
+    if (fatalExitCode_) return internalError("store-write-failed", fatalError_);
     if (st.result != ValidationResult::VALID) return st;
 
     std::string err;
-    if (!activateBestChain(err)) return internalError("fatal-chainstate", err);
+    if (!activateBestChain(err)) {
+        fail(EXIT_DATABASE_CORRUPT, err);
+        return internalError("fatal-chainstate", fatalError_);
+    }
 
     if (e->failed()) {
         ValidationState reject;
@@ -260,6 +271,10 @@ void ChainState::raiseForkAlert(const ForkAlert& a, uint64_t depth) {
 }
 
 bool ChainState::approveReorg(const Hash256& tipHash, std::string& err) {
+    if (fatalExitCode_) {
+        err = "the chain state has halted: " + fatalError_;
+        return false;
+    }
     // Only a branch the node actually parked behind a fork alert can be approved (audit WAL-10).
     if (!skipped_.count(tipHash) && !(alert_.active && alert_.otherTip == tipHash)) {
         err = "no parked branch with that tip";
@@ -279,7 +294,11 @@ bool ChainState::approveReorg(const Hash256& tipHash, std::string& err) {
         else
             ++it;
     }
-    if (!activateBestChain(err)) return false;
+    if (!activateBestChain(err)) {
+        fail(EXIT_DATABASE_CORRUPT, err);
+        err = fatalError_;
+        return false;
+    }
     // Report what happened, not what was asked (audit CON-7).
     if (!chain_.contains(approved)) {
         if (approved->failed()) {
@@ -313,7 +332,17 @@ bool ChainState::rejectState(const Hash256& hash, ValidationState& out) const {
 // ---------------------------------------------------------------- status
 
 void ChainState::persistStatus(const BlockIndex* e) {
-    if (!store_.putIndexRow(e->hash, e->header, e->status)) storeFailed_ = true;
+    if (!store_.putIndexRow(e->hash, e->header, e->status))
+        fail(EXIT_STORAGE_FAILURE, "cannot write the index row of block " + describeHash(e->hash));
+}
+
+// Continuing after a failed write or unreadable stored data would serve a chain that can no longer move, or a
+// wrong one (audit CON-4). The first reason wins; the node polls fatalExitCode() and stops.
+void ChainState::fail(int exitCode, const std::string& why) {
+    if (fatalExitCode_) return;
+    fatalExitCode_ = exitCode;
+    fatalError_ = why;
+    logErr() << "FATAL: chain state halted: " << why << "\n";
 }
 
 void ChainState::markFailed(BlockIndex* e, const ValidationState& reason) {
@@ -490,6 +519,7 @@ bool ChainState::activateBestChain(std::string& err) {
         }
         if (!store_.commitStep(commit)) {
             err = "commit of an activation step failed";
+            fail(EXIT_STORAGE_FAILURE, err);   // a write, not corrupt data
             return false;
         }
 
@@ -539,6 +569,7 @@ LoadResult failure(int code, const std::string& msg) {
 } // namespace
 
 void ChainState::shutdown() {
+    if (fatalExitCode_) return;   // write nothing more; the next start runs the crash checks
     store_.setCleanShutdown(true);
 }
 
@@ -778,7 +809,7 @@ bool ChainState::reindexFromBlocks(std::string& err) {
             Bucks::logErr() << "reindex: dropping unusable block " << hexStr(std::vector<uint8_t>(hash.begin(), hash.end())) << "\n";
             store_.deleteBlockData(hash);
         }
-        if (storeFailed_) {
+        if (fatalExitCode_) {
             err = "a write to the store failed during the reindex";
             return false;
         }
@@ -846,7 +877,7 @@ LoadResult ChainState::load(const LoadOptions& opt) {
     }
 
     // Blocks that were stored but not connected before shutdown.
-    if (!activateBestChain(err)) return failure(EXIT_DATABASE_CORRUPT, err);
+    if (!activateBestChain(err)) return failure(fatalExitCode_ ? fatalExitCode_ : EXIT_DATABASE_CORRUPT, err);
 
     LoadResult ok;
     ok.ok = true;

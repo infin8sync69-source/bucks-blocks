@@ -157,6 +157,28 @@ TEST(Startup, ReorgAtomicAndResumedAfterRestart) {
     EXPECT_EQ(c.store().stats().count, 6u);                  // coinbases at heights 1,2 and 3..6 of the new branch
 }
 
+// Audit CON-4: an orderly shutdown after a fatal error writes nothing, so the next start runs the crash checks
+// (and connects the block whose commit failed).
+TEST(Startup, ShutdownAfterAFatalErrorIsNotClean) {
+    PersistentChain c;
+    ASSERT_TRUE(c.open().ok);
+    grow(c, 3);
+    c.store().failNextCommit = true;
+    const Block b = c.build(c.state().tip());
+    EXPECT_EQ(c.submit(b).result, ValidationResult::INTERNAL);
+    EXPECT_EQ(c.state().fatalExitCode(), EXIT_STORAGE_FAILURE);
+
+    c.close(true);   // the orderly path: ChainState::shutdown()
+    {
+        RawDb raw(c.dbPath());
+        EXPECT_EQ(raw.scalar("SELECT value FROM chain_state WHERE name = 'clean_shutdown'"), 0);
+    }
+    LoadResult r = c.open();
+    ASSERT_TRUE(r.ok) << r.error;
+    EXPECT_EQ(c.state().fatalExitCode(), 0);
+    EXPECT_EQ(c.state().tip()->hash, b.getHash());
+}
+
 // ST-1
 TEST(Startup, GenesisMismatch) {
     PersistentChain c;

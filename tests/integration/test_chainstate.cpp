@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <random>
 
+#include "chaindb.h"
 #include "chainstate.h"
 #include "consensus.h"
 #include "pow.h"
@@ -150,6 +151,34 @@ TEST(ChainState, ReorgAtomic) {
     EXPECT_EQ(t.state().tip()->hash, tipHash);
     EXPECT_EQ(t.store().mutableCoins().stats(), before);
     EXPECT_TRUE(t.state().coins().haveCoin(OutPoint{mainBlock(t, 5).transactions[0].txid(), 0}));
+}
+
+// Audit CON-4: a fatal error halts the chain state for good. Nothing more is taken (not even a block that would
+// now commit fine), mining stops on every network, and the reason and exit code are there for the node to stop.
+TEST(ChainState, FatalErrorHaltsTheChainState) {
+    TestChain t;
+    branch(t, t.state().tip(), 3, 0);
+    const Hash256 tipHash = t.state().tip()->hash;
+    EXPECT_EQ(t.state().fatalExitCode(), 0);
+
+    t.store().failNextCommit = true;
+    ValidationState st = t.submit(t.build(t.state().tip()));
+    EXPECT_EQ(st.result, ValidationResult::INTERNAL);
+    EXPECT_EQ(st.code, "fatal-chainstate");
+    EXPECT_EQ(t.state().fatalExitCode(), EXIT_STORAGE_FAILURE);
+    EXPECT_NE(t.state().fatalError().find("commit"), std::string::npos) << t.state().fatalError();
+
+    const Block other = t.build(t.state().tip(), {}, 1);
+    st = t.submit(other);
+    EXPECT_EQ(st.result, ValidationResult::INTERNAL);
+    EXPECT_EQ(st.code, "chainstate-halted");
+    EXPECT_EQ(t.state().ProcessNewBlockHeaders({other.header}).result, ValidationResult::INTERNAL);
+    EXPECT_EQ(t.state().find(other.getHash()), nullptr);
+    EXPECT_EQ(t.state().tip()->hash, tipHash);
+    EXPECT_NE(t.state().miningBlockedReason().find("halted"), std::string::npos);   // regtest too
+    std::string err;
+    EXPECT_FALSE(t.state().approveReorg(tipHash, err));
+    EXPECT_NE(err.find("halted"), std::string::npos) << err;
 }
 
 // CS-7: a branch block spends an output created only on the branch.
