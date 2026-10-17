@@ -325,8 +325,8 @@ public:
     void start(uint16_t listenPort);
     void stop();
 
-    // Outbound peer connection. Starts the dial and returns: false if the host does not resolve
-    // (looked up on the calling thread) or the peer table is full. The network thread completes it.
+    // Outbound peer connection. Queues the dial for the network thread and returns; false if the
+    // host does not resolve (looked up on the calling thread, so never call it from that thread).
     bool connectToPeer(const std::string& host, uint16_t port);
 
     // A peer to keep (--connect): redialled with exponential backoff (5 s up to 5 min) whenever
@@ -364,7 +364,7 @@ public:
 
     // Peer discovery: addresses a peer at `sourceIp` told us about go into the address table
     // (never dialled straight away); entries that do not parse or that this source may not
-    // give us are dropped. Returns how many were new.
+    // give us are dropped. Returns how many were new. Network thread (or before start()).
     size_t addAddresses(const std::vector<std::string>& addresses, const std::string& sourceIp,
                         std::vector<NetAddress>* fresh = nullptr);
     AddrMan& addresses() { return addrman_; }
@@ -375,6 +375,7 @@ public:
     // Random per process; a VERSION carrying it means we dialled ourselves.
     uint64_t localNonce() const { return localNonce_; }
     void markSelf(const std::string& hostPort);
+    // A second connection to the node `p` just identified is closed (true if that is `p`).
     bool dropDuplicate(Peer& p);
     // Keeps the address table in this file across restarts: read now, written every 15 minutes
     // and at stop(). Call before start().
