@@ -29,15 +29,13 @@
 namespace Bucks {
 
 // ------------------------------------------------------------
-// Local / LAN address whitelist helper
-// Returns true for addresses that must never be banned:
-//   127.0.0.1, ::1, 192.168.x.x, 10.x.x.x
+// Loopback (127/8, ::1): the only addresses never banned, because several local nodes share them.
+// LAN addresses are banned like any other: a seed in a cloud VPC or behind NAT must still be able
+// to shut out a misbehaving peer (audit NET-NEW-5, NET-13).
 // ------------------------------------------------------------
-static bool isLocalAddress(const std::string& ip) {
-    if (ip == "127.0.0.1" || ip == "::1") return true;
-    if (ip.find("192.168.") == 0)          return true;
-    if (ip.find("10.")      == 0)          return true;
-    return false;
+static bool isLoopbackAddress(const std::string& ip) {
+    if (ip == "::1") return true;
+    return ip.compare(0, 4, "127.") == 0;
 }
 
 // Extra bytes an encrypted payload may carry (IV, tag).
@@ -565,11 +563,8 @@ void Peer::misbehavior(int penalty) {
               << " (total: " << misbehaviorScore << ")" << std::endl;
 
     if (misbehaviorScore >= 100) {
-        if (isLocalAddress(ip)) {
-            Bucks::logOut() << "WARNING: Peer " << ip << " exceeded misbehavior threshold but is a local/LAN address — skipping ban and disconnect." << std::endl;
-            return;
-        }
-        Bucks::logOut() << "DEBUG: Peer " << ip << " exceeded misbehavior threshold. Banning IP." << std::endl;
+        // Always disconnected; banned unless it is a loopback peer (banIP refuses those).
+        Bucks::logOut() << "DEBUG: Peer " << ip << " exceeded misbehavior threshold. Disconnecting." << std::endl;
         network.banIP(ip);
         disconnect();
     }
@@ -1576,8 +1571,7 @@ void Network::acceptNewConnection() {
     inet_ntop(AF_INET, &addr.sin_addr, ip, INET_ADDRSTRLEN);
     
     {
-        std::lock_guard<std::mutex> lock(securityMutex);
-        if (bannedIPs.count(ip) > 0) {
+        if (isIPBanned(ip)) {
             Bucks::logOut() << "DEBUG: Dropping connection from banned IP " << ip << std::endl;
 #ifdef _WIN32
             closesocket(s);
@@ -1589,10 +1583,13 @@ void Network::acceptNewConnection() {
 
         // The throttle slows one remote host's reconnect loop. Loopback connections come from this
         // machine (several local nodes discovering each other) and are not throttled.
+        std::lock_guard<std::mutex> lock(securityMutex);
         auto now = std::chrono::steady_clock::now();
-        uint32_t ipNumber = 0;
-        const bool loopback = NetAddress::parseIP(ip, ipNumber) && NetAddress{ipNumber, 1}.isLoopback();
-        if (!loopback && lastConnectionTimes.count(ip) > 0) {
+        if (lastConnectionTimes.size() > 4096) {   // forget addresses that are no longer throttled
+            for (auto it = lastConnectionTimes.begin(); it != lastConnectionTimes.end();)
+                it = now - it->second >= std::chrono::seconds(5) ? lastConnectionTimes.erase(it) : std::next(it);
+        }
+        if (!isLoopbackAddress(ip) && lastConnectionTimes.count(ip) > 0) {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastConnectionTimes[ip]).count();
             if (elapsed < 5) {
                 Bucks::logOut() << "DEBUG: Throttling connection attempt from " << ip << " (too fast)" << std::endl;
@@ -1681,22 +1678,32 @@ void Network::pruneZombiePeers() {
 }
 
 void Network::banIP(const std::string& ip) {
-    // Bug 1 fix: localhost and LAN peers must never be banned.
-    // All three pilot nodes share 127.0.0.1; banning that address
-    // would cut off the entire local network.
-    if (isLocalAddress(ip)) {
-        Bucks::logOut() << "WARNING: Refusing to ban local/LAN address " << ip
-                  << " — local peers are whitelisted from the ban list." << std::endl;
+    // Local nodes share 127.0.0.1; banning it would cut off the whole local network.
+    if (isLoopbackAddress(ip)) {
+        Bucks::logOut() << "WARNING: Not banning loopback address " << ip << std::endl;
         return;
     }
+    const auto now = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock(securityMutex);
-    bannedIPs.insert(ip);
-    Bucks::logOut() << "DEBUG: IP " << ip << " added to ban list." << std::endl;
+    // Bans end (before: never, until a restart), and the list is bounded: when full, the ban
+    // closest to its end makes room.
+    if (bannedUntil_.size() >= kMaxBans && !bannedUntil_.count(ip)) {
+        auto soonest = bannedUntil_.begin();
+        for (auto it = bannedUntil_.begin(); it != bannedUntil_.end(); ++it)
+            if (it->second < soonest->second) soonest = it;
+        bannedUntil_.erase(soonest);
+    }
+    bannedUntil_[ip] = now + options_.banDuration;
+    Bucks::logOut() << "DEBUG: IP " << ip << " banned for " << options_.banDuration.count() << " s." << std::endl;
 }
 
 bool Network::isIPBanned(const std::string& ip) const {
     std::lock_guard<std::mutex> lock(securityMutex);
-    return bannedIPs.count(ip) > 0;
+    auto it = bannedUntil_.find(ip);
+    if (it == bannedUntil_.end()) return false;
+    if (std::chrono::steady_clock::now() < it->second) return true;
+    bannedUntil_.erase(it);
+    return false;
 }
 
 void Network::handleSocketIO() {

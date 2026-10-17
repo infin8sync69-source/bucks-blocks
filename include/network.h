@@ -54,6 +54,7 @@ struct NetworkOptions {
     // Headers a peer may make us store that do not lead to more work than our tip (forks that
     // go nowhere). Every header on main costs 2^32 hashes but is kept for ever (audit NET-NEW-3).
     size_t lowWorkHeaderBudget = 4000;
+    std::chrono::seconds banDuration{86400};       // a misbehaving address is refused this long
 };
 
 std::vector<uint8_t> serializeInvs(const std::vector<struct Inventory>& invs);
@@ -351,7 +352,8 @@ public:
     // message handlers (which run under that lock) and by the node's listeners.
     void queueBroadcast(const NetMessage& msg, int exceptFd = -1);
 
-    // Security & Banning
+    // Security & Banning. Bans end after NetworkOptions::banDuration; loopback is never banned
+    // (peers on it are still disconnected at the misbehaviour threshold).
     void banIP(const std::string& ip);
     bool isIPBanned(const std::string& ip) const;
 
@@ -394,7 +396,8 @@ private:
     int listenSocket;
 
     // Security
-    std::set<std::string> bannedIPs;
+    static constexpr size_t kMaxBans = 10000;
+    mutable std::map<std::string, std::chrono::steady_clock::time_point> bannedUntil_;
     std::map<std::string, std::chrono::steady_clock::time_point> lastConnectionTimes;
     mutable std::mutex securityMutex;
 

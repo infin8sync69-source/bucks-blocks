@@ -647,6 +647,38 @@ TEST(P2pAudit, HeadersThatLeadNowhereAreCapped) {
     netA.stop();
 }
 
+// NET-NEW-5, NET-13: 10/8 and 192.168/16 were never banned (a seed in a cloud VPC or behind NAT had no
+// misbehaviour enforcement) and bans lasted until a restart. Only loopback is spared now, and bans end.
+TEST(P2pAudit, BansEndAndSpareOnlyLoopback) {
+    NodeHarness h;
+    ASSERT_TRUE(h.node) << h.error;
+    NetworkOptions o;
+    o.banDuration = std::chrono::seconds(1);
+    Network net(*h.node, o);
+    for (const char* ip : {"10.1.2.3", "192.168.1.1", "172.16.0.1", "8.8.8.8"}) {
+        net.banIP(ip);
+        EXPECT_TRUE(net.isIPBanned(ip)) << ip;
+    }
+    for (const char* ip : {"127.0.0.1", "127.0.0.2"}) {
+        net.banIP(ip);
+        EXPECT_FALSE(net.isIPBanned(ip)) << ip;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    for (const char* ip : {"10.1.2.3", "192.168.1.1", "172.16.0.1", "8.8.8.8"}) EXPECT_FALSE(net.isIPBanned(ip)) << ip;
+}
+
+// A loopback peer past the misbehaviour threshold used to be kept ("skipping ban and disconnect"). It is
+// disconnected now, though not banned, so it can connect again.
+TEST(P2pAudit, MisbehavingLoopbackPeerIsDisconnected) {
+    TwoNodes t;
+    ASSERT_TRUE(t.start());
+    ASSERT_TRUE(t.connectBToA());
+    for (int i = 0; i < 5; ++i) sendToAll(*t.netB, NetMessage(MessageType::HEADERS, {0xFD}));   // 20 each
+    EXPECT_TRUE(waitFor([&] { return t.netA->peerCount() == 0; })) << "A kept a peer past the threshold";
+    ASSERT_TRUE(waitFor([&] { return t.netB->peerCount() == 0; }));
+    EXPECT_TRUE(t.connectBToA()) << "loopback must not be banned";
+}
+
 // NET-NEW-4: a peer cannot fill the table; what is beyond its allowance is dropped unread.
 TEST(P2pAudit, AddressFloodIsRateLimited) {
     TwoNodes t;
