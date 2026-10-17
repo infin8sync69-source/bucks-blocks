@@ -9,6 +9,8 @@ FetchContent_Declare(
 )
 # Force shared CRT to match the main application (usually helpful on Windows)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+# googletest is only for the test binaries; `cmake --install` must not put it in the prefix.
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(googletest)
 include(GoogleTest)
@@ -36,3 +38,11 @@ add_test(NAME build_hygiene
 )
 
 # Register a meta-test invocation if needed, or rely on individual add_test calls
+
+# `cmake --install` gives the layout the node looks for (bin/, share/bucks/web, share/bucks/wordlists).
+add_test(NAME install_layout
+    COMMAND ${CMAKE_COMMAND} "-DBUCKS_ROOT=${CMAKE_SOURCE_DIR}" "-DBUCKS_BUILD=${CMAKE_BINARY_DIR}"
+            "-DPREFIX=${CMAKE_CURRENT_BINARY_DIR}/install-layout-test" "-DCONFIG=$<CONFIG>"
+            "-DCHECK_WORDLISTS=$<TARGET_FILE:bucks-check-wordlists>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/install_layout.cmake"
+)

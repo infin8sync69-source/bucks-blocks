@@ -15,6 +15,9 @@ if(NOT BUCKS_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE)
 endif()
 
 option(BUCKS_WERROR "Treat warnings in Bucks C++ code as errors" OFF)
+# OFF builds only the node and its tools: no googletest download, nothing for ctest. CI and
+# developers keep the default.
+option(BUCKS_BUILD_TESTS "Build the test suites (fetches googletest v1.14.0)" ON)
 set(BUCKS_SANITIZE "" CACHE STRING
     "Sanitizers for every target, e.g. address,undefined (empty = none)")
 
@@ -46,6 +49,9 @@ endif()
 # their corpus. Apple's clang has no libFuzzer; Homebrew LLVM and Linux clang do.
 option(BUCKS_FUZZ "Build the fuzz targets in tests/fuzz" OFF)
 if(BUCKS_FUZZ)
+    if(NOT BUCKS_BUILD_TESTS)
+        message(FATAL_ERROR "BUCKS_FUZZ needs BUCKS_BUILD_TESTS (the fuzz targets live in tests/)")
+    endif()
     include(CheckCXXSourceCompiles)
     set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer")
     check_cxx_source_compiles(
@@ -160,6 +166,31 @@ target_link_libraries(bucks-mine-genesis bucks_core Threads::Threads)
 add_executable(bucks-check-wordlists tools/check_wordlists.cpp)
 target_link_libraries(bucks-check-wordlists bucks_core)
 
+# Install layout: <prefix>/bin/{bucks,bucks-mine-genesis} and <prefix>/share/bucks/{web,wordlists}.
+# When the source tree it was built from is gone, bucks looks for its UI and word lists at
+# <exe dir>/../share/bucks/, so these paths are fixed (not GNUInstallDirs) to always match it.
+install(TARGETS bucks bucks-mine-genesis RUNTIME DESTINATION bin)
+install(DIRECTORY web/ DESTINATION share/bucks/web
+    PATTERN test EXCLUDE
+    PATTERN node_modules EXCLUDE
+    PATTERN package.json EXCLUDE)
+# Only the lists the manifest names (not wordlists/review/ or retired lists), so an installed
+# node reads exactly the bytes the source tree pins.
+file(READ "${CMAKE_SOURCE_DIR}/wordlists/manifest.json" bucks_manifest)
+string(REGEX MATCHALL "\"file\" *: *\"[^\"]+\"" bucks_manifest_files "${bucks_manifest}")
+set(bucks_wordlist_files "${CMAKE_SOURCE_DIR}/wordlists/manifest.json")
+foreach(entry IN LISTS bucks_manifest_files)
+    string(REGEX REPLACE ".*\"([^\"]+)\"$" "\\1" list_file "${entry}")
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/wordlists/${list_file}")
+        message(FATAL_ERROR "wordlists/manifest.json names ${list_file}, which does not exist")
+    endif()
+    list(APPEND bucks_wordlist_files "${CMAKE_SOURCE_DIR}/wordlists/${list_file}")
+endforeach()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS wordlists/manifest.json)
+install(FILES ${bucks_wordlist_files} DESTINATION share/bucks/wordlists)
+
 # Testing
-enable_testing()
-add_subdirectory(tests)
+if(BUCKS_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
