@@ -9,6 +9,7 @@
 #include "wallet.h"
 #include "crypto.h"
 #include "bip_8192.h"
+#include "version.h"
 #include <openssl/rand.h>
 #include <openssl/crypto.h>
 #include <ctime>
@@ -94,8 +95,6 @@ static std::string defaultWalletLanguage(bool mainNet) {
     if (!firstOther.empty()) return firstOther;
     return mainNet ? "" : defaultMnemonicLanguage();
 }
-
-constexpr const char* BUCKS_NODE_VERSION = "0.2.0-testnet";
 
 namespace fs = std::filesystem;
 
@@ -914,7 +913,7 @@ void Server::setupRoutes() {
                             std::chrono::steady_clock::now() - startedAt_).count();
         json j{
             {"status", "ok"},
-            {"version", BUCKS_NODE_VERSION},
+            {"version", nodeVersionString(node.params().name)},
             {"network", node.params().name},
             {"uptimeSeconds", up},
             {"peerCount", network_ ? network_->peerCount() : 0},

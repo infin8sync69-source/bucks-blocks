@@ -10,6 +10,7 @@
 #include "wallet.h"
 #include "crypto.h"
 #include "bip_8192.h"
+#include "version.h"
 #include "httplib.h"
 #include <nlohmann/json.hpp>
 #include <filesystem>
@@ -1083,4 +1084,18 @@ TEST_F(ServerAuthTest, RestoreWithPassphraseOfAnUnusedWalletAsksFirst) {
     ASSERT_EQ(r->status, 200) << r->body;
     EXPECT_EQ(json::parse(r->body)["wallet"]["address"], otherAddress);
     second.stop();
+}
+
+// ML-11 / OPS-14: the version names the network the node runs, not a fixed "testnet".
+TEST_F(ServerAuthTest, StatusReportsTheVersionOfThisNetwork) {
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+    auto r = cli.Get("/api/status");
+    ASSERT_TRUE(r);
+    json status = json::parse(r->body);
+    EXPECT_EQ(status["network"], "regtest");
+    EXPECT_EQ(status["version"], std::string(Bucks::BUCKS_VERSION) + "-regtest");
+    EXPECT_EQ(Bucks::nodeVersionString("main"), std::string(Bucks::BUCKS_VERSION) + "-main");
+    server.stop();
 }

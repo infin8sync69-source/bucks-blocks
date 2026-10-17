@@ -16,6 +16,7 @@
 #include "genesis.h"
 #include "network.h"
 #include "server.h"
+#include "version.h"
 
 using namespace Bucks;
 
@@ -56,7 +57,7 @@ static void printUsage() {
 }
 
 int main(int argc, char* argv[]) {
-    Bucks::logOut() << "=== Bucks Node (PATH-B) ===\n";
+    Bucks::logOut() << "=== Bucks Node " << BUCKS_VERSION << " ===\n";
 
     // Handle shutdown signals
 #ifdef SIGPIPE
