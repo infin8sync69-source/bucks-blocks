@@ -37,8 +37,21 @@ constexpr uint32_t MAX_MESSAGE_PAYLOAD = 4 * 1024 * 1024; // 4MB
 constexpr uint32_t MAX_PEER_BUFFER = MAX_MESSAGE_PAYLOAD + 1024; // 4MB + safety overhead
 constexpr size_t MAX_PEERS = 125;
 constexpr size_t MAX_PEERS_PER_IP = 8;
-// Outbound connections the node opens on its own (seeds and discovered addresses).
+// Outbound connections the node opens on its own (seeds and discovered addresses), and slots for
+// --connect peers. Inbound peers can never take these (audit NET-6, NET-12).
 constexpr size_t MAX_OUTBOUND_PEERS = 8;
+constexpr size_t MAX_MANUAL_PEERS = 8;
+constexpr size_t MAX_INBOUND_PEERS = MAX_PEERS - MAX_OUTBOUND_PEERS - MAX_MANUAL_PEERS;
+// Automatic outbound peers in one public /16; addresses in a /16 we have no outbound peer in yet
+// are dialled first, so one network cannot hold all our outbound slots.
+constexpr size_t MAX_OUTBOUND_PER_GROUP = 2;
+
+// Tunables; tests shorten the timers.
+struct NetworkOptions {
+    size_t maxInbound = MAX_INBOUND_PEERS;
+    std::chrono::seconds pingInterval{120};        // to every active peer
+    std::chrono::seconds inactivityTimeout{1200};  // nothing received for this long: disconnect
+};
 
 std::vector<uint8_t> serializeInvs(const std::vector<struct Inventory>& invs);
 
@@ -238,6 +251,9 @@ public:
     void misbehavior(int penalty);
     bool isBanned() const;
     std::chrono::steady_clock::time_point getConnectionTime() const { return connectionTime; }
+    // When the last complete message arrived, and when we last pinged (idle detection).
+    std::chrono::steady_clock::time_point lastReceived;
+    std::chrono::steady_clock::time_point lastPingSent;
 
     // Sync state
     std::chrono::steady_clock::time_point lastBlockRequestTime;
@@ -287,7 +303,7 @@ private:
 // ------------------------------------------------------------
 class Network {
 public:
-    explicit Network(Node& node);
+    explicit Network(Node& node, const NetworkOptions& options = {});
     ~Network();
 
     void start(uint16_t listenPort);
@@ -341,6 +357,9 @@ public:
     // Random per process; a VERSION carrying it means we dialled ourselves.
     uint64_t localNonce() const { return localNonce_; }
     void markSelf(const std::string& hostPort);
+    // Whether one more automatic outbound peer at `a` would exceed MAX_OUTBOUND_PER_GROUP, given
+    // how many outbound peers each /16 has. Loopback and LAN addresses are not limited.
+    static bool outboundGroupFull(const NetAddress& a, const std::map<uint32_t, size_t>& outboundGroups);
 
     // Peer discovery access (for Peer class)
     std::mutex peersMutex;
@@ -349,6 +368,7 @@ public:
 
 private:
     Node& node;
+    NetworkOptions options_;
     std::array<uint8_t, 4> magic_;
     std::array<std::atomic<uint64_t>, 16> rejectedBlocks_{};
     size_t tipListenerId_ = 0;
@@ -369,7 +389,9 @@ private:
     uint64_t localNonce_ = 0;
     std::mt19937_64 relayRng_;              // network thread only
     std::set<NetAddress> selfAddresses_;    // network thread only
-    void dialFromAddressTable(size_t outbound, const std::set<NetAddress>& linked);
+    void dialFromAddressTable(size_t outbound, const std::set<NetAddress>& linked,
+                              const std::map<uint32_t, size_t>& outboundGroups);
+    void sendPings();
 
     // --connect peers (MANUAL) and seeds (SEED), redialled by maintainConnections. Guarded by
     // peersMutex; entries are only ever appended.

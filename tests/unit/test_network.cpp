@@ -245,3 +245,23 @@ TEST(AddrManTest, SampleLeavesOutUnreachable) {
     EXPECT_EQ(s[0], a);
     EXPECT_TRUE(m.sample(100, kNow + 31 * 86400).empty()) << "not heard of for a month";
 }
+
+// NET-6: at most two automatic outbound peers in one public /16; local addresses are not limited.
+TEST(NetworkPolicyTest, OutboundGroupLimit) {
+    std::map<uint32_t, size_t> groups;
+    EXPECT_FALSE(Network::outboundGroupFull(na(9, 9, 1, 1), groups));
+    groups[na(9, 9, 0, 0).group()] = 1;
+    EXPECT_FALSE(Network::outboundGroupFull(na(9, 9, 1, 1), groups));
+    groups[na(9, 9, 0, 0).group()] = MAX_OUTBOUND_PER_GROUP;
+    EXPECT_TRUE(Network::outboundGroupFull(na(9, 9, 200, 7), groups));
+    EXPECT_FALSE(Network::outboundGroupFull(na(9, 10, 1, 1), groups));
+    groups[na(127, 0, 0, 0).group()] = 50;
+    groups[na(192, 168, 0, 0).group()] = 50;
+    EXPECT_FALSE(Network::outboundGroupFull(na(127, 0, 0, 1), groups));
+    EXPECT_FALSE(Network::outboundGroupFull(na(192, 168, 1, 1), groups));
+}
+
+TEST(NetworkPolicyTest, SlotsAddUp) {
+    EXPECT_EQ(MAX_INBOUND_PEERS + MAX_OUTBOUND_PEERS + MAX_MANUAL_PEERS, MAX_PEERS);
+    EXPECT_LT(MAX_INBOUND_PEERS, MAX_PEERS);
+}

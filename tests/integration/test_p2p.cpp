@@ -489,6 +489,57 @@ TEST(Network, NodesFindEachOtherThroughTheSeed) {
     netS->stop();
 }
 
+// NET-6, NET-12: inbound and outbound shared one cap, so enough inbound connections left no room for the
+// node's own dials (seeds, --connect). Inbound peers now have their own limit.
+TEST(P2pAudit, InboundPeersCannotTakeOutboundSlots) {
+    NodeHarness a, c;
+    ASSERT_TRUE(a.node && c.node);
+    NetworkOptions small;
+    small.maxInbound = 2;
+    Network netA(*a.node, small), netC(*c.node);
+    const uint16_t portA = freePort(), portC = freePort();
+    netA.start(portA);
+    netC.start(portC);
+    std::vector<int> crowd;
+    for (int i = 0; i < 4; ++i) crowd.push_back(rawConnect(portA));
+    // Two are kept (their key-exchange frame arrives), the others are closed.
+    size_t served = 0;
+    for (int s : crowd) served += readSome(s, 24, 1000) >= 24 ? 1 : 0;
+    EXPECT_EQ(served, 2u);
+
+    ASSERT_TRUE(netA.connectToPeer("127.0.0.1", portC));
+    EXPECT_TRUE(waitFor([&] { return netC.peerCount() == 1; })) << "the outbound dial found no slot";
+    for (int s : crowd) close(s);
+    netC.stop();
+    netA.stop();
+}
+
+// NET-12: an active peer that stops talking held its slot for ever. Peers are pinged, and one that sends
+// nothing for the inactivity timeout is dropped; a healthy idle peer answers the pings and stays.
+TEST(P2pAudit, SilentPeerIsDropped) {
+    NodeHarness a, b;
+    ASSERT_TRUE(a.node && b.node);
+    NetworkOptions fast;
+    fast.pingInterval = std::chrono::seconds(1);
+    fast.inactivityTimeout = std::chrono::seconds(3);
+    Network netA(*a.node, fast), netB(*b.node, fast);
+    const uint16_t portA = freePort();
+    netA.start(portA);
+    netB.start(freePort());
+    ASSERT_TRUE(netB.connectToPeer("127.0.0.1", portA));
+    ASSERT_TRUE(waitFor([&] { return netA.peerCount() == 1 && netB.peerCount() == 1; }));
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+    EXPECT_EQ(netA.peerCount(), 1u) << "an idle but healthy peer was dropped";
+
+    {
+        // B's network thread stops: it reads nothing and answers nothing.
+        std::lock_guard<std::mutex> freeze(netB.peersMutex);
+        EXPECT_TRUE(waitFor([&] { return netA.peerCount() == 0; }, 8)) << "A kept a silent peer";
+    }
+    netB.stop();
+    netA.stop();
+}
+
 // NET-NEW-4: a peer cannot fill the table; what is beyond its allowance is dropped unread.
 TEST(P2pAudit, AddressFloodIsRateLimited) {
     TwoNodes t;

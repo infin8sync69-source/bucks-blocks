@@ -500,6 +500,7 @@ Peer::Peer(Network& net, int socket, const std::string& ip, uint16_t port, ConnK
 #endif
     connectionTime = std::chrono::steady_clock::now();
     addrTokensAt = connectionTime;
+    lastReceived = lastPingSent = connectionTime;
     if (outbound()) listenPort_ = port;
     lastBlockRequestTime = connectionTime;
     lastHeadersRequestTime = connectionTime - std::chrono::seconds(60);
@@ -635,6 +636,7 @@ void Peer::processBuffer() {
 
         try {
             NetMessage msg = NetMessage::deserialize(raw, magic);
+            lastReceived = std::chrono::steady_clock::now();
             handleMessage(msg);
         } catch (const NetIncomplete&) {
             return;   // cannot happen: the frame is complete
@@ -977,8 +979,8 @@ std::optional<NetAddress> Peer::listenAddress() const {
 // Network implementation
 // ------------------------------------------------------------
 
-Network::Network(Node& n)
-    : listenPort(0), node(n), magic_(n.params().netMagic), running(false), listenSocket(-1) {
+Network::Network(Node& n, const NetworkOptions& options)
+    : listenPort(0), node(n), options_(options), magic_(n.params().netMagic), running(false), listenSocket(-1) {
 #ifdef _WIN32
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -1117,10 +1119,6 @@ constexpr auto kDnsRetry = std::chrono::seconds(30);
 bool Network::connectToPeer(const std::string& host, uint16_t port) {
     std::string ip;
     if (!resolveIPv4(host, ip)) return false;   // on the caller's thread, never the network thread
-    {
-        std::lock_guard<std::mutex> lock(peersMutex);
-        if (peers.size() >= MAX_PEERS) return false;   // outbound dials respect the same cap (audit NET-6)
-    }
     std::lock_guard<std::mutex> lock(queueMutex);
     dialQueue_.push_back({ip, port, ConnKind::MANUAL});
     return true;
@@ -1135,8 +1133,12 @@ bool Network::startConnect(const std::string& ip, uint16_t port, ConnKind kind) 
     addr.sin_port = htons(port);
     if (port == 0 || inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) != 1) return false;
     {
+        // Outbound connections have their own slots, which inbound peers cannot fill (audit NET-6).
         std::lock_guard<std::mutex> lock(peersMutex);
-        if (peers.size() + pending_.size() >= MAX_PEERS) return false;   // outbound dials respect the same cap (audit NET-6)
+        size_t outbound = pending_.size();
+        for (const auto& [fd, peer] : peers)
+            if (peer->outbound()) ++outbound;
+        if (outbound >= MAX_OUTBOUND_PEERS + MAX_MANUAL_PEERS) return false;
     }
 
     int s = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
@@ -1347,11 +1349,20 @@ void Network::maintainConnections() {
     }
 
     std::set<NetAddress> linked(selfAddresses_.begin(), selfAddresses_.end());
+    std::map<uint32_t, size_t> outboundGroups;
     for (const Link& l : links) {
         NetAddress a;
-        if (NetAddress::parse(l.ip + ":" + std::to_string(l.port), a)) linked.insert(a);
+        if (!NetAddress::parse(l.ip + ":" + std::to_string(l.port), a)) continue;
+        linked.insert(a);
+        if (l.outbound) ++outboundGroups[a.group()];
     }
-    dialFromAddressTable(outbound, linked);
+    dialFromAddressTable(outbound, linked, outboundGroups);
+}
+
+bool Network::outboundGroupFull(const NetAddress& a, const std::map<uint32_t, size_t>& outboundGroups) {
+    if (!a.isRoutable()) return false;
+    const auto it = outboundGroups.find(a.group());
+    return it != outboundGroups.end() && it->second >= MAX_OUTBOUND_PER_GROUP;
 }
 
 namespace {
@@ -1361,7 +1372,8 @@ constexpr size_t kMaxAutoDialsInFlight = 2;
 // Fills free outbound slots from the address table, one dial a round (about a second) and at
 // most two in flight, so a table full of dead addresses costs little. Addresses from ADDR are
 // only ever dialled from here, never as they arrive (audit NET-11).
-void Network::dialFromAddressTable(size_t outbound, const std::set<NetAddress>& linked) {
+void Network::dialFromAddressTable(size_t outbound, const std::set<NetAddress>& linked,
+                                   const std::map<uint32_t, size_t>& outboundGroups) {
     if (outbound >= MAX_OUTBOUND_PEERS) return;
     size_t inFlight = 0;
     for (const PendingConnect& pc : pending_)
@@ -1369,9 +1381,14 @@ void Network::dialFromAddressTable(size_t outbound, const std::set<NetAddress>& 
     if (inFlight >= kMaxAutoDialsInFlight) return;
 
     const int64_t now = unixNow();
-    const std::optional<NetAddress> pick = addrman_.select(now, [&](const NetAddress& a) {
-        return linked.count(a) > 0 || isIPBanned(a.ipString());
-    });
+    // Spread outbound peers over networks (audit NET-6): a /16 we have no outbound peer in comes
+    // first, and a public /16 never holds more than MAX_OUTBOUND_PER_GROUP of them.
+    const std::optional<NetAddress> pick = addrman_.select(
+        now,
+        [&](const NetAddress& a) {
+            return linked.count(a) > 0 || outboundGroupFull(a, outboundGroups) || isIPBanned(a.ipString());
+        },
+        [&](const NetAddress& a) { return outboundGroups.count(a.group()) == 0; });
     if (!pick) return;
     addrman_.attempt(*pick, now);
     Bucks::logOut() << "DEBUG: Connecting to discovered peer " << pick->toString() << std::endl;
@@ -1521,8 +1538,11 @@ void Network::acceptNewConnection() {
         return;
     }
 
-    if (peers.size() >= MAX_PEERS) {
-        Bucks::logOut() << "DEBUG: Max peers reached (" << MAX_PEERS << "). Dropping connection from " << ip << std::endl;
+    size_t inbound = 0;
+    for (auto const& [fd, p] : peers)
+        if (!p->outbound()) ++inbound;
+    if (inbound >= options_.maxInbound) {
+        Bucks::logOut() << "DEBUG: Inbound slots full (" << inbound << "). Dropping connection from " << ip << std::endl;
 #ifdef _WIN32
         closesocket(s);
 #else
@@ -1547,6 +1567,13 @@ void Network::pruneZombiePeers() {
                 it = peers.erase(it);
                 continue;
             }
+        }
+
+        // Nothing received (not even a pong) for inactivityTimeout: the slot goes to someone else.
+        if (now - peer->lastReceived > options_.inactivityTimeout) {
+            Bucks::logOut() << "DEBUG: Pruning silent peer " << peer->address() << " (inactivity timeout)" << std::endl;
+            it = peers.erase(it);
+            continue;
         }
 
         // Round 4: Sync Stall Detection
@@ -1642,6 +1669,21 @@ void Network::broadcast(const NetMessage& msg) {
 // Periodic work of the network thread.
 void Network::update() {
     maintainConnections();
+    sendPings();
+}
+
+// Every active peer gets a ping (8 random bytes) each pingInterval, so a peer that went away
+// without closing the connection is noticed by pruneZombiePeers (audit NET-12).
+void Network::sendPings() {
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(peersMutex);
+    for (auto& [fd, peer] : peers) {
+        if (peer->getState() != PeerState::ACTIVE || now - peer->lastPingSent < options_.pingInterval) continue;
+        peer->lastPingSent = now;
+        Writer w;
+        w.u64(relayRng_());
+        peer->sendMsg(NetMessage(MessageType::PING, w.take()));
+    }
 }
 
 // Peer Discovery Implementation (Phase 6)
