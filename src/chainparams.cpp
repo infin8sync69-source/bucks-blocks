@@ -145,6 +145,13 @@ bool checkChainParams(const ChainParams& p, std::string& err) {
         err = "genesis inscription longer than 96 bytes";
         return false;
     }
+    // Printable ASCII only, so every tool and explorer shows the same text (spec 3.5).
+    for (unsigned char ch : p.genesisInscription) {
+        if (ch < 0x20 || ch > 0x7e) {
+            err = "genesis inscription must be printable ASCII";
+            return false;
+        }
+    }
     return true;
 }
 

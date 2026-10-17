@@ -3,14 +3,18 @@
 //
 //   bucks-mine-genesis --network=test --time=1791590400 [--inscription="..."]
 //
-// Prints the values to paste into src/chainparams.cpp. If the 32-bit nonce
-// space is exhausted the time is incremented by one and the search restarts.
+// Prints the values to paste into src/chainparams.cpp (use the printed time:
+// if the 32-bit nonce space is exhausted the time is incremented by one and the
+// search restarts). Progress goes to stderr every ten seconds. Check the result
+// independently with tools/verify_genesis.py.
 
 #include <openssl/sha.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <iomanip>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -24,7 +28,8 @@
 using namespace Bucks;
 
 // SHA256d of header (84 bytes) with a given nonce, using the low-level API so
-// threads do not contend on OpenSSL 3 provider lookups. The first 64 bytes are
+// threads do not contend on OpenSSL 3 provider lookups (the one-shot SHA256()
+// goes through EVP and was most of the time per nonce). The first 64 bytes are
 // hashed once (midstate); only the tail and the second hash run per nonce.
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -45,7 +50,9 @@ struct Midstate {
         uint8_t first[32];
         SHA256_Final(first, &c);
         Hash256 out;
-        SHA256(first, 32, out.data());
+        SHA256_Init(&c);
+        SHA256_Update(&c, first, 32);
+        SHA256_Final(out.data(), &c);
         return out;
     }
 };
@@ -90,7 +97,9 @@ int main(int argc, char* argv[]) {
     if (haveTime) params.genesisTime = time;
     if (haveInscription) params.genesisInscription = inscription;
     if (params.genesisTime == 0) { std::cerr << "--time is required\n"; return 2; }
-    if (params.genesisInscription.size() > 96) { std::cerr << "inscription longer than 96 bytes\n"; return 2; }
+    // The node's own startup checks (at most 96 bytes, printable ASCII): refuse here, not after an hour of mining.
+    std::string err;
+    if (!checkChainParams(params, err)) { std::cerr << err << "\n"; return 2; }
 
     std::cerr << "Mining " << params.name << " genesis, bits=0x" << std::hex << params.powLimitBits
               << std::dec << ", " << threads << " threads\n";
@@ -100,19 +109,44 @@ int main(int argc, char* argv[]) {
         Block genesis = Genesis::build(params);
         std::atomic<bool> found{false};
         std::atomic<uint32_t> winner{0};
+        std::atomic<uint64_t> tried{0};
+        std::atomic<unsigned> busy{threads};
 
         auto worker = [&](unsigned index) {
             const Midstate mid(genesis.header.serialize());  // 84 bytes, nonce at 80
+            uint64_t local = 0;
             for (uint64_t n = index; n <= 0xFFFFFFFFull && !found.load(); n += threads) {
+                if (++local == 65536) {
+                    tried += local;
+                    local = 0;
+                }
                 if (Pow::checkProofOfWork(mid.hash(uint32_t(n)), genesis.header.bits, params.powLimit)) {
                     bool expected = false;
                     if (found.compare_exchange_strong(expected, true)) winner = uint32_t(n);
-                    return;
+                    break;
                 }
             }
+            tried += local;
+            --busy;
         };
         std::vector<std::thread> pool;
         for (unsigned t = 0; t < threads; ++t) pool.emplace_back(worker, t);
+
+        // At the mainnet limit one time value takes about 2^32 hashes: minutes to an hour. Show that it is
+        // working (audit ML-10).
+        const auto start = std::chrono::steady_clock::now();
+        auto shown = start;
+        while (busy.load() > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            const auto now = std::chrono::steady_clock::now();
+            if (now - shown < std::chrono::seconds(10)) continue;
+            shown = now;
+            const double seconds = std::chrono::duration<double>(now - start).count();
+            const uint64_t n = tried.load();
+            std::cerr << "  time " << params.genesisTime << ": " << n << " hashes, " << std::fixed
+                      << std::setprecision(2) << double(n) / seconds / 1e6 << " MH/s, " << std::setprecision(1)
+                      << 100.0 * double(n) / 4294967296.0 << "% of the nonce space\n";
+        }
         for (auto& t : pool) t.join();
 
         if (found) {

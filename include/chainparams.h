@@ -61,7 +61,8 @@ bool parseNetworkName(const std::string& name, NetworkId& out);
 
 // Startup assertions of section 3.7 that do not need the genesis block:
 // powLimit decodes from powLimitBits, the retarget product cannot overflow,
-// checkpoints are sorted and start at genesis, the inscription fits.
+// checkpoints are sorted and start at genesis, the inscription is printable
+// ASCII and fits.
 // Returns false and fills `err` on failure; the node then exits with code 3.
 bool checkChainParams(const ChainParams& p, std::string& err);
 

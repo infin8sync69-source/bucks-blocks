@@ -22,12 +22,22 @@ if(BUCKS_FUZZ)
 endif()
 
 add_custom_target(tests ALL
-    DEPENDS unit_tests integration_tests system_tests perf_security_tests bucks-check-wordlists
+    DEPENDS unit_tests integration_tests system_tests perf_security_tests bucks-check-wordlists bucks-mine-genesis
 )
 
 # Every shipped word list is valid and the set has no ambiguous spellings.
 add_test(NAME wordlists
     COMMAND bucks-check-wordlists ${CMAKE_SOURCE_DIR}/wordlists)
+
+# bucks-mine-genesis reproduces the regtest genesis, and refuses an inscription the node would refuse.
+add_test(NAME mine_genesis_regtest
+    COMMAND bucks-mine-genesis --network=regtest --time=1767225600 "--inscription=Bucks regtest genesis" --threads=1)
+set_tests_properties(mine_genesis_regtest PROPERTIES
+    PASS_REGULAR_EXPRESSION "hash: +3491115920c29000d16f7d776bbab4a3399e5065abeeaf73fa23a273406bf520")
+add_test(NAME mine_genesis_refuses_non_ascii
+    COMMAND bucks-mine-genesis --network=regtest --time=1767225600 "--inscription=Bucks\tgenesis" --threads=1)
+set_tests_properties(mine_genesis_refuses_non_ascii PROPERTIES
+    PASS_REGULAR_EXPRESSION "genesis inscription must be printable ASCII")
 
 # Checks that build.sh mirrors CMakeLists.txt and .gitignore covers secrets.
 add_test(NAME build_hygiene

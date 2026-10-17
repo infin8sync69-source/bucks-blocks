@@ -74,6 +74,25 @@ TEST(Params, GenesisConfiguration) {
               chainParams(NetworkId::REGTEST).genesisHash);
 }
 
+// The inscription is printable ASCII and at most 96 bytes on every network (spec 3.5); bucks-mine-genesis
+// runs the same check before it starts.
+TEST(Params, InscriptionIsPrintableAscii) {
+    std::string err;
+    for (NetworkId id : {NetworkId::MAIN, NetworkId::TEST, NetworkId::REGTEST})
+        EXPECT_TRUE(checkChainParams(chainParams(id), err)) << err;
+    ChainParams p = chainParams(NetworkId::REGTEST);
+    p.genesisInscription = " Space to tilde: 0-9 A-Z a-z !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+    EXPECT_TRUE(checkChainParams(p, err)) << err;
+    p.genesisInscription = std::string(97, 'a');
+    EXPECT_FALSE(checkChainParams(p, err));
+    for (const std::string& bad : {std::string("Bucks\tgenesis"), std::string("line\nbreak"),
+                                   std::string("caf\xc3\xa9"), std::string("\x7f"), std::string("a\0b", 3)}) {
+        p.genesisInscription = bad;
+        EXPECT_FALSE(checkChainParams(p, err)) << bad;
+        EXPECT_EQ(err, "genesis inscription must be printable ASCII");
+    }
+}
+
 TEST(Params, NetworkNames) {
     NetworkId id;
     EXPECT_TRUE(parseNetworkName("regtest", id));
