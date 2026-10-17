@@ -230,7 +230,7 @@ The genesis block creates **no coins**: there is no premine and no placeholder p
 
 **Launch procedure (mainnet; testnet at implementation time):**
 1. The owner fixes the inscription (ASCII, at most 96 bytes) and the genesis time (the announced launch time).
-2. Run `bucks-mine-genesis --network=main --time=<t> --inscription="<text>"` (new tool `tools/mine_genesis.cpp`, separate CMake target, not linked into the node). It prints nonce, merkle root and hash. At 2^32 expected hashes this takes minutes on one CPU core. If the 32-bit nonce space is exhausted, the tool increments `time` by 1 and continues, and prints the final time.
+2. Run `bucks-mine-genesis --network=main --time=<t> --inscription="<text>"` (new tool `tools/mine_genesis.cpp`, separate CMake target, not linked into the node). It prints nonce, merkle root and hash. At 2^32 expected hashes this takes about 35 minutes on one CPU thread on average, proportionally less on several (`--threads=<n>`, default all cores). If the 32-bit nonce space is exhausted, the tool increments `time` by 1 and continues, and prints the final time.
 3. Paste the values into `src/chainparams.cpp`; add checkpoint `{0, hash}`.
 4. Publish the hash and inscription in the launch announcement before the launch time (fair launch).
 
@@ -251,7 +251,7 @@ The genesis block creates **no coins**: there is no premine and no placeholder p
 
 **Why:**
 1. *No overflow.* The retarget multiplies target × timespan before dividing (§6.5). With today's `0x1f00ffff` (`include/consensus.h:81`) the product needs 263 bits and overflows 256-bit arithmetic. With `0x1d00ffff` it needs 247 bits. The node asserts this at startup (§3.7).
-2. *No stall.* One ordinary CPU core (about 10^7 SHA256d per second) finds a block in about 7 minutes, so the chain keeps moving even if only one small miner is online.
+2. *No stall.* The node's built-in miner hashes about 2 × 10^6 SHA256d per second per CPU thread (midstate search, measured on a 2.8 GHz Xeon without SHA extensions; CPUs with them are faster). One thread finds a block in about 35 minutes on average, a 4-core server in about 9 minutes, so the chain keeps moving even if only one small miner is online. (This section first assumed 10^7 per core; the node's miner reached 0.5 × 10^6 on one thread until the midstate and thread changes of audit ML-2.)
 3. *No instant supply grab.* It is 65,536 times harder than today's 2^16 hashes per block, which let one GPU make thousands of blocks per second (CON-17).
 4. *Header spam costs real work.* Each fake header costs at least 2^32 hashes (§8.6).
 
