@@ -46,3 +46,19 @@ add_test(NAME install_layout
             "-DCHECK_WORDLISTS=$<TARGET_FILE:bucks-check-wordlists>"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/install_layout.cmake"
 )
+
+# deploy/ passes only options bucks knows, points at the install layout and keeps the API off the network.
+add_test(NAME deploy_kit
+    COMMAND ${CMAKE_COMMAND} "-DBUCKS_ROOT=${CMAKE_SOURCE_DIR}" "-DBUCKS_BIN=$<TARGET_FILE:bucks>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/deploy_kit.cmake"
+)
+find_program(SHELLCHECK shellcheck)
+if(SHELLCHECK)
+    add_test(NAME shellcheck
+        COMMAND ${SHELLCHECK} --severity=warning
+                deploy/bootstrap-ubuntu.sh deploy/bucks-backup.sh deploy/bucks-healthcheck.sh
+                tools/soak.sh tools/ci.sh
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+else()
+    message(STATUS "shellcheck not found: the deploy and tool scripts are only syntax-checked")
+endif()

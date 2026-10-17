@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake libssl-dev shellcheck
       - name: Dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install openssl@3 cmake

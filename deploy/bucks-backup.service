@@ -1,0 +1,16 @@
+# /etc/systemd/system/bucks-backup.service
+[Unit]
+Description=Bucks backup (wallets.json + chain.sqlite, encrypted)
+After=bucks.service
+ConditionPathExists=/var/lib/bucks
+
+[Service]
+Type=oneshot
+# Set the recipient of an OFFLINE key here or in /etc/bucks/backup.env (the private key must not live on this host).
+EnvironmentFile=-/etc/bucks/backup.env
+ExecStart=/usr/local/sbin/bucks-backup
+Nice=10
+IOSchedulingClass=idle
+UMask=0077
+PrivateTmp=yes
+# gpg keeps its keyring and lock files in /root/.gnupg, so the home directory stays writable.
