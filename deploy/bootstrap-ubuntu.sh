@@ -119,8 +119,9 @@ else
     log "cloning $BUCKS_REPO"
     as_builder git clone --no-checkout "$BUCKS_REPO" "$SRC"
 fi
-target=$(as_builder git -C "$SRC" rev-parse --verify --quiet "$BUCKS_REF^{commit}" \
-         || as_builder git -C "$SRC" rev-parse --verify --quiet "origin/$BUCKS_REF^{commit}") \
+# A branch resolves through origin/ (the clone's own local branch may be stale), a tag or commit as is.
+target=$(as_builder git -C "$SRC" rev-parse --verify --quiet "origin/$BUCKS_REF^{commit}" \
+         || as_builder git -C "$SRC" rev-parse --verify --quiet "$BUCKS_REF^{commit}") \
     || die "ref $BUCKS_REF not found in $BUCKS_REPO"
 if [ -n "$BUCKS_COMMIT" ] && [ "$target" != "$BUCKS_COMMIT" ]; then
     die "ref $BUCKS_REF is $target, expected BUCKS_COMMIT=$BUCKS_COMMIT"
@@ -159,7 +160,8 @@ else
     mv -T "$tmp" "$REL"
     log "installed $REL"
 fi
-previous=$(readlink -f "$PREFIX/current" 2>/dev/null || true)
+previous=""
+[ -L "$PREFIX/current" ] && previous=$(readlink -f "$PREFIX/current")
 ln -sfn "$REL" "$PREFIX/current.new"
 mv -T "$PREFIX/current.new" "$PREFIX/current"
 if [ -n "$previous" ] && [ "$previous" != "$REL" ]; then
