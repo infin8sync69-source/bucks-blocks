@@ -89,11 +89,13 @@ bool BlockAssembler::build(const Script& minerScript, const AssemblerOptions& op
     header.bits = Rules::GetNextWorkRequired(tip, params_);
 
     int64_t minTime = mtp + 1;
-    if (h % Consensus::RETARGET_INTERVAL == 0)   // H-TW1
-        minTime = std::max<int64_t>(minTime, int64_t(tip->header.timestamp) - int64_t(Consensus::TIMEWARP_GRACE));
-    if (h % Consensus::RETARGET_INTERVAL == Consensus::RETARGET_INTERVAL - 1) {   // H-TW2
-        if (const BlockIndex* first = tip->getAncestor(h - (Consensus::RETARGET_INTERVAL - 1)))
-            minTime = std::max<int64_t>(minTime, int64_t(first->header.timestamp));
+    if (params_.powAlgorithm == PowAlgorithm::BITCOIN) {   // period time rules (ASERT has none)
+        if (h % Consensus::RETARGET_INTERVAL == 0)   // H-TW1
+            minTime = std::max<int64_t>(minTime, int64_t(tip->header.timestamp) - int64_t(Consensus::TIMEWARP_GRACE));
+        if (h % Consensus::RETARGET_INTERVAL == Consensus::RETARGET_INTERVAL - 1) {   // H-TW2
+            if (const BlockIndex* first = tip->getAncestor(h - (Consensus::RETARGET_INTERVAL - 1)))
+                minTime = std::max<int64_t>(minTime, int64_t(first->header.timestamp));
+        }
     }
     const int64_t time = std::max(now, minTime);
     if (time > now + int64_t(Consensus::MAX_FUTURE_BLOCK_TIME)) {

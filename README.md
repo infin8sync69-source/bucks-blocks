@@ -157,7 +157,7 @@ Blockchain/
 
 ### Mining
 - Proof of Work consensus algorithm
-- Dynamic difficulty adjustment (every 2016 blocks)
+- Difficulty adjusted every block (aserti3-2d, 2-day half-life; spec section 6.5)
 - Block reward system (50 BUCKS, halving every 210K blocks)
 - Transaction fee support
 

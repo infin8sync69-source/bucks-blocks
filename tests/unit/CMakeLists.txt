@@ -10,6 +10,7 @@ add_executable(unit_tests
     test_chain_index.cpp
     test_tx_rules.cpp
     test_header_rules.cpp
+    test_difficulty.cpp
     test_connect_block.cpp
     test_coins.cpp
     test_undo.cpp
