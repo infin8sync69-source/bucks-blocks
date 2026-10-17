@@ -78,8 +78,13 @@ struct ServerConfig {
     std::vector<std::string> corsOrigins;
     // Extra Host header values accepted besides loopback and bindAddress.
     std::vector<std::string> allowedHosts;
-    // Key the rate limiter on X-Forwarded-For (only behind a trusted proxy).
+    // Behind a reverse proxy on this host: believe X-Forwarded-For (rate limit key) and
+    // X-Forwarded-Proto, but only on connections from loopback, where the proxy runs.
     bool trustProxy = false;
+    // The browser reaches the node over TLS (a proxy in front): the session cookie is always
+    // Secure and only https origins pass the CSRF check. Also on per request when a trusted
+    // proxy sends X-Forwarded-Proto: https, or when the login comes from an https origin.
+    bool secureCookie = false;
     // Sent on every response. The bundled UI in web/ is dependency-free ES
     // modules served by the node itself: no CDN, no inline script or style,
     // no third-party origin.
@@ -228,7 +233,10 @@ private:
                           const std::string& apiTokenHeader,
                           const std::string& cookieHeader);
     bool hostAllowed(const std::string& hostHeader) const;
-    bool originAllowed(const std::string& origin) const;
+    bool forwardedHeadersTrusted(const std::string& remoteAddr) const;
+    bool browserUsesTls(const std::string& remoteAddr, const std::string& forwardedProto) const;
+    bool originAllowed(const std::string& origin, const std::string& hostHeader, bool tls) const;
+    std::string sessionCookie(const std::string& value, long long maxAge, bool secure) const;
     bool corsOriginAllowed(const std::string& origin) const;
     std::string createSession();
     bool validateSession(const std::string& id);

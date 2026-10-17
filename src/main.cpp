@@ -72,7 +72,9 @@ static void printUsage() {
         "  --api-token <token>       API token on the command line (visible to other users!)\n"
         "  --api-cors-origin <o>     allow this exact origin cross-origin (repeatable)\n"
         "  --api-allowed-host <h>    accept this Host header (repeatable)\n"
-        "  --trust-proxy             rate-limit on X-Forwarded-For (behind a trusted proxy only)\n"
+        "  --trust-proxy             a reverse proxy on this host: believe X-Forwarded-For (rate limit)\n"
+        "                            and X-Forwarded-Proto: https (Secure cookie) from loopback peers\n"
+        "  --api-secure-cookie       the console is served over TLS: Secure session cookie, https origins only\n"
         "  --ipfs-enable, --ipfs-port <n>, --auto-mine\n"
         "Signals: SIGINT and SIGTERM stop the node cleanly. SIGHUP is logged and ignored, so closing\n"
         "the terminal does not stop it (there is no configuration to reload).\n"
@@ -114,6 +116,7 @@ int main(int argc, char* argv[]) {
     std::vector<std::string> corsOrigins;
     std::vector<std::string> allowedHosts;
     bool trustProxy = false;
+    bool secureCookie = false;
     LoadOptions loadOptions;
 
     // Reads the value after option `name`; false (after saying why) unless it is a number in [lo, hi].
@@ -182,6 +185,8 @@ int main(int argc, char* argv[]) {
              allowedHosts.push_back(argv[++i]);
         } else if (arg == "--trust-proxy") {
              trustProxy = true;
+        } else if (arg == "--api-secure-cookie") {
+             secureCookie = true;
         } else if (arg == "--checkblocks" && i + 1 < argc) {
              if (!numberArg(i, arg, 0, UINT32_MAX, number)) return 2;
              loadOptions.checkBlocks = static_cast<uint32_t>(number);
@@ -318,6 +323,7 @@ int main(int argc, char* argv[]) {
         serverConfig.corsOrigins = corsOrigins;
         serverConfig.allowedHosts = allowedHosts;
         serverConfig.trustProxy = trustProxy;
+        serverConfig.secureCookie = secureCookie;
         server = new Server(node, &network, serverConfig);
         if (!server->start(port)) {
             Bucks::logErr() << "✗ Failed to start server\n";

@@ -22,6 +22,10 @@
 #include <chrono>
 
 #ifndef _WIN32
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -1085,6 +1089,170 @@ TEST_F(ServerAuthTest, RestoreWithPassphraseOfAnUnusedWalletAsksFirst) {
     EXPECT_EQ(json::parse(r->body)["wallet"]["address"], otherAddress);
     second.stop();
 }
+
+// ---------------------------------------------------------------------------
+// TLS behind a proxy, CSRF origins, forwarded headers (WAL-12, NEW-3, OPS-09, OPS-10)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::string loginCookie(httplib::Client& cli, const std::string& token, const httplib::Headers& extra = {}) {
+    auto r = cli.Post("/api/auth/login", extra, json{{"token", token}}.dump(), "application/json");
+    EXPECT_TRUE(r && r->status == 200);
+    return r ? r->get_header_value("Set-Cookie") : std::string();
+}
+
+bool isSecureCookie(const std::string& setCookie) {
+    return setCookie.find("; Secure") != std::string::npos;
+}
+
+#ifndef _WIN32
+// An IPv4 address of this machine that is not loopback, "" if there is none.
+std::string nonLoopbackIpv4() {
+    ifaddrs* list = nullptr;
+    if (::getifaddrs(&list) != 0) return "";
+    std::string found;
+    for (ifaddrs* i = list; i && found.empty(); i = i->ifa_next) {
+        if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET || (i->ifa_flags & IFF_LOOPBACK) || !(i->ifa_flags & IFF_UP))
+            continue;
+        char buf[INET_ADDRSTRLEN] = {};
+        if (::inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in*>(i->ifa_addr)->sin_addr, buf, sizeof(buf))) found = buf;
+    }
+    ::freeifaddrs(list);
+    return found;
+}
+#endif
+
+} // namespace
+
+TEST_F(ServerAuthTest, SessionCookieIsSecureWhenTheBrowserUsesTls) {
+    {
+        Bucks::Server server(*chain, nullptr, cfg);
+        ASSERT_TRUE(server.start(0));
+        httplib::Client cli("127.0.0.1", server.port());
+        const std::string plain = loginCookie(cli, token);
+        EXPECT_FALSE(isSecureCookie(plain)) << plain;   // http://localhost keeps working
+        EXPECT_NE(plain.find("HttpOnly"), std::string::npos);
+        EXPECT_NE(plain.find("SameSite=Strict"), std::string::npos);
+        // Without --trust-proxy a forwarded scheme is not believed ...
+        EXPECT_FALSE(isSecureCookie(loginCookie(cli, token, {{"X-Forwarded-Proto", "https"}})));
+        // ... but a login page served over https is reason enough.
+        EXPECT_TRUE(isSecureCookie(loginCookie(cli, token, {{"Origin", "https://127.0.0.1"}})));
+        server.stop();
+    }
+    {
+        cfg.trustProxy = true;
+        Bucks::Server server(*chain, nullptr, cfg);
+        ASSERT_TRUE(server.start(0));
+        httplib::Client cli("127.0.0.1", server.port());
+        const std::string viaTls = loginCookie(cli, token, {{"X-Forwarded-Proto", "https"}});
+        EXPECT_TRUE(isSecureCookie(viaTls)) << viaTls;
+        EXPECT_NE(viaTls.find("HttpOnly"), std::string::npos);
+        EXPECT_NE(viaTls.find("SameSite=Strict"), std::string::npos);
+        EXPECT_FALSE(isSecureCookie(loginCookie(cli, token, {{"X-Forwarded-Proto", "http"}})));
+        auto r = cli.Post("/api/auth/logout", {{"X-API-Token", token}, {"X-Forwarded-Proto", "https"}}, "", "application/json");
+        ASSERT_TRUE(r);
+        EXPECT_TRUE(isSecureCookie(r->get_header_value("Set-Cookie")));
+        server.stop();
+    }
+    {
+        cfg.trustProxy = false;
+        cfg.secureCookie = true;   // --api-secure-cookie
+        Bucks::Server server(*chain, nullptr, cfg);
+        ASSERT_TRUE(server.start(0));
+        httplib::Client cli("127.0.0.1", server.port());
+        EXPECT_TRUE(isSecureCookie(loginCookie(cli, token)));
+        server.stop();
+    }
+}
+
+TEST_F(ServerAuthTest, CsrfOriginMustBeTheRequestsOwnOrigin) {
+    cfg.allowedHosts = {"bucks.example.com"};
+    cfg.corsOrigins = {"https://bucks.example.com:8443"};
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+    const std::string cookie = cookiePair(loginCookie(cli, token));
+    auto post = [&](const std::string& host, const std::string& origin) {
+        auto r = cli.Post("/api/mining/stop", {{"Cookie", cookie}, {"X-Bucks-CSRF", "1"}, {"Host", host}, {"Origin", origin}},
+                          "", "application/json");
+        return r ? r->status : 0;
+    };
+    const std::string local = "127.0.0.1:" + std::to_string(server.port());
+    EXPECT_EQ(post("bucks.example.com", "https://bucks.example.com"), 200);
+    EXPECT_EQ(post("bucks.example.com", "https://bucks.example.com:443"), 200);      // the default port
+    EXPECT_EQ(post("bucks.example.com:4444", "https://bucks.example.com:4444"), 200); // a proxy that keeps the port
+    EXPECT_EQ(post(local, "http://" + local), 200);
+    EXPECT_EQ(post("bucks.example.com", "https://bucks.example.com:4444"), 403);     // another port is another origin
+    EXPECT_EQ(post(local, "http://localhost:" + std::to_string(server.port())), 403);
+    EXPECT_EQ(post("bucks.example.com", "https://evil.example.com"), 403);
+    EXPECT_EQ(post("bucks.example.com", "https://bucks.example.com:8443"), 200);     // listed with --api-cors-origin
+    // Nothing says the browser uses TLS here, so a plain http page of the same host still passes ...
+    EXPECT_EQ(post("bucks.example.com", "http://bucks.example.com"), 200);
+    server.stop();
+
+    // ... but once the node knows the console is served over TLS, only https origins do.
+    cfg.secureCookie = true;
+    Bucks::Server tls(*chain, nullptr, cfg);
+    ASSERT_TRUE(tls.start(0));
+    httplib::Client tcli("127.0.0.1", tls.port());
+    const std::string tlsCookie = cookiePair(loginCookie(tcli, token));
+    auto tpost = [&](const std::string& origin) {
+        auto r = tcli.Post("/api/mining/stop",
+                           {{"Cookie", tlsCookie}, {"X-Bucks-CSRF", "1"}, {"Host", "bucks.example.com"}, {"Origin", origin}},
+                           "", "application/json");
+        return r ? r->status : 0;
+    };
+    EXPECT_EQ(tpost("http://bucks.example.com"), 403);
+    EXPECT_EQ(tpost("https://bucks.example.com"), 200);
+    tls.stop();
+}
+
+TEST_F(ServerAuthTest, ForwardedForIsBelievedFromALoopbackProxy) {
+    cfg.trustProxy = true;
+    cfg.rateLimitRequests = 2;
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+    auto get = [&](const std::string& xff) {
+        auto r = cli.Get("/api/status", {{"X-Forwarded-For", xff}});
+        return r ? r->status : 0;
+    };
+    EXPECT_EQ(get("10.0.0.1"), 200);
+    EXPECT_EQ(get("10.0.0.1"), 200);
+    EXPECT_EQ(get("10.0.0.1"), 429);
+    EXPECT_EQ(get("10.0.0.2"), 200);   // the proxy's clients get their own buckets
+    server.stop();
+}
+
+#ifndef _WIN32
+// OPS-09: with --trust-proxy, a client that reaches the port directly can neither rotate its rate-limit key
+// nor claim TLS.
+TEST_F(ServerAuthTest, ForwardedHeadersFromOtherHostsAreIgnored) {
+    const std::string ip = nonLoopbackIpv4();
+    if (ip.empty()) GTEST_SKIP() << "no non-loopback IPv4 address on this machine";
+    cfg.bindAddress = ip;
+    cfg.trustProxy = true;
+    cfg.rateLimitRequests = 3;
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli(ip, server.port());
+    auto r = cli.Post("/api/auth/login", {{"X-Forwarded-Proto", "https"}, {"X-Forwarded-For", "10.0.0.1"}},
+                      json{{"token", token}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    EXPECT_FALSE(isSecureCookie(r->get_header_value("Set-Cookie")));
+    for (int i = 2; i <= 3; ++i) {
+        r = cli.Get("/api/status", {{"X-Forwarded-For", "10.0.0." + std::to_string(i)}});
+        ASSERT_TRUE(r);
+        EXPECT_EQ(r->status, 200);
+    }
+    r = cli.Get("/api/status", {{"X-Forwarded-For", "10.0.0.99"}});
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 429);   // keyed on the peer, not on the header it sent
+    server.stop();
+}
+#endif
 
 // ML-11 / OPS-14: the version names the network the node runs, not a fixed "testnet".
 TEST_F(ServerAuthTest, StatusReportsTheVersionOfThisNetwork) {

@@ -246,6 +246,21 @@ bool splitHostPort(const std::string& hp, std::string& name, std::string& port) 
     return !name.empty();
 }
 
+// 127.0.0.0/8 and ::1, also as an IPv4-mapped address or a bind name.
+bool isLoopbackAddress(std::string a) {
+    a = lowerAscii(trimWs(a));
+    if (a.size() > 2 && a.front() == '[' && a.back() == ']') a = a.substr(1, a.size() - 2);
+    if (startsWith(a, "::ffff:")) a = a.substr(7);
+    return a == "localhost" || a == "::1" || startsWith(a, "127.");
+}
+
+// Host and port of a Host header or an origin's authority, with the scheme's default port written as none.
+bool hostAndPort(const std::string& hp, const std::string& scheme, std::string& name, std::string& port) {
+    if (!splitHostPort(hp, name, port)) return false;
+    if ((scheme == "http" && port == "80") || (scheme == "https" && port == "443")) port.clear();
+    return true;
+}
+
 void appendCompactSize(std::vector<uint8_t>& buf, uint64_t v) {
     if (v < 0xfd) {
         buf.push_back(static_cast<uint8_t>(v));
@@ -538,7 +553,7 @@ bool Server::start(int port) {
         //    behind a trusted proxy)
         if (config.enableRateLimit && rateLimiter) {
             std::string key = req.remote_addr;
-            if (config.trustProxy && req.has_header("X-Forwarded-For")) {
+            if (forwardedHeadersTrusted(req.remote_addr) && req.has_header("X-Forwarded-For")) {
                 // The proxy appends the address it saw, so the LAST entry is the one a client cannot forge (audit WAL-6).
                 std::string xff = req.get_header_value("X-Forwarded-For");
                 std::string last = trimWs(xff.substr(xff.rfind(',') == std::string::npos ? 0 : xff.rfind(',') + 1));
@@ -578,7 +593,9 @@ bool Server::start(int port) {
             //    custom header and an Origin/Referer we recognise.
             if (kind == AuthKind::Cookie && req.method != "GET" && req.method != "HEAD") {
                 std::string src = origin.empty() ? req.get_header_value("Referer") : origin;
-                if (req.get_header_value("X-Bucks-CSRF") != "1" || src.empty() || !originAllowed(src)) {
+                const bool tls = browserUsesTls(req.remote_addr, req.get_header_value("X-Forwarded-Proto"));
+                if (req.get_header_value("X-Bucks-CSRF") != "1" || src.empty() ||
+                    !originAllowed(src, req.get_header_value("Host"), tls)) {
                     reply(res, 403, errorJson("CSRF check failed: X-Bucks-CSRF: 1 and a matching Origin are required"));
                     return httplib::Server::HandlerResponse::Handled;
                 }
@@ -662,6 +679,13 @@ bool Server::start(int port) {
     }
 
     if (config.enableLogging) {
+        if (!isLoopbackAddress(config.bindAddress)) {
+            // Plain HTTP beyond this host: the token and the session cookie would cross the network in clear (NEW-3).
+            Bucks::logErr() << "⚠ The API listens on " << config.bindAddress << ", not on loopback. It speaks plain HTTP: "
+                            "put a TLS reverse proxy (with --trust-proxy and --api-secure-cookie) or an SSH tunnel in front of it\n";
+            if (config.trustProxy)
+                Bucks::logErr() << "⚠ --trust-proxy: X-Forwarded-* headers are believed only on connections from loopback\n";
+        }
         Bucks::logOut() << "✓ HTTP Server started on port " << boundPort << "\n";
         Bucks::logOut() << "✓ Web UI available at http://" << config.bindAddress << ":" << boundPort << "\n";
         if (!cookieFilePath.empty()) {
@@ -806,13 +830,42 @@ bool Server::corsOriginAllowed(const std::string& origin) const {
     return false;
 }
 
-// Same-origin (any Host we accept, over http/https) or a configured CORS origin.
-bool Server::originAllowed(const std::string& origin) const {
+// X-Forwarded-For/-Proto are believed only with --trust-proxy and only from loopback, where the reverse proxy
+// runs: a client that reaches the port directly cannot rotate its rate-limit key or fake TLS (audit OPS-09).
+bool Server::forwardedHeadersTrusted(const std::string& remoteAddr) const {
+    return config.trustProxy && isLoopbackAddress(remoteAddr);
+}
+
+// The node never speaks TLS itself; the browser uses it when the operator says so (--api-secure-cookie) or the
+// trusted proxy reports it.
+bool Server::browserUsesTls(const std::string& remoteAddr, const std::string& forwardedProto) const {
+    if (config.secureCookie) return true;
+    if (!forwardedHeadersTrusted(remoteAddr)) return false;
+    const std::string first = forwardedProto.substr(0, forwardedProto.find(','));   // the client-facing hop
+    return lowerAscii(trimWs(first)) == "https";
+}
+
+// CSRF for cookie sessions: the Origin (or Referer) must be the origin the request itself was sent to, the same
+// host and port as its Host header, or a configured --api-cors-origin exactly. When the browser is known to use
+// TLS only https passes (audit WAL-12). Behind a proxy that rewrites the port, list the public origin with
+// --api-cors-origin.
+bool Server::originAllowed(const std::string& origin, const std::string& hostHeader, bool tls) const {
     if (corsOriginAllowed(origin)) return true;
     std::string scheme, hostport;
     if (!splitOrigin(origin, scheme, hostport)) return false;
-    if (scheme != "http" && scheme != "https") return false;
-    return hostAllowed(hostport);
+    if (scheme != "https" && (scheme != "http" || tls)) return false;
+    std::string oName, oPort, hName, hPort;
+    if (!hostAndPort(hostport, scheme, oName, oPort) ||
+        !hostAndPort(lowerAscii(trimWs(hostHeader)), scheme, hName, hPort))
+        return false;
+    return oName == hName && oPort == hPort;
+}
+
+// HttpOnly and SameSite=Strict always; Secure when the browser talks TLS, so the cookie never travels over
+// plain HTTP (audit WAL-12, NEW-3, OPS-10).
+std::string Server::sessionCookie(const std::string& value, long long maxAge, bool secure) const {
+    return std::string(SESSION_COOKIE) + "=" + value + "; Path=/; HttpOnly; SameSite=Strict" +
+           (secure ? "; Secure" : "") + "; Max-Age=" + std::to_string(maxAge);
 }
 
 std::string Server::createSession() {
@@ -957,17 +1010,21 @@ void Server::setupRoutes() {
             reply(res, 500, errorJson(e.what()));
             return;
         }
-        res.set_header("Set-Cookie",
-            std::string(SESSION_COOKIE) + "=" + id +
-            "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + std::to_string(config.sessionLifetime.count()));
+        // A login page served over https makes the cookie Secure even when nothing told the node about TLS.
+        std::string scheme, hostport;
+        const bool httpsPage = splitOrigin(req.get_header_value("Origin"), scheme, hostport) && scheme == "https";
+        const bool secure = httpsPage || browserUsesTls(req.remote_addr, req.get_header_value("X-Forwarded-Proto"));
+        res.set_header("Set-Cookie", sessionCookie(id, config.sessionLifetime.count(), secure));
         reply(res, 200, json{{"success", true}, {"expiresIn", config.sessionLifetime.count()}});
     });
 
     s->Post("/api/auth/logout", [this](const httplib::Request& req, httplib::Response& res) {
         std::string id = cookieValue(req.get_header_value("Cookie"), SESSION_COOKIE);
         if (!id.empty()) destroySession(id);
-        res.set_header("Set-Cookie",
-            std::string(SESSION_COOKIE) + "=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0");
+        std::string scheme, hostport;
+        const bool httpsPage = splitOrigin(req.get_header_value("Origin"), scheme, hostport) && scheme == "https";
+        res.set_header("Set-Cookie", sessionCookie("", 0, httpsPage ||
+            browserUsesTls(req.remote_addr, req.get_header_value("X-Forwarded-Proto"))));
         reply(res, 200, json{{"success", true}});
     });
 
