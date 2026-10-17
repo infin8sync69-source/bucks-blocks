@@ -76,8 +76,8 @@ foreach(def SQLITE_THREADSAFE=1 SQLITE_DQS=0 SQLITE_OMIT_LOAD_EXTENSION)
 endforeach()
 
 # --- .gitignore keeps wallets, secrets and tool output out of git ---
-foreach(pattern wallets.json *.cookie .env .env.* !.env.example *.key *.pem
-                restore.json *.db *.sqlite build/ compile_commands.json .cache/
+foreach(pattern wallets.json wallets.json* *.tmp *.token secrets.* *.cookie .env .env.* !.env.example
+                *.key *.pem restore.json *.db *.sqlite build/ build*/ compile_commands.json .cache/
                 node_modules/ .bucks/)
     list(FIND gitignore_lines "${pattern}" idx)
     if(idx EQUAL -1)

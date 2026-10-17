@@ -1,5 +1,6 @@
 # Build and IDE
 build/
+build*/
 .vscode/
 .cursor/
 out/
@@ -24,6 +25,14 @@ restore.json
 *.key
 *.pem
 wallets.json
+wallets.json*
+*.tmp
+*.token
+api-token*
+secrets.*
+id_rsa*
+id_ecdsa*
+id_ed25519*
 *.cookie
 .env
 .env.*
