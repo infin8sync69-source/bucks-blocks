@@ -468,7 +468,7 @@ TEST(Network, NodesFindEachOtherThroughTheSeed) {
     }
     auto meshed = [&] {
         for (auto& n : nets)
-            if (n->peerCount() < 3) return false;   // the seed and the two others
+            if (n->peerCount() != 3) return false;   // the seed and the two others, once each
         return true;
     };
     ASSERT_TRUE(waitFor(meshed, 30)) << nets[0]->peerCount() << " " << nets[1]->peerCount() << " "
@@ -483,7 +483,7 @@ TEST(Network, NodesFindEachOtherThroughTheSeed) {
     // The seed comes back and every node dials it again.
     netS = std::make_unique<Network>(*hs.node);
     netS->start(portS);
-    EXPECT_TRUE(waitFor([&] { return netS->peerCount() >= 3 && meshed(); }, 60))
+    EXPECT_TRUE(waitFor([&] { return netS->peerCount() == 3 && meshed(); }, 60))
         << "seed has " << netS->peerCount() << " peers";
     for (auto& n : nets) n->stop();
     netS->stop();
@@ -690,6 +690,21 @@ TEST(P2pAudit, BigPingIsRefused) {
     EXPECT_EQ(t.netA->peerCount(), 1u) << "a normal ping is fine";
     sendToAll(*t.netB, NetMessage(MessageType::PING, std::vector<uint8_t>(3'000'000, 1)));
     EXPECT_TRUE(waitFor([&] { return t.netA->peerCount() == 0; }));
+}
+
+// Two nodes that dial each other at the same moment (both just learned the other's address) end up
+// with one connection, not two: both ends close the same one.
+TEST(Network, SimultaneousDialsLeaveOneConnection) {
+    TwoNodes t;
+    ASSERT_TRUE(t.start());
+    ASSERT_TRUE(t.netA->connectToPeer("127.0.0.1", t.portB));
+    ASSERT_TRUE(t.netB->connectToPeer("127.0.0.1", t.portA));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    EXPECT_TRUE(waitFor([&] { return t.netA->peerCount() == 1 && t.netB->peerCount() == 1; }))
+        << t.netA->peerCount() << " " << t.netB->peerCount();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    EXPECT_EQ(t.netA->peerCount(), 1u);
+    EXPECT_EQ(t.netB->peerCount(), 1u);
 }
 
 // NET-NEW-4: a peer cannot fill the table; what is beyond its allowance is dropped unread.

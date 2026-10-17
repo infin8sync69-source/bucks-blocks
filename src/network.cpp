@@ -831,9 +831,11 @@ void Peer::handleMessage(const NetMessage& msg) {
                 Reader r(decrypted.payload);
                 const uint32_t peerHeight = r.u32();
                 Bucks::logOut() << "DEBUG: Peer " << ip << " version: height=" << peerHeight << std::endl;
-                if (r.remaining() >= 10) {
+                if (r.remaining() >= 10 && !versionSeen_) {
                     const uint16_t peerListenPort = r.u16();
-                    if (r.u64() == network.localNonce()) {
+                    remoteNonce_ = r.u64();
+                    versionSeen_ = true;
+                    if (remoteNonce_ == network.localNonce()) {
                         Bucks::logOut() << "DEBUG: Connected to ourselves through " << address() << "; dropping it" << std::endl;
                         if (outbound()) network.markSelf(address());
                         disconnect();
@@ -844,6 +846,7 @@ void Peer::handleMessage(const NetMessage& msg) {
                         listenPort_ = peerListenPort;
                         if (auto a = listenAddress()) network.learnAddress(*a, ip, socket_fd);
                     }
+                    if (network.dropDuplicate(*this)) break;
                 }
                 if (peerHeight > node.height()) requestHeaders();
             } else {
@@ -1863,6 +1866,30 @@ void Network::relayAddress(const NetAddress& a, int exceptFd) {
     w.bytes(reinterpret_cast<const uint8_t*>(s.data()), s.size());
     const NetMessage msg(MessageType::ADDR, w.take());
     for (Peer* p : to) p->sendMsg(msg);
+}
+
+// Called by the VERSION handler, under peersMutex, once `p` has said who it is. When two nodes dial
+// each other at the same moment (both learned the other's address together), each has two
+// connections to the other. Both ends keep the one dialled by the node with the larger nonce, so
+// they drop the same connection. True if `p` itself was dropped.
+bool Network::dropDuplicate(Peer& p) {
+    const std::optional<NetAddress> addr = p.listenAddress();
+    if (!addr) return false;
+    for (auto& [fd, other] : peers) {
+        if (other.get() == &p || !other->versionSeen() || other->getState() == PeerState::DISCONNECTED) continue;
+        if (other->listenAddress() != addr) continue;
+        Peer* drop = &p;   // the same direction twice: the newer one goes
+        if (p.outbound() != other->outbound()) {
+            Peer* out = p.outbound() ? &p : other.get();
+            Peer* in = p.outbound() ? other.get() : &p;
+            drop = localNonce_ > p.remoteNonce() ? in : out;
+        }
+        Bucks::logOut() << "DEBUG: Second connection to " << addr->toString() << "; closing "
+                        << (drop->outbound() ? "ours" : "theirs") << std::endl;
+        drop->disconnect();
+        return drop == &p;
+    }
+    return false;
 }
 
 // Our own address, learned by dialling it: never dialled or passed on again.

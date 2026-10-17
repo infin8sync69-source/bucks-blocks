@@ -154,6 +154,7 @@ struct NetAddress {
     bool acceptableFrom(uint32_t source) const;
 
     friend bool operator==(const NetAddress& a, const NetAddress& b) { return a.ip == b.ip && a.port == b.port; }
+    friend bool operator!=(const NetAddress& a, const NetAddress& b) { return !(a == b); }
     friend bool operator<(const NetAddress& a, const NetAddress& b) {
         return a.ip != b.ip ? a.ip < b.ip : a.port < b.port;
     }
@@ -255,6 +256,8 @@ public:
     // Where the peer accepts connections: the port we dialled, or the one its VERSION gave.
     // Empty for an inbound peer that does not listen (or has not said yet).
     std::optional<NetAddress> listenAddress() const;
+    bool versionSeen() const { return versionSeen_; }
+    uint64_t remoteNonce() const { return remoteNonce_; }
 
     // Misbehavior tracking
     void misbehavior(int penalty);
@@ -294,6 +297,8 @@ private:
     double addrTokens = 10;
     std::chrono::steady_clock::time_point addrTokensAt;
     uint16_t listenPort_ = 0;
+    bool versionSeen_ = false;
+    uint64_t remoteNonce_ = 0;
     bool answeredGetAddr_ = false;
     size_t lowWorkHeaders_ = 0;
 
@@ -370,6 +375,7 @@ public:
     // Random per process; a VERSION carrying it means we dialled ourselves.
     uint64_t localNonce() const { return localNonce_; }
     void markSelf(const std::string& hostPort);
+    bool dropDuplicate(Peer& p);
     // Keeps the address table in this file across restarts: read now, written every 15 minutes
     // and at stop(). Call before start().
     void setAddressFile(const std::string& path);
