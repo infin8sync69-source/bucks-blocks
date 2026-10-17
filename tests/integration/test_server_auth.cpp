@@ -917,3 +917,170 @@ TEST_F(ServerAuthTest, ApproveReorgRefusesAnUnknownTip) {
     EXPECT_EQ(r->status, 409) << r->body;
     server.stop();
 }
+
+// ---------------------------------------------------------------------------
+// Word lists on the wallet routes (WAL-3, WAL-13, gate WORDLIST-1 and WORDLIST-2)
+// ---------------------------------------------------------------------------
+
+// The advertised default is what create uses, and every new wallet records the list and its hash.
+TEST_F(ServerAuthTest, CreateRecordsTheWordlistAndDefaultMatchesLanguages) {
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+
+    auto r = cli.Get("/api/wallets/languages", tokenHeader);
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    json langs = json::parse(r->body);
+    const std::string def = langs["default"];
+    std::string defSha;
+    for (const auto& l : langs["languages"])
+        if (l["lang"] == def) defSha = l["sha256"];
+    ASSERT_EQ(defSha.size(), 64u) << r->body;
+
+    json made = createWallet(cli);
+    EXPECT_EQ(made["language"], def);
+    EXPECT_EQ(made["wordlistSha256"], defSha);
+    EXPECT_FALSE(made["wordlistStatus"].get<std::string>().empty());
+    if (made["wordlistStatus"] != "release") EXPECT_TRUE(made.contains("wordlistWarning"));
+
+    json doc = json::parse(readFile(server.walletFile()));
+    ASSERT_EQ(doc["wallets"].size(), 1u);
+    EXPECT_EQ(doc["wallets"][0]["wordlist"], def);
+    EXPECT_EQ(doc["wallets"][0]["wordlistSha256"], defSha);
+    EXPECT_EQ(doc["wallets"][0]["address"], made["wallet"]["address"]);
+
+    // Unknown or malformed languages are the caller's error, not the node's.
+    r = cli.Post("/api/wallets/create", tokenHeader, R"({"language":"zz"})", "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400) << r->body;
+    r = cli.Post("/api/wallets/create", tokenHeader, R"({"language":5})", "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400) << r->body;
+
+    // Restore takes an optional language: the right one restores, another list refuses the words.
+    const std::string phrase = made["mnemonic"];
+    r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", phrase}, {"language", def}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    EXPECT_TRUE(json::parse(r->body)["existing"].get<bool>());
+    r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", phrase}, {"language", "en-draft"}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400) << r->body;
+    r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", phrase}, {"language", "zz"}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400) << r->body;
+
+    // A restored wallet records the list its phrase was read with.
+    std::string english;
+    Bucks::Wallet::createNew(&english, "en-draft");
+    r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", english}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    EXPECT_EQ(json::parse(r->body)["detectedLanguage"], "en-draft");
+    doc = json::parse(readFile(server.walletFile()));
+    ASSERT_EQ(doc["wallets"].size(), 2u);
+    EXPECT_EQ(doc["wallets"][1]["wordlist"], "en-draft");
+    EXPECT_EQ(doc["wallets"][1]["wordlistSha256"], Bucks::findWordlist("en-draft")->sha256);
+    server.stop();
+}
+
+// WAL-3: the main network never offers or accepts the development placeholder list.
+TEST_F(ServerAuthTest, MainNetworkNeverOffersPlaceholderLists) {
+    Bucks::ChainParams mainLike = Bucks::chainParams(Bucks::NetworkId::REGTEST);
+    mainLike.id = Bucks::NetworkId::MAIN;   // the wallet routes only look at the network id
+    mainLike.name = "main";
+    std::string chainError;
+    int chainCode = 0;
+    auto mainChain = Bucks::Node::open(dir + "/mainchain", mainLike, {}, chainError, chainCode);
+    ASSERT_TRUE(mainChain) << chainError;
+    cfg.dataDir = dir + "/maindata";
+    Bucks::Server server(*mainChain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+
+    auto r = cli.Get("/api/wallets/languages", tokenHeader);
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    json langs = json::parse(r->body);
+    ASSERT_FALSE(langs["languages"].empty());
+    for (const auto& l : langs["languages"]) {
+        EXPECT_NE(l["status"], "dev") << l.dump();
+        EXPECT_NE(l["status"], "test") << l.dump();
+    }
+    EXPECT_NE(langs["default"], "ar-dev");
+
+    json made = createWallet(cli);
+    EXPECT_EQ(made["language"], langs["default"]);
+    r = cli.Post("/api/wallets/create", tokenHeader, R"({"language":"ar-dev"})", "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400) << r->body;
+
+    std::string devPhrase;
+    Bucks::Wallet::createNew(&devPhrase, "ar-dev");
+    r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", devPhrase}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400) << r->body;
+    r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", devPhrase}, {"language", "ar-dev"}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400) << r->body;
+    EXPECT_EQ(server.getWallets().size(), 1u);
+    server.stop();
+
+    // Off the main network the placeholder still restores (pilot users have such phrases).
+    Bucks::Server test(*chain, nullptr, cfg);
+    ASSERT_TRUE(test.start(0));
+    httplib::Client tcli("127.0.0.1", test.port());
+    r = tcli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", devPhrase}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 200) << r->body;
+    test.stop();
+}
+
+// WAL-13: a passphrase that gives an empty wallet is reported before anything is saved.
+TEST_F(ServerAuthTest, RestoreWithPassphraseOfAnUnusedWalletAsksFirst) {
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+    cli.set_read_timeout(120, 0);
+
+    const std::string phrase = createWallet(cli)["mnemonic"];
+    auto restore = [&](const json& body) {
+        return cli.Post("/api/wallets/restore", tokenHeader, body.dump(), "application/json");
+    };
+
+    auto r = restore({{"mnemonic", phrase}, {"passphrase", "x"}});
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 409) << r->body;
+    json ask = json::parse(r->body);
+    EXPECT_TRUE(ask["confirmRequired"].get<bool>());
+    EXPECT_EQ(ask["reason"], "unusedWithPassphrase");
+    const std::string otherAddress = ask["wallet"]["address"];
+    EXPECT_FALSE(otherAddress.empty());
+    EXPECT_EQ(server.getWallets().size(), 1u) << "saved without the user's confirmation";
+
+    r = restore({{"mnemonic", phrase}, {"passphrase", "x"}, {"confirmUnused", "yes"}});
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400);
+    r = restore({{"mnemonic", phrase}, {"passphrase", "x"}, {"confirmUnused", true}});
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    EXPECT_EQ(json::parse(r->body)["wallet"]["address"], otherAddress);
+    ASSERT_EQ(server.getWallets().size(), 2u);
+
+    // Once that wallet holds coins, the same restore elsewhere needs no confirmation.
+    r = cli.Post("/api/mining/mine", tokenHeader, R"({"minerWalletIndex":1})", "application/json");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    server.stop();
+
+    cfg.dataDir = dir + "/data2";
+    Bucks::Server second(*chain, nullptr, cfg);
+    ASSERT_TRUE(second.start(0));
+    httplib::Client cli2("127.0.0.1", second.port());
+    r = cli2.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", phrase}, {"passphrase", "x"}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    EXPECT_EQ(json::parse(r->body)["wallet"]["address"], otherAddress);
+    second.stop();
+}

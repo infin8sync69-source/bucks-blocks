@@ -51,14 +51,48 @@ using json = nlohmann::json;
 
 namespace Bucks {
 
-// The Arabic list shown as "the actual Arabic words": the first non-placeholder Arabic list (release or
-// draft), else the default list.
-static std::string canonicalMnemonicLanguage() {
+// "dev" and "test" lists are placeholders that exist to be replaced.
+static bool placeholderList(const Wordlist& wl) {
+    return wl.status == "dev" || wl.status == "test";
+}
+
+// The main network never offers or accepts a placeholder list (audit WAL-3).
+static bool listAllowed(const Wordlist& wl, bool mainNet) {
+    return !(mainNet && placeholderList(wl));
+}
+
+static std::vector<std::string> allowedMnemonicLanguages(bool mainNet) {
+    std::vector<std::string> out;
     for (const auto& lang : mnemonicLanguages()) {
         auto wl = findWordlist(lang);
-        if (wl && wl->normalizer == "arabic" && wl->status != "dev" && wl->status != "test") return lang;
+        if (wl && listAllowed(*wl, mainNet)) out.push_back(lang);
     }
-    return defaultMnemonicLanguage();
+    return out;
+}
+
+// The Arabic list shown as "the actual Arabic words": the first non-placeholder Arabic list (release or
+// draft), else, off the main network, the library default. "" when there is none.
+static std::string canonicalMnemonicLanguage(bool mainNet) {
+    for (const auto& lang : mnemonicLanguages()) {
+        auto wl = findWordlist(lang);
+        if (wl && wl->normalizer == "arabic" && !placeholderList(*wl)) return lang;
+    }
+    return mainNet ? "" : defaultMnemonicLanguage();
+}
+
+// What a create request without "language" gets, and what GET /api/wallets/languages calls the default: the
+// first non-placeholder Arabic list, else the first non-placeholder list, else, off the main network, the
+// library default. "" when nothing qualifies.
+static std::string defaultWalletLanguage(bool mainNet) {
+    std::string firstOther;
+    for (const auto& lang : mnemonicLanguages()) {
+        auto wl = findWordlist(lang);
+        if (!wl || placeholderList(*wl)) continue;
+        if (wl->normalizer == "arabic") return lang;
+        if (firstOther.empty()) firstOther = lang;
+    }
+    if (!firstOther.empty()) return firstOther;
+    return mainNet ? "" : defaultMnemonicLanguage();
 }
 
 constexpr const char* BUCKS_NODE_VERSION = "0.2.0-testnet";
@@ -675,10 +709,21 @@ std::string Server::walletError() const {
 }
 
 bool Server::addWallet(const Wallet& wallet) {
+    return addWallet(wallet, json::object());
+}
+
+bool Server::addWallet(const Wallet& wallet, const nlohmann::json& meta) {
     std::lock_guard<std::mutex> lock(walletMutex);
     wallets.push_back(wallet);
     wallets.back().setAddressVersion(node.params().p2pkhAddressVersion);
     wallets.back().setMnemonic(""); // phrases live only in the creation response
+    if (meta.is_object() && !meta.empty()) {
+        // Extra fields ride on the wallet's entry: saveWalletsLocked keeps the fields of entries it knows.
+        json entry = meta;
+        entry["pubKeyHex"] = wallets.back().getPublicKeyHex();
+        if (!walletDoc.contains("wallets") || !walletDoc["wallets"].is_array()) walletDoc["wallets"] = json::array();
+        walletDoc["wallets"].push_back(entry);
+    }
     return saveWalletsLocked();
 }
 
@@ -1030,8 +1075,10 @@ void Server::setupRoutes() {
         res.set_content(json{{"wallets", walletArray}}.dump(), "application/json");
     });
 
-    // Mnemonic languages available for creation (index-aligned lists)
-    s->Get("/api/wallets/languages", [](const httplib::Request&, httplib::Response& res) {
+    // Mnemonic languages available for creation (index-aligned lists). "default" is what create uses when the
+    // request names none (audit WAL-3); placeholder lists are not listed on the main network.
+    s->Get("/api/wallets/languages", [this](const httplib::Request&, httplib::Response& res) {
+        const bool mainNet = node.params().id == NetworkId::MAIN;
         std::string err;
         std::vector<std::string> langs = mnemonicLanguages(&err);
         if (langs.empty()) {
@@ -1040,18 +1087,20 @@ void Server::setupRoutes() {
         }
         json arr = json::array();
         for (const auto& lang : langs) {
-            json e = {{"lang", lang}};
-            if (auto wl = findWordlist(lang)) {
-                e["normalizer"] = wl->normalizer;
-                e["status"] = wl->status;
-                e["direction"] = wl->normalizer == "arabic" ? "rtl" : "ltr";
-            }
-            arr.push_back(e);
+            auto wl = findWordlist(lang);
+            if (!wl || !listAllowed(*wl, mainNet)) continue;
+            arr.push_back({
+                {"lang", lang},
+                {"normalizer", wl->normalizer},
+                {"status", wl->status},
+                {"sha256", wl->sha256},
+                {"direction", wl->normalizer == "arabic" ? "rtl" : "ltr"}
+            });
         }
         reply(res, 200, json{
             {"success", true},
             {"languages", arr},
-            {"default", defaultMnemonicLanguage()},
+            {"default", defaultWalletLanguage(mainNet)},
             {"wordCounts", json::array({mnemonicWordCount(128), mnemonicWordCount(256)})}
         });
     });
@@ -1062,13 +1111,36 @@ void Server::setupRoutes() {
         if (walletUnavailable(res)) return;
         json body;
         if (!parseBody(req, res, body)) return;
-        std::string lang = body.contains("language") && body["language"].is_string() ? body["language"].get<std::string>() : "";
+        if (body.contains("language") && !body["language"].is_string()) {
+            reply(res, 400, errorJson("language must be a word list tag"));
+            return;
+        }
+        std::string lang = body.value("language", "");
         if (body.contains("includeCanonical") && !body["includeCanonical"].is_boolean()) {
             reply(res, 400, errorJson("includeCanonical must be true or false"));   // before anything is saved (audit WAL-4)
             return;
         }
+        const bool mainNet = node.params().id == NetworkId::MAIN;
+        std::string listErr;
+        if (mnemonicLanguages(&listErr).empty()) {
+            reply(res, 503, errorJson("Word lists unavailable: " + listErr));
+            return;
+        }
         // No language given: use the best list we ship, never the development placeholder (audit WAL-3).
-        if (lang.empty()) lang = canonicalMnemonicLanguage();
+        if (lang.empty()) lang = defaultWalletLanguage(mainNet);
+        if (lang.empty()) {
+            reply(res, 503, errorJson("No word list on this node may be used on the main network (only placeholders are installed)"));
+            return;
+        }
+        auto list = findWordlist(lang);
+        if (!list) {
+            reply(res, 400, errorJson("Unknown word list language '" + lang + "'"));
+            return;
+        }
+        if (!listAllowed(*list, mainNet)) {
+            reply(res, 400, errorJson("Word list '" + lang + "' is a placeholder and is not available on the main network"));
+            return;
+        }
         size_t entropyBits = Wallet::DEFAULT_ENTROPY_BITS;
         if (body.contains("words")) {
             if (!body["words"].is_number_unsigned()) {
@@ -1085,32 +1157,38 @@ void Server::setupRoutes() {
             Wallet w = Wallet::createNew(&mnemonic, lang, entropyBits);
             w.setAddressVersion(node.params().p2pkhAddressVersion);
             w.setMnemonic("");
-            bool persisted = addWallet(w);
-
-            std::string usedLang = lang.empty() ? defaultMnemonicLanguage() : lang;
-            std::string direction = "ltr";
-            if (auto wl = findWordlist(usedLang)) direction = wl->normalizer == "arabic" ? "rtl" : "ltr";
+            // Which list (and which exact bytes of it) the phrase needs, so support can still tell years later
+            // (gate WORDLIST-1).
+            bool persisted = addWallet(w, json{{"wordlist", lang}, {"wordlistSha256", list->sha256}});
 
             json out = {
                 {"success", true},
                 {"wallet", walletJson(w)},
                 {"mnemonic", mnemonic},
                 {"wordCount", splitMnemonic(mnemonic).size()},
-                {"language", usedLang},
-                {"direction", direction},
+                {"language", lang},
+                {"wordlistStatus", list->status},
+                {"wordlistSha256", list->sha256},
+                {"direction", list->normalizer == "arabic" ? "rtl" : "ltr"},
                 {"persisted", persisted},
                 {"warning", "Write these words down now. They are shown only once and the node does not store them."}
             };
+            if (list->status != "release")
+                out["wordlistWarning"] = placeholderList(*list)
+                    ? "This phrase uses a development placeholder word list. Use it for testing only."
+                    : "This phrase uses a draft word list that may still change before release, and a phrase made now "
+                      "might not restore with later software. Keep a backup of the node's wallets.json as well.";
             if (!persisted) out["error"] = "Wallet could not be saved to " + walletFilePath + "; it exists in memory only";
             // Opt-in: the same phrase in the canonical (Arabic) list, for users who write it in
             // their own language but want to see the words the network side uses.
             std::string canonical;
-            if (body.value("includeCanonical", false) && usedLang != canonicalMnemonicLanguage()) {
+            const std::string canonLang = canonicalMnemonicLanguage(mainNet);
+            if (body.value("includeCanonical", false) && !canonLang.empty() && lang != canonLang) {
                 MnemonicError cerr = MnemonicError::OK;
-                canonical = convertMnemonic(mnemonic, canonicalMnemonicLanguage(), &cerr);
+                canonical = convertMnemonic(mnemonic, canonLang, &cerr);
                 if (cerr == MnemonicError::OK) {
                     out["canonicalMnemonic"] = canonical;
-                    out["canonicalLanguage"] = canonicalMnemonicLanguage();
+                    out["canonicalLanguage"] = canonLang;
                     out["canonicalDirection"] = "rtl";
                 }
             }
@@ -1122,45 +1200,71 @@ void Server::setupRoutes() {
         }
     });
 
-    // Restore Wallet: words and checksum are validated by Wallet::fromMnemonic
-    // (API-11); duplicates are not added twice.
+    // Restore Wallet: words and checksum are validated before any key is derived (API-11); duplicates are not
+    // added twice. An optional "language" names the list; otherwise it is detected among the lists this
+    // network accepts (gate WORDLIST-2).
     s->Post("/api/wallets/restore", [this, walletUnavailable, walletJson](const httplib::Request& req, httplib::Response& res) {
         if (walletUnavailable(res)) return;
         json body;
         if (!parseBody(req, res, body)) return;
         std::string restoreMnemonic = body.contains("mnemonic") && body["mnemonic"].is_string() ? body["mnemonic"].get<std::string>() : "";
         std::string pass = body.contains("passphrase") && body["passphrase"].is_string() ? body["passphrase"].get<std::string>() : "";
-        if (body.contains("includeCanonical") && !body["includeCanonical"].is_boolean()) {
-            reply(res, 400, errorJson("includeCanonical must be true or false"));
+        for (const char* flag : {"includeCanonical", "confirmUnused"}) {
+            if (body.contains(flag) && !body[flag].is_boolean()) {
+                reply(res, 400, errorJson(std::string(flag) + " must be true or false"));
+                return;
+            }
+        }
+        if (body.contains("language") && !body["language"].is_string()) {
+            reply(res, 400, errorJson("language must be a word list tag"));
             return;
         }
         if (trimWs(restoreMnemonic).empty()) {
             reply(res, 400, errorJson("Mnemonic required"));
             return;
         }
+        const bool mainNet = node.params().id == NetworkId::MAIN;
+        std::string lang = body.value("language", "");
+        if (!lang.empty()) {
+            auto list = findWordlist(lang);
+            if (!list) {
+                reply(res, 400, errorJson("Unknown word list language '" + lang + "'"));
+                return;
+            }
+            if (!listAllowed(*list, mainNet)) {
+                reply(res, 400, errorJson("Word list '" + lang + "' is a placeholder and is not available on the main network"));
+                return;
+            }
+        }
+        std::vector<uint8_t> entropy;
+        const MnemonicError merr = lang.empty()
+            ? mnemonicToEntropyAmong(restoreMnemonic, allowedMnemonicLanguages(mainNet), entropy, &lang)
+            : mnemonicToEntropy(restoreMnemonic, entropy, nullptr, lang);
+        if (merr != MnemonicError::OK) {
+            // The message never contains the phrase.
+            reply(res, merr == MnemonicError::WORDLIST_LOAD_FAILED ? 503 : 400,
+                  errorJson(std::string("Invalid mnemonic: ") + mnemonicErrorString(merr)));
+            return;
+        }
         try {
-            Wallet w = Wallet::fromMnemonic(restoreMnemonic, pass);
+            Wallet w = Wallet::fromMnemonic(restoreMnemonic, pass, lang);
             w.setAddressVersion(node.params().p2pkhAddressVersion);
             w.setMnemonic("");
             // Which list the phrase was written in, and (opt-in) the same phrase in the canonical list.
             json echo = json::object();
-            {
-                std::string detected;
-                if (validateMnemonic(restoreMnemonic, &detected) == MnemonicError::OK) {
-                    echo["detectedLanguage"] = detected;
-                    const std::string canonLang = canonicalMnemonicLanguage();
-                    if (body.value("includeCanonical", false)) {
-                        MnemonicError cerr = MnemonicError::OK;
-                        std::string canon = convertMnemonic(restoreMnemonic, canonLang, &cerr);
-                        if (cerr == MnemonicError::OK) {
-                            echo["canonicalMnemonic"] = canon;
-                            echo["canonicalLanguage"] = canonLang;
-                            echo["canonicalDirection"] = "rtl";
-                        }
-                        OPENSSL_cleanse(&canon[0], canon.size());
-                    }
+            echo["detectedLanguage"] = lang;
+            const std::string canonLang = canonicalMnemonicLanguage(mainNet);
+            if (body.value("includeCanonical", false) && !canonLang.empty()) {
+                MnemonicError cerr = MnemonicError::OK;
+                std::string canon = mnemonicFromEntropy(entropy, canonLang, &cerr);
+                if (cerr == MnemonicError::OK) {
+                    echo["canonicalMnemonic"] = canon;
+                    echo["canonicalLanguage"] = canonLang;
+                    echo["canonicalDirection"] = "rtl";
                 }
+                if (!canon.empty()) OPENSSL_cleanse(&canon[0], canon.size());
             }
+            OPENSSL_cleanse(entropy.data(), entropy.size());
             const std::string address = w.getAddress();
             {
                 std::lock_guard<std::mutex> lock(walletMutex);
@@ -1173,13 +1277,31 @@ void Server::setupRoutes() {
                     }
                 }
             }
-            bool persisted = addWallet(w);
+            // A mistyped passphrase does not fail: it gives a valid but different, empty wallet. Saving that
+            // silently makes users think their coins are gone, so ask first (audit WAL-13).
+            uint64_t coins = 0;
+            if (!pass.empty() && !body.value("confirmUnused", false) &&
+                (!node.coinCount(hash160(w.getPublicKey()), coins) || coins == 0)) {
+                reply(res, 409, json{
+                    {"success", false},
+                    {"confirmRequired", true},
+                    {"reason", "unusedWithPassphrase"},
+                    {"wallet", walletJson(w)},
+                    {"error", "This phrase and passphrase give a wallet with no coins on this node's chain (address " +
+                              address + "). A mistyped passphrase gives a different, empty wallet. Check the "
+                              "passphrase, or send the request again with confirmUnused: true to add it anyway."}
+                });
+                return;
+            }
+            const auto list = findWordlist(lang);
+            bool persisted = addWallet(w, json{{"wordlist", lang}, {"wordlistSha256", list ? list->sha256 : ""}});
             json out = {{"success", true}, {"wallet", walletJson(w)}, {"existing", false}, {"persisted", persisted}};
             out.update(echo);
             if (!persisted) out["error"] = "Wallet could not be saved to " + walletFilePath + "; it exists in memory only";
             reply(res, 200, out);
         } catch (const std::exception& e) {
             // e.what() never contains the phrase (see Wallet::fromMnemonic)
+            OPENSSL_cleanse(entropy.data(), entropy.size());
             reply(res, 400, errorJson(e.what()));
         }
     });

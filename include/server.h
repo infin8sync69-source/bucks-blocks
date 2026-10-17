@@ -138,8 +138,10 @@ public:
     std::string walletError() const;
 
     // Optional wallet management. addWallet returns false (and keeps the
-    // wallet in memory only) if the file could not be written.
+    // wallet in memory only) if the file could not be written. `meta` fields
+    // (e.g. the word list a phrase needs) are stored in the wallet's entry.
     bool addWallet(const Wallet& wallet);
+    bool addWallet(const Wallet& wallet, const nlohmann::json& meta);
     std::vector<Wallet> getWallets() const;
 
     // WebSocket Notifications

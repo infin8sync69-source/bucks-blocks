@@ -1,7 +1,7 @@
 import { h, icon, card, append, kv, copyButton, pageHead, keyedRender, skeletonRows, errorState, notice, field, busy, toast } from "../ui.js";
 import { get, post, ApiError } from "../api.js";
 import { state, loadWallets, selectWallet, selectedWallet, emit } from "../store.js";
-import { fmtBucks, COINBASE_MATURITY, NETWORKS } from "../util.js";
+import { fmtBucks, COINBASE_MATURITY, NETWORKS, unusedRestoreAddress } from "../util.js";
 import { toSvg } from "../qr.js";
 
 // The recovery phrase lives only in this module variable while the user writes
@@ -155,7 +155,8 @@ export function mount(root) {
         }
         const r = await post("/api/wallets/create", body);
         const used = langs && langs.languages && langs.languages.find((l) => l.lang === r.language);
-        pending = { dev: !!(used && used.status === "dev"), draft: !!(used && used.status === "draft"), words: String(r.mnemonic).trim().split(/\s+/), direction: r.direction === "rtl" ? "rtl" : "ltr", canonical: r.canonicalMnemonic ? String(r.canonicalMnemonic).trim().split(/\s+/) : null, address: r.wallet && r.wallet.address, persisted: r.persisted !== false, saveError: r.error || "" };
+        const status = r.wordlistStatus || (used && used.status) || "";
+        pending = { dev: status === "dev", draft: status === "draft", words: String(r.mnemonic).trim().split(/\s+/), direction: r.direction === "rtl" ? "rtl" : "ltr", canonical: r.canonicalMnemonic ? String(r.canonicalMnemonic).trim().split(/\s+/) : null, address: r.wallet && r.wallet.address, persisted: r.persisted !== false, saveError: r.error || "" };
         r.mnemonic = null; r.canonicalMnemonic = null;
         await loadWallets(false);
         if (pending && pending.address) selectWallet(pending.address);
@@ -270,17 +271,20 @@ export function mount(root) {
     const phraseField = field({ id: "r-phrase", label: "Recovery phrase", hint: "Type or paste the words separated by spaces. They are sent only to your own node.", input: ta });
     const form = h("form", { class: "card", novalidate: true },
       h("div", { class: "stack" }, phraseField,
-        h("details", null, h("summary", { style: "cursor:pointer;margin-bottom:10px" }, "Advanced: passphrase"), field({ id: "r-pass", label: "Passphrase (optional)", hint: "Leave empty unless you set a passphrase when you created this wallet.", input: pass })),
+        h("details", null, h("summary", { style: "cursor:pointer;margin-bottom:10px" }, "Advanced: passphrase"), field({ id: "r-pass", label: "Passphrase (optional)", hint: "Leave empty unless this wallet was made with a passphrase. A wrong passphrase opens a different, empty wallet.", input: pass })),
         err,
         h("div", { class: "row actions" }, submit, h("button", { type: "button", class: "btn ghost", onclick: () => go("main") }, "Cancel"))));
-    form.addEventListener("submit", async (e) => {
+    form.addEventListener("submit", (e) => {
       e.preventDefault();
       err.replaceChildren();
       const phrase = ta.value.trim().replace(/\s+/g, " ");
       if (!phrase) { err.replaceChildren(notice("error", "Enter your recovery phrase.")); ta.focus(); return; }
+      restore({ mnemonic: phrase, passphrase: pass.value, includeCanonical: true });
+    });
+    async function restore(body) {
       busy(submit, true, "Restoring…");
       try {
-        const r = await post("/api/wallets/restore", { mnemonic: phrase, passphrase: pass.value, includeCanonical: true });
+        const r = await post("/api/wallets/restore", body);
         ta.value = ""; pass.value = "";
         await loadWallets(false);
         if (r.wallet) selectWallet(r.wallet.address);
@@ -294,10 +298,18 @@ export function mount(root) {
         }
         go("main");
       } catch (ex) {
-        err.replaceChildren(notice("error", ex instanceof ApiError && ex.offline ? "Cannot reach the node." : ex.status === 400 ? `The node rejected the phrase: ${ex.message}` : ex.message));
         submit.disabled = false; submit.textContent = "Restore wallet";
+        // A wrong passphrase gives a valid but different, empty wallet: the node asks before saving it.
+        const unused = unusedRestoreAddress(ex);
+        if (unused) {
+          err.replaceChildren(notice("warn", h("strong", null, "No coins found for this passphrase. "),
+            `The phrase and passphrase give the wallet ${unused}, which holds no coins on this node's chain. A mistyped passphrase gives a different, empty wallet. Check the passphrase, or add this wallet anyway.`),
+            h("div", { class: "row actions" }, h("button", { type: "button", class: "btn", onclick: () => { err.replaceChildren(); restore({ ...body, confirmUnused: true }); } }, "Add this wallet anyway")));
+          return;
+        }
+        err.replaceChildren(notice("error", ex instanceof ApiError && ex.offline ? "Cannot reach the node." : ex.status === 400 ? `The node rejected the phrase: ${ex.message}` : ex.message));
       }
-    });
+    }
     return h("div", { class: "stack" }, pageHead("Restore a wallet", "Rebuild a wallet on this node from its recovery phrase."), form);
   }
 
