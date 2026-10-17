@@ -556,6 +556,97 @@ TEST(Network, AddressTableSurvivesRestart) {
     EXPECT_EQ(again.addresses().size(), 2u);
 }
 
+namespace {
+
+// A header on `parent` with valid regtest proof of work; `tag` makes siblings differ.
+BlockHeader mineHeader(const ChainParams& p, const BlockHeader& parent, uint8_t tag) {
+    BlockHeader h;
+    h.version = parent.version;
+    h.height = parent.height + 1;
+    h.prevBlockHash = parent.hash();
+    h.merkleRoot = Hash256{};
+    h.merkleRoot[0] = tag;
+    h.merkleRoot[1] = uint8_t(h.height);
+    h.timestamp = parent.timestamp + 600;
+    h.bits = parent.bits;
+    for (h.nonce = 0; !Pow::checkProofOfWork(h.hash(), h.bits, p.powLimit); ++h.nonce) {}
+    return h;
+}
+
+// `length` headers from the genesis, tagged `tag`.
+std::vector<BlockHeader> forkFromGenesis(Node& node, size_t length, uint8_t tag) {
+    std::vector<BlockHeader> out;
+    BlockHeader parent = node.blockByHeight(0)->header;
+    for (size_t i = 0; i < length; ++i) {
+        out.push_back(mineHeader(node.params(), parent, tag));
+        parent = out.back();
+    }
+    return out;
+}
+
+NetMessage headersMessage(const std::vector<BlockHeader>& headers) {
+    Writer w;
+    w.compactSize(headers.size());
+    for (const BlockHeader& h : headers) {
+        const std::vector<uint8_t> raw = h.serialize();
+        w.bytes(raw.data(), raw.size());
+    }
+    return NetMessage(MessageType::HEADERS, w.take());
+}
+
+} // namespace
+
+// NET-NEW-3: every header that passed proof of work was stored, so one peer could fill a node's index and
+// disk with cheap forks from the genesis that never lead anywhere. A peer now has a budget of such headers;
+// past it its headers are not stored (and it is scored), while a branch with more work is always taken.
+TEST(P2pAudit, HeadersThatLeadNowhereAreCapped) {
+    NodeHarness a, b;
+    ASSERT_TRUE(a.node && b.node);
+    Wallet w;
+    w.generateKeys();
+    for (int i = 0; i < 5; ++i) ASSERT_TRUE(mineOne(*a.node, w));
+    const Hash256 tipBefore = a.node->tip().hash;
+
+    NetworkOptions small;
+    small.lowWorkHeaderBudget = 30;
+    Network netA(*a.node, small), netB(*b.node);
+    const uint16_t portA = freePort();
+    netA.start(portA);
+    netB.start(freePort());
+    ASSERT_TRUE(netB.connectToPeer("127.0.0.1", portA));
+    ASSERT_TRUE(waitFor([&] { return netA.peerCount() == 1 && netB.peerCount() == 1; }));
+
+    // 7 forks of 4 headers and one of 2: exactly the budget, all stored (shorter forks are normal).
+    for (uint8_t f = 0; f < 7; ++f) sendToAll(netB, headersMessage(forkFromGenesis(*a.node, 4, f)));
+    const std::vector<BlockHeader> last = forkFromGenesis(*a.node, 2, 7);
+    sendToAll(netB, headersMessage(last));
+    ASSERT_TRUE(waitFor([&] { return a.node->knowsHeader(last.back().hash()); }));
+
+    // Past the budget: neither a headers message nor an unrequested block is stored.
+    const std::vector<BlockHeader> over = forkFromGenesis(*a.node, 4, 8);
+    sendToAll(netB, headersMessage(over));
+    Block lone;
+    lone.header = forkFromGenesis(*a.node, 1, 9).back();
+    Transaction cb;
+    TransactionInput in;
+    in.prevIndex = 0xFFFFFFFF;
+    in.scriptSig = {0x01, 0x01};
+    cb.inputs.push_back(in);
+    cb.outputs.emplace_back(50 * Consensus::COIN, w.getP2PKHScript());
+    lone.transactions = {cb};
+    sendToAll(netB, NetMessage(MessageType::BLOCK, lone.serialize()));
+
+    // A branch with more work than the tip is still taken, whatever the count.
+    const std::vector<BlockHeader> heavy = forkFromGenesis(*a.node, 6, 10);
+    sendToAll(netB, headersMessage(heavy));
+    ASSERT_TRUE(waitFor([&] { return a.node->knowsHeader(heavy.back().hash()); })) << "a heavier branch was refused";
+    for (const BlockHeader& h : over) EXPECT_FALSE(a.node->knowsHeader(h.hash()));
+    EXPECT_FALSE(a.node->knowsHeader(lone.header.hash()));
+    EXPECT_EQ(a.node->tip().hash, tipBefore);
+    netB.stop();
+    netA.stop();
+}
+
 // NET-NEW-4: a peer cannot fill the table; what is beyond its allowance is dropped unread.
 TEST(P2pAudit, AddressFloodIsRateLimited) {
     TwoNodes t;

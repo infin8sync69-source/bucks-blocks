@@ -4,6 +4,7 @@
 #include "serialize.h"
 #include "consensus.h"
 #include "fsutil.h"
+#include "pow.h"
 #include <iostream>
 #include <cerrno>
 #include <cstring>
@@ -712,6 +713,40 @@ void Peer::askForAddresses() {
     sendMsg(NetMessage(MessageType::GETADDR, {}));
 }
 
+// Counts the headers of a batch that we do not know yet and that do not lead to more work than our
+// active tip, and refuses the batch once this peer's total would pass lowWorkHeaderBudget. Such
+// headers are stored for ever and a fork from genesis can be replayed to every node, so one
+// connection may not make us store an unlimited number of them (audit NET-NEW-3). A batch that
+// does lead past the tip resets the count: an honest peer on a heavier branch is never limited,
+// and an attacker would need more work than the whole chain. Which headers are valid and which
+// chain is best do not change; a refused batch is simply not stored.
+bool Peer::withinHeaderBudget(const std::vector<BlockHeader>& headers) {
+    Node& node = network.getNode();
+    const std::optional<U256> parentWork = node.chainWorkOf(headers.front().prevBlockHash);
+    if (!parentWork) return true;   // unknown parent: nothing is stored (MISSING_PARENT)
+    U256 work = *parentWork;
+    uint32_t lastBits = 0;
+    U256 proof;
+    for (const BlockHeader& h : headers) {
+        if (h.bits != lastBits) proof = Pow::blockProof(lastBits = h.bits);   // bits change once per 2016 at most
+        work += proof;
+    }
+    if (work > node.tip().chainWork) {
+        lowWorkHeaders_ = 0;
+        return true;
+    }
+    size_t fresh = 0;
+    for (const BlockHeader& h : headers)
+        if (!node.knowsHeader(h.hash())) ++fresh;
+    if (lowWorkHeaders_ + fresh > network.options().lowWorkHeaderBudget) {
+        Bucks::logErr() << "DEBUG: Peer " << ip << " sent " << fresh << " more headers that lead nowhere ("
+                        << lowWorkHeaders_ << " already); not storing them" << std::endl;
+        return false;
+    }
+    lowWorkHeaders_ += fresh;
+    return true;
+}
+
 void Peer::requestMissingBlocks() {
     if (requestedBlocks.size() >= MAX_BLOCKS_IN_FLIGHT) return;
     std::vector<Hash256> missing = network.getNode().missingBlocksOnBestHeaderChain(MAX_BLOCKS_IN_FLIGHT);
@@ -869,6 +904,10 @@ void Peer::handleMessage(const NetMessage& msg) {
                 break;
             }
             if (headers.empty()) break;
+            if (!withinHeaderBudget(headers)) {
+                misbehavior(20);
+                break;
+            }
             // Headers must connect to each other; the first one's parent must be known.
             const ValidationState st = node.submitHeaders(headers);
             if (st.result == ValidationResult::MISSING_PARENT) {
@@ -908,6 +947,11 @@ void Peer::handleMessage(const NetMessage& msg) {
             }
             const Hash256 hash = b.getHash();
             const bool requested = requestedBlocks.erase(hash) > 0;
+            // An unrequested block stores its header even when the block itself is dropped.
+            if (!requested && !withinHeaderBudget({b.header})) {
+                misbehavior(20);
+                break;
+            }
             const ValidationState st = node.submitBlock(b, requested);
             if (st.valid()) {
                 Bucks::logOut() << "DEBUG: Accepted block " << b.header.height << " from " << ip << std::endl;

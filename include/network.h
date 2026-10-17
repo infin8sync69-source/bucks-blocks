@@ -51,6 +51,9 @@ struct NetworkOptions {
     size_t maxInbound = MAX_INBOUND_PEERS;
     std::chrono::seconds pingInterval{120};        // to every active peer
     std::chrono::seconds inactivityTimeout{1200};  // nothing received for this long: disconnect
+    // Headers a peer may make us store that do not lead to more work than our tip (forks that
+    // go nowhere). Every header on main costs 2^32 hashes but is kept for ever (audit NET-NEW-3).
+    size_t lowWorkHeaderBudget = 4000;
 };
 
 std::vector<uint8_t> serializeInvs(const std::vector<struct Inventory>& invs);
@@ -291,6 +294,7 @@ private:
     std::chrono::steady_clock::time_point addrTokensAt;
     uint16_t listenPort_ = 0;
     bool answeredGetAddr_ = false;
+    size_t lowWorkHeaders_ = 0;
 
     // Encryption (Phase 5)
     std::unique_ptr<P2PSessionEncryption> encryption;
@@ -301,6 +305,7 @@ private:
     // data of the best header chain, at most 16 blocks in flight per peer.
     void requestHeaders();
     void requestMissingBlocks();
+    bool withinHeaderBudget(const std::vector<BlockHeader>& headers);
 };
 
 // ------------------------------------------------------------
@@ -333,6 +338,7 @@ public:
     void update();
 
     Node& getNode() { return node; }
+    const NetworkOptions& options() const { return options_; }
     const std::array<uint8_t, 4>& magic() const { return magic_; }
 
     // How many blocks from peers were rejected with each result category. Loopback peers

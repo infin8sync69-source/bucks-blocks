@@ -60,6 +60,8 @@ public:
     std::optional<Block> blockByHash(const Hash256& hash) const;
     bool haveBlockData(const Hash256& hash) const;     // block bytes stored
     bool knowsHeader(const Hash256& hash) const;
+    // Cumulative work of the chain that ends at a known header; empty if it is unknown.
+    std::optional<U256> chainWorkOf(const Hash256& hash) const;
     std::vector<Hash256> locator() const;
     std::vector<BlockHeader> headersAfter(const std::vector<Hash256>& locator, const Hash256& stop,
                                           size_t max) const;
