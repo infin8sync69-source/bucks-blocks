@@ -6,7 +6,10 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <filesystem>
 
+#include "bip_8192.h"
+#include "fsutil.h"
 #include "node.h"
 #include "log.h"
 #include "chainparams.h"
@@ -31,7 +34,10 @@ static void printUsage() {
         "  --p2p-port <n>            P2P port (default: per network, 8733 on main)\n"
         "  --connect <host:port>     keep a connection to this peer (repeatable)\n"
         "  --seed <host:port>        seed node, dialled while there are fewer than 3 peers (repeatable)\n"
-        "  --web-root <dir>          static UI directory (default: web/ next to the sources)\n"
+        "  --web-root <dir>          static UI directory (default: the source tree's web/, else\n"
+        "                            <exe dir>/../share/bucks/web)\n"
+        "  --wordlist-dir <dir>      mnemonic word lists (default: $BUCKS_WORDLIST_DIR, the source tree's\n"
+        "                            wordlists/, else <exe dir>/../share/bucks/wordlists)\n"
         "  --import-legacy-wallets <file>  read an old wallets.json once (never written)\n"
         "  --datadir <dir>           wallets, API cookie and <network>/chain.sqlite (default ~/.bucks)\n"
         "  --checkblocks <n>         verify the last n blocks at start (default 24, 0 = all)\n"
@@ -66,11 +72,8 @@ int main(int argc, char* argv[]) {
     uint16_t p2pPort = 0;
     std::vector<std::string> connectPeers;
     std::vector<std::string> seedPeers;
-#ifdef BUCKS_SOURCE_DIR
-    std::string webRoot = std::string(BUCKS_SOURCE_DIR) + "/web";
-#else
-    std::string webRoot = "web";
-#endif
+    std::string webRoot;        // "" = the bundled UI (see below)
+    std::string wordlistDir;    // "" = $BUCKS_WORDLIST_DIR or the bundled lists
     bool enableIPFS = false;
     uint16_t ipfsPort = 5001;
     bool autoMine = false;
@@ -109,6 +112,8 @@ int main(int argc, char* argv[]) {
             seedPeers.push_back(argv[++i]);
         } else if (arg == "--web-root" && i + 1 < argc) {
              webRoot = argv[++i];
+        } else if (arg == "--wordlist-dir" && i + 1 < argc) {
+             wordlistDir = argv[++i];
         } else if (arg == "--ipfs-enable") {
              enableIPFS = true;
         } else if (arg == "--ipfs-port" && i + 1 < argc) {
@@ -169,6 +174,33 @@ int main(int argc, char* argv[]) {
                 Bucks::logErr() << "       (use --network=test or --network=regtest until mainnet launches)\n";
             return 3;
         }
+    }
+
+    // Web UI and word lists: an explicit option wins, then the source tree the binary was built from, then
+    // the install layout <prefix>/share/bucks/ (audit OPS-06). Creating or restoring a wallet needs the lists,
+    // so a server whose lists are missing or do not match their pins stops here, before touching the chain.
+    if (!wordlistDir.empty()) setWordlistDir(wordlistDir);
+    if (startServer) {
+        if (webRoot.empty()) {
+            const std::vector<std::string> candidates = bundledDirCandidates("web");
+            std::error_code ec;
+            for (const std::string& c : candidates) {
+                if (std::filesystem::is_regular_file(std::filesystem::path(c) / "index.html", ec)) { webRoot = c; break; }
+            }
+            if (webRoot.empty()) {
+                std::string tried;
+                for (const std::string& c : candidates) tried += (tried.empty() ? "" : ", ") + c;
+                Bucks::logErr() << "⚠ No web UI found (looked in: " << tried << "); pass --web-root <dir>\n";
+                webRoot = candidates.empty() ? "web" : candidates.back();
+            }
+        }
+        std::string err;
+        if (!loadWordlists(&err)) {
+            Bucks::logErr() << "FATAL: " << err << "\n"
+                            << "       (pass --wordlist-dir <dir>; an installed node has them in <prefix>/share/bucks/wordlists)\n";
+            return 1;
+        }
+        Bucks::logOut() << "✓ Word lists: " << resolveWordlistDir() << "\n";
     }
 
     // Open the chain: <datadir>/<network>/chain.sqlite. Exit codes (storage spec section 4):

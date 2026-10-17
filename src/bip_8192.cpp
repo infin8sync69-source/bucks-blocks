@@ -72,8 +72,9 @@
 //   entropy, the same wallet is reached from any language's phrase.
 //
 // WORDLIST DIRECTORY (first hit wins; see resolveWordlistDir)
-//   setWordlistDir() > $BUCKS_WORDLIST_DIR > <exe>/../wordlists >
-//   <exe>/wordlists > BUCKS_SOURCE_DIR/wordlists. Never the working directory.
+//   setWordlistDir() (--wordlist-dir) > $BUCKS_WORDLIST_DIR >
+//   BUCKS_SOURCE_DIR/wordlists > <exe>/../share/bucks/wordlists >
+//   <exe>/../wordlists > <exe>/wordlists. Never the working directory.
 //   The two explicit settings are used as given (no fallback) so a wrong
 //   configuration fails loudly instead of silently picking another list.
 // ============================================================================
@@ -81,6 +82,7 @@
 #include "bip_8192.h"
 #include "arabic_nfkd_table.h"
 #include "crypto.h"
+#include "fsutil.h"
 
 #include <nlohmann/json.hpp>
 #include <openssl/crypto.h>
@@ -93,13 +95,6 @@
 #include <sstream>
 #include <unordered_set>
 
-#if defined(__APPLE__)
-#include <mach-o/dyld.h>
-#elif defined(_WIN32)
-#include <windows.h>
-#elif defined(__linux__)
-#include <unistd.h>
-#endif
 
 namespace Bucks {
 
@@ -402,34 +397,6 @@ std::mutex g_mutex;
 std::string g_overrideDir;                   // setWordlistDir()
 std::shared_ptr<const Registry> g_registry;  // last successful load
 
-std::string executableDir() {
-    std::string path;
-#if defined(__APPLE__)
-    uint32_t size = 0;
-    _NSGetExecutablePath(nullptr, &size);
-    std::vector<char> buf(size + 1, '\0');
-    if (size == 0 || _NSGetExecutablePath(buf.data(), &size) != 0) return "";
-    path.assign(buf.data());
-#elif defined(_WIN32)
-    char buf[MAX_PATH];
-    DWORD n = GetModuleFileNameA(nullptr, buf, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH) return "";
-    path.assign(buf, n);
-#elif defined(__linux__)
-    char buf[4096];
-    ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    if (n <= 0) return "";
-    path.assign(buf, static_cast<size_t>(n));
-#else
-    return "";
-#endif
-    std::error_code ec;
-    fs::path p = fs::weakly_canonical(fs::path(path), ec);
-    if (ec) p = fs::absolute(fs::path(path), ec);
-    if (ec) return "";
-    return p.parent_path().string();
-}
-
 bool hasManifest(const std::string& dir) {
     std::error_code ec;
     return !dir.empty() && fs::is_regular_file(fs::path(dir) / MANIFEST_NAME, ec);
@@ -442,16 +409,15 @@ std::string resolveDirLocked(std::string* err) {
         if (*env) return env;
     }
 
-    std::vector<std::string> candidates;
+    // The source tree while it exists, then the install layout <prefix>/share/bucks/wordlists (audit OPS-06),
+    // then the older layouts next to the binary. No ./wordlists: the working directory must not decide which
+    // list a phrase is read with (audit WAL-14).
+    std::vector<std::string> candidates = bundledDirCandidates("wordlists");
     std::string exe = executableDir();
     if (!exe.empty()) {
         candidates.push_back((fs::path(exe) / ".." / "wordlists").lexically_normal().string());
         candidates.push_back((fs::path(exe) / "wordlists").string());
     }
-#ifdef BUCKS_SOURCE_DIR
-    candidates.push_back((fs::path(BUCKS_SOURCE_DIR) / "wordlists").string());
-#endif
-    // No ./wordlists: the working directory must not decide which list a phrase is read with (audit WAL-14).
 
     for (const auto& c : candidates)
         if (hasManifest(c)) return c;

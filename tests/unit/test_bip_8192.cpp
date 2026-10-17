@@ -2,6 +2,7 @@
 #include "bip_8192.h"
 #include "bip_custom.h"
 #include "crypto.h"
+#include "fsutil.h"
 #include "mnemonic_test_util.h"
 
 #include <nlohmann/json.hpp>
@@ -170,6 +171,21 @@ TEST_F(MnemonicDir, DefaultResolutionFindsRepoManifest) {
     auto langs = mnemonicLanguages();
     ASSERT_GE(langs.size(), 1u);
     EXPECT_EQ(langs[0], "ar-dev");   // the placeholder stays first, so it stays the default
+}
+
+// OPS-06: a copied or installed binary finds <prefix>/share/bucks/<name> next to <prefix>/bin.
+TEST_F(MnemonicDir, BundledDirectoriesFollowTheInstallLayout) {
+    const std::string src = (fs::path("/src") / "bucks").string();
+    const std::string bin = (fs::path("/opt") / "bucks" / "bin").string();
+    const std::vector<std::string> both = bundledDirCandidates("wordlists", src, bin);
+    ASSERT_EQ(both.size(), 2u);
+    EXPECT_EQ(both[0], (fs::path(src) / "wordlists").string());   // the source tree first, while it exists
+    EXPECT_EQ(both[1], (fs::path("/opt") / "bucks" / "share" / "bucks" / "wordlists").string());
+    const std::vector<std::string> installed = bundledDirCandidates("web", "", bin);
+    ASSERT_EQ(installed.size(), 1u);
+    EXPECT_EQ(installed[0], (fs::path("/opt") / "bucks" / "share" / "bucks" / "web").string());
+    // This build: the source tree's lists come first.
+    EXPECT_EQ(bundledDirCandidates("wordlists").front(), (fs::path(BUCKS_SOURCE_DIR) / "wordlists").string());
 }
 
 TEST_F(MnemonicDir, EmptyEnvDirFailsClosed) {

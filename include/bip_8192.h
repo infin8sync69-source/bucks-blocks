@@ -125,12 +125,13 @@ bool loadWordlistFile(const std::string& path,
 
 /**
  * Where lists are looked up (first hit wins):
- *   1. setWordlistDir()            (explicit; no fallback if it is wrong)
+ *   1. setWordlistDir()            (--wordlist-dir; no fallback if it is wrong)
  *   2. $BUCKS_WORDLIST_DIR         (explicit; no fallback if it is wrong)
- *   3. <executable dir>/../wordlists
- *   4. <executable dir>/wordlists
- *   5. BUCKS_SOURCE_DIR/wordlists  (compile-time, if defined)
- * Candidates 3-5 qualify only if they contain manifest.json. The working
+ *   3. BUCKS_SOURCE_DIR/wordlists  (compile-time, if defined)
+ *   4. <executable dir>/../share/bucks/wordlists  (install layout)
+ *   5. <executable dir>/../wordlists
+ *   6. <executable dir>/wordlists
+ * Candidates 3-6 qualify only if they contain manifest.json. The working
  * directory is never searched.
  * An empty string clears the override. Changing the directory drops the cache.
  */
