@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 
+#include "crypto.h"
 #include "node.h"
 #include "log.h"
 #include "chainparams.h"
@@ -152,6 +153,17 @@ int main(int argc, char* argv[]) {
              Bucks::logErr() << "✗ Unknown or incomplete option: " << arg << "\n";
              printUsage();
              return 2;
+        }
+    }
+
+    // The hash and signature primitives are consensus: a broken crypto library must not get near the chain
+    // (audit NEW-4). Exit code 3 like a genesis mismatch: this build cannot follow the network.
+    {
+        std::string err;
+        if (!cryptoSelfTest(err)) {
+            Bucks::logErr() << "FATAL: cryptographic self-test failed: " << err
+                            << " (check the OpenSSL library this binary runs with)\n";
+            return 3;
         }
     }
 

@@ -18,7 +18,9 @@ option(BUCKS_WERROR "Treat warnings in Bucks C++ code as errors" OFF)
 set(BUCKS_SANITIZE "" CACHE STRING
     "Sanitizers for every target, e.g. address,undefined (empty = none)")
 
-find_package(OpenSSL REQUIRED)
+# OpenSSL 3: EVP one-shot digests, EC and the version check in src/crypto.cpp. RIPEMD-160 is in-tree,
+# so the legacy provider is never needed.
+find_package(OpenSSL 3.0 REQUIRED)
 find_package(Threads REQUIRED)
 
 # Hardening for every target, including the vendored sqlite3.c and googletest.
