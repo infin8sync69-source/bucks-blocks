@@ -189,6 +189,7 @@ int main(int argc, char* argv[]) {
     // P2P network. Seeds and --connect peers are registered before the network thread starts,
     // so its first round already dials them (audit NET-NEW-8).
     Network network(node);
+    network.setAddressFile(networkDir + "/peers.dat");   // addresses learned from peers, kept across restarts
     auto splitHostPort = [](const std::string& hp, std::string& host, uint16_t& port) {
         const size_t colon = hp.rfind(':');
         if (colon == std::string::npos || colon == 0) return false;

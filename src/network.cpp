@@ -3,6 +3,7 @@
 #include "node.h"
 #include "serialize.h"
 #include "consensus.h"
+#include "fsutil.h"
 #include <iostream>
 #include <cerrno>
 #include <cstring>
@@ -484,6 +485,50 @@ size_t AddrMan::size() const {
 size_t AddrMan::triedCount() const {
     std::lock_guard<std::mutex> lock(mu_);
     return triedCount_;
+}
+
+std::string AddrMan::serialize() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    std::ostringstream out;
+    out << "bucks-addresses 1\n";
+    for (const auto& [a, e] : entries_) {
+        out << a.toString() << ' ' << (e.tried ? 1 : 0) << ' ' << e.lastSeen << ' ' << e.lastTry << ' '
+            << e.lastSuccess << ' ' << e.attempts << ' ' << e.sourceGroup << '\n';
+    }
+    return out.str();
+}
+
+size_t AddrMan::load(const std::string& text) {
+    std::istringstream in(text);
+    std::string line;
+    if (!std::getline(in, line) || line != "bucks-addresses 1") return 0;
+    size_t taken = 0;
+    while (std::getline(in, line)) {
+        std::istringstream fields(line);
+        std::string addr;
+        Entry e;
+        int tried = 0;
+        if (!(fields >> addr >> tried >> e.lastSeen >> e.lastTry >> e.lastSuccess >> e.attempts >> e.sourceGroup))
+            continue;
+        if (!NetAddress::parse(addr, e.addr) || !e.addr.isValid() || e.attempts < 0) continue;
+        std::lock_guard<std::mutex> lock(mu_);
+        if (entries_.count(e.addr)) continue;
+        if (tried == 1 && e.lastSuccess > 0) {
+            if (triedCount_ >= MAX_TRIED) continue;
+            e.tried = true;
+            ++triedCount_;
+        } else {
+            const auto share = newPerSource_.find(e.sourceGroup);
+            if (newCount_ >= MAX_NEW || (share != newPerSource_.end() && share->second >= MAX_NEW_PER_SOURCE_GROUP))
+                continue;
+            e.tried = false;
+            ++newPerSource_[e.sourceGroup];
+            ++newCount_;
+        }
+        entries_.emplace(e.addr, e);
+        ++taken;
+    }
+    return taken;
 }
 
 // ------------------------------------------------------------
@@ -1026,15 +1071,17 @@ void Network::start(uint16_t port) {
 }
 
 void Network::stop() {
-    if (!running) return;
-    running = false;
-    {
-        // The resolver checks `running` under dnsMutex_, so it cannot miss this wake-up.
-        std::lock_guard<std::mutex> lock(dnsMutex_);
+    if (running) {
+        running = false;
+        {
+            // The resolver checks `running` under dnsMutex_, so it cannot miss this wake-up.
+            std::lock_guard<std::mutex> lock(dnsMutex_);
+        }
+        dnsCv_.notify_all();
+        if (networkThread.joinable()) networkThread.join();
+        if (dnsThread_.joinable()) dnsThread_.join();   // waits for a lookup in progress
     }
-    dnsCv_.notify_all();
-    if (networkThread.joinable()) networkThread.join();
-    if (dnsThread_.joinable()) dnsThread_.join();   // waits for a lookup in progress
+    saveAddresses();
 
     std::lock_guard<std::mutex> lock(peersMutex);
     peers.clear();
@@ -1670,6 +1717,23 @@ void Network::broadcast(const NetMessage& msg) {
 void Network::update() {
     maintainConnections();
     sendPings();
+    if (std::chrono::steady_clock::now() - lastAddressSave_ > std::chrono::minutes(15)) saveAddresses();
+}
+
+void Network::setAddressFile(const std::string& path) {
+    addressFile_ = path;
+    lastAddressSave_ = std::chrono::steady_clock::now();
+    std::string text;
+    if (!readWholeFile(path, text)) return;   // none yet: normal on a first start
+    Bucks::logOut() << "DEBUG: Loaded " << addrman_.load(text) << " peer addresses from " << path << std::endl;
+}
+
+void Network::saveAddresses() {
+    lastAddressSave_ = std::chrono::steady_clock::now();
+    if (addressFile_.empty()) return;
+    std::string err;
+    if (!writePrivateFileAtomic(addressFile_, addrman_.serialize(), &err))
+        Bucks::logErr() << "WARNING: cannot write " << addressFile_ << ": " << err << std::endl;
 }
 
 // Every active peer gets a ping (8 random bytes) each pingInterval, so a peer that went away

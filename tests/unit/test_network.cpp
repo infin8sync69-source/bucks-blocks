@@ -265,3 +265,30 @@ TEST(NetworkPolicyTest, SlotsAddUp) {
     EXPECT_EQ(MAX_INBOUND_PEERS + MAX_OUTBOUND_PEERS + MAX_MANUAL_PEERS, MAX_PEERS);
     EXPECT_LT(MAX_INBOUND_PEERS, MAX_PEERS);
 }
+
+TEST(AddrManTest, SaveAndLoad) {
+    AddrMan m;
+    const NetAddress good = na(9, 9, 9, 9), heard = na(8, 8, 8, 8);
+    m.add(heard, 77, kNow);
+    m.attempt(heard, kNow + 5);
+    m.good(good, kNow + 10);
+    const std::string text = m.serialize();
+
+    AddrMan again;
+    EXPECT_EQ(again.load(text + "1.2.3.4:5 junk\nnot an address 0 0 0 0 0 0\n0.0.0.0:80 0 1 0 0 0 1\n"), 2u);
+    auto g = again.find(good), h = again.find(heard);
+    ASSERT_TRUE(g && h);
+    EXPECT_TRUE(g->tried);
+    EXPECT_EQ(g->lastSuccess, kNow + 10);
+    EXPECT_FALSE(h->tried);
+    EXPECT_EQ(h->attempts, 1);
+    EXPECT_EQ(h->sourceGroup, 77u);
+    EXPECT_EQ(again.triedCount(), 1u);
+    EXPECT_EQ(again.load("something else\n" + text), 0u);
+
+    // The bounds hold for a file written by hand.
+    std::string big = "bucks-addresses 1\n";
+    for (uint32_t i = 0; i < 5000; ++i) big += na(20, 1, i / 256, i % 256).toString() + " 0 1 0 0 0 5\n";
+    AddrMan bounded;
+    EXPECT_EQ(bounded.load(big), AddrMan::MAX_NEW_PER_SOURCE_GROUP);
+}

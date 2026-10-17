@@ -193,6 +193,11 @@ public:
     size_t size() const;
     size_t triedCount() const;
 
+    // One line per entry, for peers.dat. load() keeps the bounds above and skips lines it
+    // cannot read; it returns how many entries it took.
+    std::string serialize() const;
+    size_t load(const std::string& text);
+
 private:
     bool isTerrible(const Entry& e, int64_t now) const;
     void evictNew(uint32_t sourceGroup, int64_t now);
@@ -357,6 +362,9 @@ public:
     // Random per process; a VERSION carrying it means we dialled ourselves.
     uint64_t localNonce() const { return localNonce_; }
     void markSelf(const std::string& hostPort);
+    // Keeps the address table in this file across restarts: read now, written every 15 minutes
+    // and at stop(). Call before start().
+    void setAddressFile(const std::string& path);
     // Whether one more automatic outbound peer at `a` would exceed MAX_OUTBOUND_PER_GROUP, given
     // how many outbound peers each /16 has. Loopback and LAN addresses are not limited.
     static bool outboundGroupFull(const NetAddress& a, const std::map<uint32_t, size_t>& outboundGroups);
@@ -392,6 +400,9 @@ private:
     void dialFromAddressTable(size_t outbound, const std::set<NetAddress>& linked,
                               const std::map<uint32_t, size_t>& outboundGroups);
     void sendPings();
+    std::string addressFile_;
+    std::chrono::steady_clock::time_point lastAddressSave_;
+    void saveAddresses();
 
     // --connect peers (MANUAL) and seeds (SEED), redialled by maintainConnections. Guarded by
     // peersMutex; entries are only ever appended.

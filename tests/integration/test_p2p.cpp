@@ -540,6 +540,22 @@ TEST(P2pAudit, SilentPeerIsDropped) {
     netA.stop();
 }
 
+// NET-NEW-2: the address table is kept across restarts, so a node whose seed is down at start can still
+// reach the peers it knew.
+TEST(Network, AddressTableSurvivesRestart) {
+    NodeHarness h;
+    ASSERT_TRUE(h.node) << h.error;
+    const std::string file = h.root() + "/peers.dat";
+    {
+        Network net(*h.node);
+        net.setAddressFile(file);
+        EXPECT_EQ(net.addAddresses({"9.9.9.9:8733", "8.8.8.8:8733"}, "1.1.1.1"), 2u);
+    }   // written when the network goes away
+    Network again(*h.node);
+    again.setAddressFile(file);
+    EXPECT_EQ(again.addresses().size(), 2u);
+}
+
 // NET-NEW-4: a peer cannot fill the table; what is beyond its allowance is dropped unread.
 TEST(P2pAudit, AddressFloodIsRateLimited) {
     TwoNodes t;
