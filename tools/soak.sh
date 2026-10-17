@@ -36,7 +36,8 @@ cleanup() { for p in "${PIDS[@]}"; do [ -n "$p" ] && kill "$p" 2>/dev/null; done
 trap cleanup EXIT
 
 echo "soak dir: $DIR"
-start_node 0 --auto-mine
+# A fixed payout address: the fresh datadir has no wallet, and --auto-mine refuses to run without one.
+start_node 0 --auto-mine --mine-address tVv3EEBzQBHJp9MoZEE3EDh7TYzj9jqtzg
 start_node 1 --connect "127.0.0.1:$BASE_P2P"
 start_node 2 --connect "127.0.0.1:$BASE_P2P"
 sleep 2

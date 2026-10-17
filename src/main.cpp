@@ -44,7 +44,10 @@ static void printUsage() {
         "  --api-cors-origin <o>     allow this exact origin cross-origin (repeatable)\n"
         "  --api-allowed-host <h>    accept this Host header (repeatable)\n"
         "  --trust-proxy             rate-limit on X-Forwarded-For (behind a trusted proxy only)\n"
-        "  --ipfs-enable, --ipfs-port <n>, --auto-mine\n"
+        "  --auto-mine               mine from the start (implies --server); needs --mine-address or a wallet\n"
+        "  --mine-address <addr>     pay every mined block to this address: no wallet or key on this node\n"
+        "  --mine-threads <n>        hashing threads (default 0 = one per CPU core)\n"
+        "  --ipfs-enable, --ipfs-port <n>\n"
         "Without --api-token/--api-token-file/$BUCKS_API_TOKEN a random token is\n"
         "written to <datadir>/.cookie at start; the web UI asks for it.\n";
 }
@@ -74,6 +77,8 @@ int main(int argc, char* argv[]) {
     bool enableIPFS = false;
     uint16_t ipfsPort = 5001;
     bool autoMine = false;
+    std::string mineAddress;        // --mine-address: coinbase payout, no wallet needed
+    unsigned mineThreads = 0;       // --mine-threads: 0 = one per CPU
     std::string apiBind = "127.0.0.1";
     std::string apiToken;
     std::string apiTokenFile;
@@ -116,6 +121,16 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--auto-mine") {
              autoMine = true;
              startServer = true; // auto-mine implies server mode
+        } else if (arg == "--mine-address" && i + 1 < argc) {
+             mineAddress = argv[++i];
+        } else if (arg == "--mine-threads" && i + 1 < argc) {
+             const std::string v = argv[++i];
+             if (v.empty() || v.size() > 4 || v.find_first_not_of("0123456789") != std::string::npos ||
+                 std::stoul(v) > 1024) {
+                 Bucks::logErr() << "✗ --mine-threads expects 0 (one per CPU) to 1024, got '" << v << "'\n";
+                 return 2;
+             }
+             mineThreads = static_cast<unsigned>(std::stoul(v));
         } else if (arg == "--api-bind" && i + 1 < argc) {
              apiBind = argv[++i];
         } else if (arg == "--api-token" && i + 1 < argc) {
@@ -170,6 +185,17 @@ int main(int argc, char* argv[]) {
             return 3;
         }
     }
+    if (!mineAddress.empty()) {
+        try {
+            Wallet::addressToP2PKHScript(mineAddress, params.p2pkhAddressVersion);
+        } catch (const std::exception&) {
+            Bucks::logErr() << "✗ --mine-address " << mineAddress << " is not a valid " << params.name
+                            << " address (a typo, or an address of another network)\n";
+            return 2;
+        }
+    }
+    if (!startServer && (!mineAddress.empty() || mineThreads))
+        Bucks::logErr() << "⚠ --mine-address and --mine-threads only apply with --server or --auto-mine\n";
 
     // Open the chain: <datadir>/<network>/chain.sqlite. Exit codes (storage spec section 4):
     // 3 parameters/genesis/network mismatch, 4 storage failure, 6 database corrupt, 7 unsupported version.
@@ -247,7 +273,20 @@ int main(int argc, char* argv[]) {
         serverConfig.corsOrigins = corsOrigins;
         serverConfig.allowedHosts = allowedHosts;
         serverConfig.trustProxy = trustProxy;
+        serverConfig.mineAddress = mineAddress;
+        serverConfig.mineThreads = mineThreads;
         server = new Server(node, &network, serverConfig);
+        // --auto-mine with nowhere to pay the rewards is a configuration error: refuse to start
+        // instead of running a node that silently does not mine (audit OPS-03).
+        std::string mineErr;
+        if (autoMine && !server->minerPayoutReady(mineErr)) {
+            Bucks::logErr() << "✗ --auto-mine: " << mineErr << "\n"
+                            << "  (on a server prefer --mine-address <address>: the reward key then never sits on it)\n";
+            delete server;
+            network.stop();
+            node.shutdown();
+            return 2;
+        }
         if (!server->start(port)) {
             Bucks::logErr() << "✗ Failed to start server\n";
             delete server;
@@ -263,10 +302,13 @@ int main(int argc, char* argv[]) {
             Bucks::logErr() << "⚠ Wallet subsystem disabled: " << server->walletError() << "\n";
         }
 
-        if (autoMine) {
-            std::string err;
-            if (server->startAutoMine(err)) Bucks::logOut() << "✓ Node configured for mining (rewards → primary wallet)\n";
-            else Bucks::logErr() << "✗ Auto-mining not started: " << err << "\n";
+        if (autoMine && !server->startAutoMine(mineErr)) {
+            Bucks::logErr() << "✗ --auto-mine: " << mineErr << "\n";
+            server->stop();
+            delete server;
+            network.stop();
+            node.shutdown();
+            return 1;
         }
     }
 

@@ -43,7 +43,7 @@ mkdir -p "${PILOT_DIR}/node3"
         --p2p-port 8333 \
         --connect 127.0.0.1:8334 \
         --connect 127.0.0.1:8335 \
-        --auto-mine
+        --auto-mine --mine-address tVv3EEBzQBHJp9MoZEE3EDh7TYzj9jqtzg
 ) &
 PID1=$!
 echo "Node 1 started (PID $PID1) — mining genesis block..."

@@ -1,8 +1,11 @@
 // Mining through the REST API: one race-free mining thread (audit SAN-2, NEW-6), "mine one
-// block" as a background search (ML-4, NEW-5) and a live status (ML-3, ONB-14).
+// block" as a background search (ML-4, NEW-5), a live status (ML-3, ONB-14) and the payout
+// (--mine-address: OPS-03, OPS-04, NEW-4; the chosen wallet: ONB-12).
 #include <gtest/gtest.h>
 #include "server.h"
 #include "node.h"
+#include "wallet.h"
+#include "crypto.h"
 #include "consensus.h"
 #include "pow.h"
 #include "validation_rules.h"
@@ -332,5 +335,142 @@ TEST_F(ServerMiningTest, StatusSaysWhyMiningIsBlocked) {
     ASSERT_TRUE(server.start());
     httplib::Client cli("127.0.0.1", server.port());
     EXPECT_EQ(status(cli)["blockedReason"], "node is syncing");
+    server.stop();
+}
+
+// ---------------------------------------------------------------------------
+// Payout: --mine-address (OPS-04, NEW-4, GAP-1) and the reward wallet chosen in the UI (ONB-12)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::string addressFor(uint8_t version, const std::string& seed) {
+    const Bucks::Hash256 h = Bucks::sha256(std::vector<uint8_t>(seed.begin(), seed.end()));
+    return Bucks::base58CheckEncode(version, std::vector<uint8_t>(h.begin(), h.begin() + 20));
+}
+
+std::vector<uint8_t> scriptFor(const std::string& address, const Bucks::ChainParams& p) {
+    return Bucks::Wallet::addressToP2PKHScript(address, p.p2pkhAddressVersion);
+}
+
+} // namespace
+
+TEST_F(ServerMiningTest, MineAddressPaysWithoutAWallet) {
+    const Bucks::ChainParams& p = Bucks::chainParams(Bucks::NetworkId::REGTEST);
+    openChain(p);
+    cfg.mineAddress = addressFor(p.p2pkhAddressVersion, "cold");
+    const std::string other = addressFor(p.p2pkhAddressVersion, "hot");
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start());
+    httplib::Client cli("127.0.0.1", server.port());
+    cli.set_read_timeout(10, 0);
+    ASSERT_TRUE(server.getWallets().empty());
+    std::string err;
+    EXPECT_TRUE(server.minerPayoutReady(err)) << err;
+    EXPECT_EQ(status(cli)["fixedPayoutAddress"], cfg.mineAddress);
+
+    auto r = cli.Post("/api/mining/mine", tokenHeader, "{}", "application/json");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    EXPECT_EQ(json::parse(r->body)["minerAddress"], cfg.mineAddress);
+    EXPECT_EQ(chain->blockByHeight(1)->transactions[0].outputs[0].scriptPubKey, scriptFor(cfg.mineAddress, p));
+
+    // A request cannot redirect the operator's payout, but naming the same address is fine.
+    r = cli.Post("/api/mining/mine", tokenHeader, json{{"minerAddress", other}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 409) << r->body;
+    r = cli.Post("/api/mining/start", tokenHeader, json{{"minerAddress", other}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 409) << r->body;
+    r = cli.Post("/api/mining/mine", tokenHeader, json{{"minerAddress", cfg.mineAddress}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 200) << r->body;
+
+    // Continuous mining: no wallet anywhere, every block to the configured address.
+    ASSERT_TRUE(server.startAutoMine(err)) << err;
+    const uint32_t from = chain->height();
+    const auto deadline = std::chrono::steady_clock::now() + 20s;
+    while (chain->height() < from + 3 && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(10ms);
+    server.stopAutoMine();
+    ASSERT_GE(chain->height(), from + 3);
+    for (uint32_t h = 1; h <= chain->height(); ++h)
+        EXPECT_EQ(chain->blockByHeight(h)->transactions[0].outputs[0].scriptPubKey, scriptFor(cfg.mineAddress, p)) << h;
+    EXPECT_TRUE(server.getWallets().empty());
+    server.stop();
+}
+
+TEST_F(ServerMiningTest, BadMineAddressFailsStart) {
+    openChain(Bucks::chainParams(Bucks::NetworkId::REGTEST));
+    for (const std::string& bad : {addressFor(Bucks::chainParams(Bucks::NetworkId::TEST).p2pkhAddressVersion, "x"),
+                                   std::string("not-an-address")}) {
+        cfg.mineAddress = bad;
+        Bucks::Server server(*chain, nullptr, cfg);
+        EXPECT_FALSE(server.start()) << bad;
+    }
+}
+
+// OPS-03: with neither a wallet nor --mine-address there is nothing to pay, and mining says so.
+TEST_F(ServerMiningTest, NoPayoutMeansNoMining) {
+    openChain(Bucks::chainParams(Bucks::NetworkId::REGTEST));
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start());
+    std::string err;
+    EXPECT_FALSE(server.minerPayoutReady(err));
+    EXPECT_NE(err.find("--mine-address"), std::string::npos) << err;
+    err.clear();
+    EXPECT_FALSE(server.startAutoMine(err));
+    EXPECT_NE(err.find("No wallet"), std::string::npos) << err;
+    httplib::Client cli("127.0.0.1", server.port());
+    auto r = cli.Post("/api/mining/start", tokenHeader, "{}", "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400);
+    EXPECT_FALSE(status(cli)["mining"].get<bool>());
+    server.stop();
+}
+
+// ONB-12: the UI sends the selected wallet; the reward goes there, not to the first wallet.
+TEST_F(ServerMiningTest, RewardsGoToTheChosenAddress) {
+    const Bucks::ChainParams& p = Bucks::chainParams(Bucks::NetworkId::REGTEST);
+    openChain(p);
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start());
+    httplib::Client cli("127.0.0.1", server.port());
+    cli.set_read_timeout(10, 0);
+    const std::string first = createWallet(cli)["wallet"]["address"];
+    const std::string chosen = createWallet(cli)["wallet"]["address"];
+
+    auto r = cli.Post("/api/mining/mine", tokenHeader, json{{"minerAddress", chosen}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    EXPECT_EQ(json::parse(r->body)["minerAddress"], chosen);
+    EXPECT_EQ(chain->blockByHeight(chain->height())->transactions[0].outputs[0].scriptPubKey, scriptFor(chosen, p));
+
+    r = cli.Post("/api/mining/start", tokenHeader, json{{"minerAddress", chosen}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    EXPECT_EQ(json::parse(r->body)["minerAddress"], chosen);
+    EXPECT_EQ(status(cli)["minerAddress"], chosen);
+    r = cli.Post("/api/mining/start", tokenHeader, json{{"minerAddress", first}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 409) << r->body;   // already mining to another address
+    const uint32_t from = chain->height();
+    const auto deadline = std::chrono::steady_clock::now() + 20s;
+    while (chain->height() < from + 2 && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(10ms);
+    server.stopAutoMine();
+    ASSERT_GE(chain->height(), from + 2);
+    EXPECT_EQ(chain->blockByHeight(from + 1)->transactions[0].outputs[0].scriptPubKey, scriptFor(chosen, p));
+
+    // Without a choice the first wallet still gets it, as before.
+    r = cli.Post("/api/mining/mine", tokenHeader, "{}", "application/json");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    EXPECT_EQ(json::parse(r->body)["minerAddress"], first);
+
+    for (const std::string& bad : {std::string("garbage"),
+                                   addressFor(Bucks::chainParams(Bucks::NetworkId::TEST).p2pkhAddressVersion, "x")}) {
+        r = cli.Post("/api/mining/mine", tokenHeader, json{{"minerAddress", bad}}.dump(), "application/json");
+        ASSERT_TRUE(r);
+        EXPECT_EQ(r->status, 400) << bad;
+    }
     server.stop();
 }

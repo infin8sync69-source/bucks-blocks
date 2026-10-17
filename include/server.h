@@ -99,6 +99,9 @@ struct ServerConfig {
     // ---- Mining ----
     // Hashing threads of the built-in miner; 0 = one per CPU (hardware concurrency).
     unsigned mineThreads = 0;
+    // Pay every mined block to this address (--mine-address). The node then mines with no
+    // wallet and no key, and API requests cannot redirect the rewards (audit OPS-04, NEW-4).
+    std::string mineAddress;
     // How long POST /api/mining/mine waits for its block before answering 202 and leaving
     // the search running in the background (audit ML-4).
     std::chrono::milliseconds mineOneWait{5000};
@@ -200,6 +203,7 @@ private:
     std::atomic<bool> minerBusy{false};      // the mining thread is hashing
     std::atomic<uint64_t> blocksFound{0};
     unsigned minerThreads = 1;
+    std::vector<uint8_t> fixedPayoutScript;  // config.mineAddress as a script
     // What /api/mining/status shows. The status route is public, so it reads these
     // under minerInfoMutex and never waits for minerCtlMutex.
     mutable std::mutex minerInfoMutex;
@@ -260,9 +264,11 @@ private:
 
     // ---- Mining control ----
 public:
-    // Starts continuous mining, paid to the first wallet. False with `err` set when there is
-    // nothing to pay to or a one-block search is running.
+    // Starts continuous mining, paid to --mine-address or else the first wallet. False with
+    // `err` set when there is nothing to pay to or a one-block search is running.
     bool startAutoMine(std::string& err);
+    // True when mining has somewhere to pay: --mine-address, or a wallet.
+    bool minerPayoutReady(std::string& err);
     // Stops continuous mining and any one-block search; returns once the miner has stopped.
     void stopAutoMine();
 private:

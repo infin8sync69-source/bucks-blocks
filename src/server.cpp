@@ -350,6 +350,14 @@ Server::Server(Node& n, Network* net, const ServerConfig& cfg)
       svr(new httplib::Server()) {
 
     minerThreads = config.mineThreads ? config.mineThreads : std::max(1u, std::thread::hardware_concurrency());
+    if (!config.mineAddress.empty()) {
+        try {
+            fixedPayoutScript = Wallet::addressToP2PKHScript(config.mineAddress, node.params().p2pkhAddressVersion);
+        } catch (const std::exception&) {
+            startupError = "--mine-address " + config.mineAddress + " is not a valid " + node.params().name + " address";
+            Bucks::logErr() << "✗ " << startupError << "\n";
+        }
+    }
     dataDirPath = config.dataDir.empty() ? defaultDataDir() : config.dataDir;
     // One wallet file per network, next to that network's chain (and its process lock): two nodes can no longer
     // overwrite each other's keys through a shared file (audit WAL-2).
@@ -1490,7 +1498,8 @@ void Server::setupRoutes() {
             {"bits",         info.bits},
             {"expectedHashesPerBlock", expected},
             {"expectedSecondsPerBlock", rate ? json(expected / double(rate)) : json(nullptr)},
-            {"blockedReason", info.blockedReason}
+            {"blockedReason", info.blockedReason},
+            {"fixedPayoutAddress", config.mineAddress}   // --mine-address: requests cannot change the payout
         };
         {
             std::lock_guard<std::mutex> lock(minerInfoMutex);
@@ -1716,31 +1725,67 @@ bool Server::pinCID(const std::string& cid) {
 // std::thread (that aborted the node: audit SAN-2), and a start can no longer clear the stop
 // flag of a loop that is still running (NEW-6). The loop never takes minerCtlMutex.
 
+// The coinbase pays --mine-address when it is set; otherwise the request's minerAddress (any
+// address of this network, so the UI can pay the wallet the user selected: ONB-12) or
+// minerWalletIndex, otherwise the first wallet.
 int Server::resolvePayout(const json& request, std::vector<uint8_t>& script, std::string& address,
                           std::string& err) {
-    // Copy only what the coinbase needs. The wallet list is never written here (the old
-    // `Wallet& miner = wallets[0]; miner = wallets[idx];` overwrote the primary key:
-    // CRY-9/API-5/OPS-3) and the lock is not held across the hash loop (API-8).
-    size_t index = 0;
-    if (request.is_object() && request.contains("minerWalletIndex")) {
-        if (!request["minerWalletIndex"].is_number_unsigned()) {
-            err = "minerWalletIndex must be a non-negative integer";
+    const bool byAddress = request.is_object() && request.contains("minerAddress");
+    const bool byIndex = request.is_object() && request.contains("minerWalletIndex");
+    if (byAddress) {
+        if (!request["minerAddress"].is_string()) {
+            err = "minerAddress must be a string";
             return 400;
         }
-        index = request["minerWalletIndex"].get<size_t>();
+        address = trimWs(request["minerAddress"].get<std::string>());
+        try {
+            script = Wallet::addressToP2PKHScript(address, node.params().p2pkhAddressVersion);
+        } catch (const std::exception&) {
+            err = "minerAddress is not a valid " + std::string(node.params().name) + " address";
+            return 400;
+        }
+    } else if (byIndex || config.mineAddress.empty()) {
+        // Copy only what the coinbase needs. The wallet list is never written here (the old
+        // `Wallet& miner = wallets[0]; miner = wallets[idx];` overwrote the primary key:
+        // CRY-9/API-5/OPS-3) and the lock is not held across the hash loop (API-8).
+        size_t index = 0;
+        if (byIndex) {
+            if (!request["minerWalletIndex"].is_number_unsigned()) {
+                err = "minerWalletIndex must be a non-negative integer";
+                return 400;
+            }
+            index = request["minerWalletIndex"].get<size_t>();
+        }
+        std::lock_guard<std::mutex> lock(walletMutex);
+        if (wallets.empty()) {
+            err = walletOk ? "No wallet to mine to; create or restore one first, or start the node with --mine-address"
+                           : "No wallet to mine to (" + walletErr + "); start the node with --mine-address";
+            return 400;
+        }
+        if (index >= wallets.size()) {
+            err = "minerWalletIndex out of range";
+            return 400;
+        }
+        script = wallets[index].getP2PKHScript();
+        address = wallets[index].getAddress();
     }
-    std::lock_guard<std::mutex> lock(walletMutex);
-    if (wallets.empty()) {
-        err = "No wallet to mine to; create or restore one first";
-        return 400;
+    if (!config.mineAddress.empty()) {
+        // The operator's choice holds: a leaked API token cannot quietly redirect rewards.
+        if ((byAddress || byIndex) && address != config.mineAddress) {
+            err = "This node pays every block to " + config.mineAddress +
+                  " (--mine-address); the reward address cannot be changed through the API";
+            return 409;
+        }
+        script = fixedPayoutScript;
+        address = config.mineAddress;
     }
-    if (index >= wallets.size()) {
-        err = "minerWalletIndex out of range";
-        return 400;
-    }
-    script = wallets[index].getP2PKHScript();
-    address = wallets[index].getAddress();
     return 0;
+}
+
+bool Server::minerPayoutReady(std::string& err) {
+    std::vector<uint8_t> script;
+    std::string address;
+    return resolvePayout(json::object(), script, address, err) == 0;
 }
 
 bool Server::startAutoMine(std::string& err) {
@@ -1757,7 +1802,15 @@ int Server::startMining(const json& request, std::string& err) {
         err = "The node is shutting down";
         return 503;
     }
-    if (autoMining.load()) return 0;   // already running
+    if (autoMining.load()) {
+        std::lock_guard<std::mutex> lock(minerInfoMutex);
+        const bool chosen = request.contains("minerAddress") || request.contains("minerWalletIndex");
+        if (chosen && address != minerAddress) {
+            err = "Mining already runs and pays " + minerAddress + "; stop it to change the reward address";
+            return 409;
+        }
+        return 0;   // already running
+    }
     if (minerBusy.load()) {
         err = "A one-block search is running; stop it first";
         return 409;
