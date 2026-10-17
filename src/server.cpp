@@ -1257,6 +1257,22 @@ void Server::setupRoutes() {
 
         try {
             Transaction tx = sender.createTransaction(toAddress, amount, node);
+            // "maxFee" is the fee the user approved on the review screen; coin selection may have
+            // changed since (a reward matured, another payment locked coins), so never pay more (ONB-03).
+            uint64_t fee = 0;
+            const bool feeKnown = paymentFee(sender, tx, fee);
+            if (j.contains("maxFee")) {
+                if (!j["maxFee"].is_number_unsigned()) {
+                    reply(res, 400, errorJson("maxFee must be an unsigned integer"));
+                    return;
+                }
+                if (!feeKnown || fee > j["maxFee"].get<uint64_t>()) {
+                    json out = errorJson("The network fee is now higher than the fee you approved; review the payment again");
+                    if (feeKnown) out["fee"] = fee;
+                    reply(res, 409, out);
+                    return;
+                }
+            }
             const ValidationState accepted = node.submitTransaction(tx);
             if (accepted.valid()) {
                 // The network layer and WebSocket clients hear about it through the node's listeners.
@@ -1266,6 +1282,7 @@ void Server::setupRoutes() {
                     {"outputCount", tx.outputs.size()},
                     {"totalAmount", amount}
                 };
+                if (feeKnown) txJson["fee"] = fee;
                 res.set_content(json{{"success", true}, {"transaction", txJson}}.dump(), "application/json");
             } else {
                 reply(res, 400, errorJson("Transaction rejected: " + accepted.code));
@@ -1273,6 +1290,13 @@ void Server::setupRoutes() {
         } catch (const std::exception& e) {
             reply(res, 400, errorJson(e.what()));
         }
+    });
+
+    // Wallet views for the console: see the "Wallet views" section below.
+    s->Post("/api/transactions/estimate", [this](const httplib::Request& req, httplib::Response& res) {
+        json out;
+        const int status = estimatePayment(req.body, out);
+        reply(res, status, out);
     });
 
     // Mine Block
@@ -1614,6 +1638,76 @@ nlohmann::json Server::txToJSON(const Transaction& tx) const {
         {"outputCount", tx.outputs.size()},
         {"totalAmount", total}
     };
+}
+
+// ============================================================================
+// Wallet views for the console (read-only, except the backup flag)
+// ============================================================================
+
+// Fee of a payment this node's wallet just built: every input is one of the wallet's confirmed coins, so the fee
+// is their sum minus the outputs (dust change that went to the miner included).
+bool Server::paymentFee(const Wallet& from, const Transaction& tx, uint64_t& fee) const {
+    std::map<std::pair<Hash256, uint32_t>, uint64_t> coins;
+    for (const CoinRow& c : node.coinsByHash160(hash160(from.getPublicKey()), 20000))
+        coins[{c.op.txid, c.op.index}] = c.coin.amount;
+    uint64_t in = 0;
+    for (const auto& input : tx.inputs) {
+        auto it = coins.find({input.prevTxid, input.prevIndex});
+        if (it == coins.end()) return false;
+        in += it->second;
+    }
+    const uint64_t out = tx.totalOutput();
+    if (in < out) return false;
+    fee = in - out;
+    return true;
+}
+
+// POST /api/transactions/estimate {from, to, amount}: builds the payment exactly as /api/transactions/send
+// would and returns its fee without sending it, so the review screen can show the real fee (ONB-03).
+int Server::estimatePayment(const std::string& body, json& out) {
+    if (!walletOk) {
+        out = errorJson("Wallet subsystem disabled: " + walletErr);
+        return 503;
+    }
+    json j;
+    try { j = body.empty() ? json::object() : json::parse(body); } catch (...) { out = errorJson("Invalid JSON body"); return 400; }
+    if (!j.is_object() || !j.contains("from") || !j["from"].is_string() || !j.contains("to") || !j["to"].is_string() ||
+        !j.contains("amount") || !j["amount"].is_number_unsigned()) {
+        out = errorJson("from, to (strings) and amount (unsigned integer) are required");
+        return 400;
+    }
+    const uint64_t amount = j["amount"];
+    if (amount < Policy::DUST_LIMIT) {
+        out = errorJson("amount is below the dust limit of " + std::to_string(Policy::DUST_LIMIT) + " awraq");
+        return 400;
+    }
+    Wallet sender;
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lock(walletMutex);
+        for (const auto& w : wallets) {
+            if (w.getAddress() == j["from"].get<std::string>()) { sender = w; found = true; break; }
+        }
+    }
+    if (!found) {
+        out = errorJson("Sender wallet not found");
+        return 404;
+    }
+    try {
+        const Transaction tx = sender.createTransaction(j["to"].get<std::string>(), amount, node);
+        uint64_t fee = 0;
+        if (!paymentFee(sender, tx, fee)) {
+            out = errorJson("Could not work out the fee; try again");
+            return 503;
+        }
+        out = json{{"success", true}, {"amount", amount}, {"fee", fee}, {"total", amount + fee},
+                   {"change", tx.totalOutput() - amount}, {"inputCount", tx.inputs.size()},
+                   {"outputCount", tx.outputs.size()}, {"size", tx.serialize().size()}};
+        return 200;
+    } catch (const std::exception& e) {
+        out = errorJson(e.what());
+        return 400;
+    }
 }
 
 bool Server::checkIPFSStatus(std::string& peerId) {

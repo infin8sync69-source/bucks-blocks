@@ -96,9 +96,11 @@ export function mount(root) {
     amt.addEventListener("blur", () => { if (amt.value.trim()) { touchedAmt = true; check(false); } });
     from.addEventListener("change", () => { selectWallet(from.value); balHint.textContent = hintText(); check(false); });
 
+    const formErr = h("div", { "aria-live": "assertive" });
     const form = h("form", { class: "card", novalidate: true },
       h("div", { class: "stack" }, fromField, toField, amtField,
-        h("div", { class: "notice info" }, icon("info", { size: 18 }), h("div", null, h("strong", null, "Network fee: "), `set automatically by the node, at least ${fmtBucks(MIN_FEE_UNITS, { trim: true })} BUCKS.`)),
+        h("div", { class: "notice info" }, icon("info", { size: 18 }), h("div", null, h("strong", null, "Network fee: "), `set by the node from the size of the payment, at least ${fmtBucks(MIN_FEE_UNITS, { trim: true })} BUCKS. You see the exact fee before you confirm.`)),
+        formErr,
         h("div", { class: "row actions" }, reviewBtn)));
 
     form.addEventListener("submit", (e) => {
@@ -106,19 +108,46 @@ export function mount(root) {
       touchedTo = touchedAmt = true;
       const r = check(true);
       if (!r.ok) { (form.querySelector(".invalid input") || to).focus(); return; }
-      toReview(r.units);
+      startReview(r.units);
     });
+
+    // The node builds the payment once without sending it, so the review shows the fee it will really
+    // pay (ONB-03). Confirm sends that fee as maxFee: if coin selection changed meanwhile, the node refuses.
+    let estimating = false;
+    async function startReview(units) {
+      if (estimating) return;
+      estimating = true;
+      formErr.replaceChildren();
+      busy(reviewBtn, true, "Working out the fee…");
+      const w = wallet(state);
+      const dest = to.value.trim();
+      try {
+        const est = await post("/api/transactions/estimate", { from: w.address, to: dest, amount: Number(units) });
+        toReview(units, w, dest, est);
+      } catch (ex) {
+        step = "form"; show();
+        if (ex instanceof ApiError && ex.status === 400 && /insufficient|no spendable|dust/i.test(ex.message)) {
+          setErr(amtField, amt, explain(ex));
+          amt.focus();
+        } else {
+          formErr.replaceChildren(notice("error", explain(ex, false)));
+        }
+      } finally {
+        estimating = false;
+        reviewBtn.disabled = false;
+        reviewBtn.replaceChildren("Review payment", icon("arrow", { size: 16 }));
+      }
+    }
 
     // ----- review -----
     const reviewBox = h("div");
-    function toReview(units) {
+    function toReview(units, w, dest, est) {
       step = "review";
-      const w = wallet(state);
+      const fee = BigInt(est.fee);
       const back = h("button", { type: "button", class: "btn", onclick: () => { step = "form"; show(); amt.focus(); } }, icon("chevl", { size: 16 }), "Edit");
       const confirm = h("button", { type: "button", class: "btn primary lg" }, icon("send", { size: 18 }), "Confirm and send");
       const err = h("div", { "aria-live": "assertive" });
-      const dest = to.value.trim();
-      confirm.addEventListener("click", () => send(units, w, dest, confirm, back, err));
+      confirm.addEventListener("click", () => send(units, w, dest, fee, confirm, back, err));
       reviewBox.replaceChildren(h("section", { class: "card" }, h("div", { class: "stack" },
         h("div", { class: "row between" }, h("h2", null, "Review and confirm"), netBadge(net)),
         net !== "main" && notice("warn", `This is ${netName.toLowerCase()}. The coins have no real value.`),
@@ -126,8 +155,9 @@ export function mount(root) {
           h("div", null, h("span", { class: "k" }, "From"), h("span", { class: "mono wrap" }, w.address)),
           h("div", null, h("span", { class: "k" }, "To"), h("span", { class: "mono wrap" }, dest)),
           h("div", null, h("span", { class: "k" }, "Amount"), h("span", { class: "big" }, `${fmtBucks(units)} BUCKS`)),
-          h("div", null, h("span", { class: "k" }, "Network fee"), h("span", null, `at least ${fmtBucks(MIN_FEE_UNITS)} BUCKS (set by the node)`)),
-          h("div", null, h("span", { class: "k" }, "Total (min.)"), h("span", null, `${fmtBucks(units + MIN_FEE_UNITS)} BUCKS`))),
+          h("div", null, h("span", { class: "k" }, "Network fee"), h("span", null, `${fmtBucks(fee)} BUCKS`,
+            fee > MIN_FEE_UNITS ? h("span", { class: "sub", style: "display:block" }, `Higher than the minimum: this payment combines ${est.inputCount} coins, which makes it larger.`) : null)),
+          h("div", null, h("span", { class: "k" }, "Total"), h("span", null, h("strong", null, `${fmtBucks(units + fee)} BUCKS`)))),
         h("p", { class: "muted", style: "margin:0;font-size:.88rem" }, "Transactions cannot be reversed. Check the first and last characters of the recipient address."),
         err,
         h("div", { class: "row actions" }, confirm, back))));
@@ -135,29 +165,36 @@ export function mount(root) {
       confirm.focus();
     }
 
-    async function send(units, w, dest, confirm, back, err) {
+    async function send(units, w, dest, fee, confirm, back, err) {
       if (sentInFlight) return;
       sentInFlight = true;
       err.replaceChildren();
       busy(confirm, true, "Sending…");
       back.disabled = true;
       try {
-        const r = await post("/api/transactions/send", { from: w.address, to: dest, amount: Number(units) }, { timeout: 30000 });
+        const r = await post("/api/transactions/send", { from: w.address, to: dest, amount: Number(units), maxFee: Number(fee) }, { timeout: 30000 });
         step = "done";
         loadWallets(true);
-        showDone(r.transaction, units, dest);
+        showDone(r.transaction, units, dest, w.address);
         to.value = ""; amt.value = ""; touchedTo = touchedAmt = false;
         check(false);
       } catch (ex) {
         confirm.disabled = false;
         confirm.replaceChildren(icon("send", { size: 18 }), "Confirm and send");
         back.disabled = false;
-        err.replaceChildren(notice("error", explain(ex)));
+        if (ex instanceof ApiError && ex.status === 409) {
+          // Nothing was sent: the fee went up since the review. Show the new one.
+          err.replaceChildren(notice("warn", h("span", null, "The network fee changed since you reviewed this payment, so nothing was sent. "),
+            h("button", { type: "button", class: "btn sm", onclick: () => startReview(units) }, "Review the new fee")));
+        } else {
+          err.replaceChildren(notice("error", explain(ex)));
+        }
       } finally { sentInFlight = false; }
     }
 
-    function explain(ex) {
+    function explain(ex, sending = true) {
       if (ex instanceof ApiError) {
+        if (ex.offline && !sending) return "Cannot reach the node. Nothing was sent.";
         if (ex.offline) return "The node did not confirm the payment. It may or may not have been sent. Check the History page before trying again.";
         const m = ex.message || "";
         if (/insufficient|no spendable/i.test(m)) return `${m}. Newly mined rewards can be spent only after ${COINBASE_MATURITY} further blocks, and coins in a pending payment are locked until it is mined.`;
@@ -171,13 +208,14 @@ export function mount(root) {
 
     // ----- done -----
     const doneBox = h("div");
-    function showDone(tx, units, dest) {
+    function showDone(tx, units, dest, fromAddress) {
       const txid = tx && tx.hash;
       doneBox.replaceChildren(h("section", { class: "card" }, h("div", { class: "stack" },
         notice("ok", h("strong", null, "Payment submitted. "), "It is in the node's mempool and will be confirmed when the next block includes it."),
         h("div", { class: "review" },
           h("div", null, h("span", { class: "k" }, "Amount"), h("span", null, `${fmtBucks(units)} BUCKS`)),
           h("div", null, h("span", { class: "k" }, "To"), h("span", { class: "mono wrap" }, dest)),
+          tx && tx.fee != null && h("div", null, h("span", { class: "k" }, "Network fee"), h("span", null, `${fmtBucks(tx.fee)} BUCKS`)),
           h("div", null, h("span", { class: "k" }, "Transaction ID"), h("span", { class: "row" }, h("span", { class: "mono wrap" }, txid || "unknown"), txid && copyButton(txid, "Copy", { what: "transaction id", compact: true })))),
         h("div", { class: "row actions" },
           h("button", { type: "button", class: "btn primary", onclick: () => { step = "form"; show(); to.focus(); } }, "Send another"),

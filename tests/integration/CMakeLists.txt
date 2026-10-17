@@ -1,6 +1,7 @@
 add_executable(integration_tests
     test_server_network.cpp
     test_server_auth.cpp
+    test_server_wallet_views.cpp
     test_wallet_db.cpp
     test_chain_spend.cpp
     test_chainstate.cpp
