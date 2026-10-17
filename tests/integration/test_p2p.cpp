@@ -7,6 +7,7 @@
 #include <thread>
 
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -306,6 +307,38 @@ size_t readSome(int s, size_t want, int ms) {
     return got;
 }
 
+// A listener that never accepts, with its accept queue full: the kernel drops further SYNs, so a dial to it
+// neither succeeds nor fails until the dialler gives up (an address behind a firewall that drops packets).
+struct BlackHole {
+    int listener = -1;
+    std::vector<int> fillers;
+    uint16_t port = 0;
+    BlackHole() {
+        listener = socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in a{};
+        a.sin_family = AF_INET;
+        a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        if (bind(listener, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0 || listen(listener, 0) != 0) return;
+        socklen_t len = sizeof(a);
+        getsockname(listener, reinterpret_cast<sockaddr*>(&a), &len);
+        for (int i = 0; i < 8; ++i) {
+            int s = socket(AF_INET, SOCK_STREAM, 0);
+            fcntl(s, F_SETFL, O_NONBLOCK);
+            connect(s, reinterpret_cast<sockaddr*>(&a), sizeof(a));
+            fillers.push_back(s);
+            pollfd p{s, POLLOUT, 0};
+            if (poll(&p, 1, 300) == 0) {   // this SYN went unanswered: the queue is full
+                port = ntohs(a.sin_port);
+                return;
+            }
+        }
+    }
+    ~BlackHole() {
+        for (int s : fillers) close(s);
+        if (listener >= 0) close(listener);
+    }
+};
+
 std::vector<uint8_t> frameHeader(const Network& net, const char* cmd, uint32_t len) {
     std::vector<uint8_t> h(24, 0);
     std::copy(net.magic().begin(), net.magic().end(), h.begin());
@@ -352,6 +385,48 @@ TEST(P2pAudit, BadAddressesFromAPeerDoNotThrow) {
     Network net(*h.node);
     EXPECT_NO_THROW(net.handleAddrMessage({"1.2.3.4:notaport", "1.2.3.4:99999", "1.2.3.4:", ":80", "1.2.3.4:-5",
                                            "no-colon", std::string(400, 'a') + ":80", "1.2.3.4:99999999999999999999"}));
+}
+
+// NET-4, NET-11: dials ran one after another on the network thread and each waited up to 3 s, so addresses that
+// never answer stalled every peer (a PING took 60 s to be answered). Dials now finish in the background.
+TEST(P2pAudit, UnreachableDialsDoNotStallTheNetworkThread) {
+    NodeHarness h;
+    ASSERT_TRUE(h.node) << h.error;
+    Network net(*h.node);
+    std::vector<std::unique_ptr<BlackHole>> holes;
+    for (int i = 0; i < 4; ++i) {
+        holes.push_back(std::make_unique<BlackHole>());
+        ASSERT_NE(holes.back()->port, 0) << "could not build a black hole";
+        ASSERT_TRUE(net.addSeedNode("127.0.0.1:" + std::to_string(holes.back()->port)));
+    }
+    const uint16_t port = freePort();
+    net.start(port);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));   // all four seed dials are under way
+
+    const auto start = std::chrono::steady_clock::now();
+    int honest = rawConnect(port);
+    ASSERT_GE(honest, 0);
+    EXPECT_GE(readSome(honest, 24, 1500), 24u) << "the network thread is busy dialling";
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(1500));
+    close(honest);
+
+    auto stopper = std::async(std::launch::async, [&] { net.stop(); });
+    EXPECT_EQ(stopper.wait_for(std::chrono::seconds(5)), std::future_status::ready) << "stop() hangs";
+    stopper.wait();
+}
+
+// Seed host names are looked up by the resolver thread, not the network thread.
+TEST(Network, SeedByHostName) {
+    NodeHarness a, b;
+    ASSERT_TRUE(a.node && b.node);
+    Network netA(*a.node), netB(*b.node);
+    const uint16_t portA = freePort();
+    netA.start(portA);
+    ASSERT_TRUE(netB.addSeedNode("localhost:" + std::to_string(portA)));
+    netB.start(freePort());
+    EXPECT_TRUE(waitFor([&] { return netA.peerCount() == 1 && netB.peerCount() == 1; }, 30));
+    netB.stop();
+    netA.stop();
 }
 
 // NET-3: a peer that never does the key exchange used to be served in plaintext for the whole session.

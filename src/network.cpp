@@ -714,12 +714,19 @@ void Network::start(uint16_t port) {
 
     setupListenSocket();
     networkThread = std::thread(&Network::run, this);
+    dnsThread_ = std::thread(&Network::resolverLoop, this);
 }
 
 void Network::stop() {
     if (!running) return;
     running = false;
+    {
+        // The resolver checks `running` under dnsMutex_, so it cannot miss this wake-up.
+        std::lock_guard<std::mutex> lock(dnsMutex_);
+    }
+    dnsCv_.notify_all();
     if (networkThread.joinable()) networkThread.join();
+    if (dnsThread_.joinable()) dnsThread_.join();   // waits for a lookup in progress
 
     std::lock_guard<std::mutex> lock(peersMutex);
     peers.clear();
@@ -780,59 +787,148 @@ bool resolveIPv4(const std::string& host, std::string& out) {
     return ok;
 }
 
+bool isIPv4Literal(const std::string& host) {
+    in_addr a{};
+    return inet_pton(AF_INET, host.c_str(), &a) == 1;
+}
+
+void closeSocket(int s) {
+#ifdef _WIN32
+    closesocket(s);
+#else
+    close(s);
+#endif
+}
+
+// How long a dial may take before it counts as failed. The network thread never waits for it.
+constexpr auto kConnectTimeout = std::chrono::seconds(5);
+// A host name is looked up again after this long (after a failed lookup: sooner).
+constexpr auto kDnsTtl = std::chrono::minutes(10);
+constexpr auto kDnsRetry = std::chrono::seconds(30);
+
 } // namespace
 
 bool Network::connectToPeer(const std::string& host, uint16_t port) {
-    return dial(host, port, ConnKind::MANUAL);
-}
-
-bool Network::dial(const std::string& host, uint16_t port, ConnKind kind) {
     std::string ip;
-    if (!resolveIPv4(host, ip)) return false;
-
+    if (!resolveIPv4(host, ip)) return false;   // on the caller's thread, never the network thread
     {
         std::lock_guard<std::mutex> lock(peersMutex);
         if (peers.size() >= MAX_PEERS) return false;   // outbound dials respect the same cap (audit NET-6)
     }
+    std::lock_guard<std::mutex> lock(queueMutex);
+    dialQueue_.push_back({ip, port, ConnKind::MANUAL});
+    return true;
+}
 
-    int s = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
-    if (s == -1) return false;
-
+// Network thread only. Starts a non-blocking connect; run() watches it in its poll() set and
+// completeConnects() finishes it, so a dial to an address that never answers costs the thread
+// nothing (audit NET-4, NET-11). Before, each dial waited up to 3 s inline.
+bool Network::startConnect(const std::string& ip, uint16_t port, ConnKind kind) {
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    inet_pton(AF_INET, ip.c_str(), &addr.sin_addr);
+    if (port == 0 || inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) != 1) return false;
+    {
+        std::lock_guard<std::mutex> lock(peersMutex);
+        if (peers.size() + pending_.size() >= MAX_PEERS) return false;   // outbound dials respect the same cap (audit NET-6)
+    }
 
-#ifndef _WIN32
-    // Non-blocking connect with a 3 s bound, so an unreachable host cannot hold the network thread (audit NET-4).
+    int s = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
+    if (s == -1) return false;
+#ifdef _WIN32
+    u_long mode = 1;
+    ioctlsocket(s, FIONBIO, &mode);
+#else
     fcntl(s, F_SETFL, fcntl(s, F_GETFL, 0) | O_NONBLOCK);
-    if (connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1) {
-        if (errno != EINPROGRESS) {
-            close(s);
-            return false;
+#endif
+    if (connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
+        std::lock_guard<std::mutex> lock(peersMutex);
+        peers[s] = std::make_unique<Peer>(*this, s, ip, port, kind);
+        return true;
+    }
+#ifdef _WIN32
+    const bool inProgress = WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+    const bool inProgress = errno == EINPROGRESS;
+#endif
+    if (!inProgress) {
+        closeSocket(s);
+        return false;
+    }
+    pending_.push_back({s, ip, port, kind, std::chrono::steady_clock::now() + kConnectTimeout});
+    return true;
+}
+
+// Network thread only, right after poll(): `revents` holds the poll results of pending_, in order.
+void Network::completeConnects(const std::vector<short>& revents) {
+    const auto now = std::chrono::steady_clock::now();
+    std::vector<PendingConnect> still;
+    for (size_t i = 0; i < pending_.size(); ++i) {
+        const PendingConnect& pc = pending_[i];
+        const short ev = i < revents.size() ? revents[i] : 0;
+        if (!(ev & (POLLOUT | POLLERR | POLLHUP))) {
+            if (now < pc.deadline) {
+                still.push_back(pc);
+                continue;
+            }
+            Bucks::logOut() << "DEBUG: cannot reach " << pc.ip << ":" << pc.port << " (timeout)" << std::endl;
+            closeSocket(pc.fd);
+            continue;
         }
-        struct pollfd pfd = {s, POLLOUT, 0};
         int soErr = 0;
         socklen_t soLen = sizeof(soErr);
-        if (::poll(&pfd, 1, 3000) <= 0 || getsockopt(s, SOL_SOCKET, SO_ERROR, &soErr, &soLen) != 0 || soErr != 0) {
-            close(s);
-            return false;
+        if (getsockopt(pc.fd, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soErr), &soLen) != 0 || soErr != 0) {
+            Bucks::logOut() << "DEBUG: cannot reach " << pc.ip << ":" << pc.port << ": " << strerror(soErr) << std::endl;
+            closeSocket(pc.fd);
+            continue;
         }
+        std::lock_guard<std::mutex> lock(peersMutex);
+        peers[pc.fd] = std::make_unique<Peer>(*this, pc.fd, pc.ip, pc.port, pc.kind);
     }
-#else
-    if (connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1) {
-        int err = WSAGetLastError();
-        if (err != WSAEWOULDBLOCK) {
-            closesocket(s);
-            return false;
-        }
+    pending_.swap(still);
+}
+
+// Non-blocking: an IPv4 literal, or the last answer of the resolver thread. A name that has no
+// answer yet (or an old one) is queued for it; getaddrinfo never runs on the network thread or
+// under peersMutex (audit NET-4).
+bool Network::lookupHost(const std::string& host, std::string& ip) {
+    if (isIPv4Literal(host)) {
+        ip = host;
+        return true;
     }
-#endif
-
-    std::lock_guard<std::mutex> lock(peersMutex);
-    peers[s] = std::make_unique<Peer>(*this, s, ip, port, kind);
-
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(dnsMutex_);
+    DnsEntry& e = dnsCache_[host];
+    const bool fresh = e.asked && now - e.at < (e.ok ? kDnsTtl : kDnsRetry);
+    if (!fresh && !e.queued) {
+        e.queued = true;
+        dnsQueue_.push_back(host);
+        dnsCv_.notify_one();
+    }
+    if (e.ip.empty()) return false;
+    ip = e.ip;   // possibly stale while a new lookup runs
     return true;
+}
+
+void Network::resolverLoop() {
+    std::unique_lock<std::mutex> lock(dnsMutex_);
+    while (true) {
+        dnsCv_.wait(lock, [&] { return !running || !dnsQueue_.empty(); });
+        if (!running) return;
+        const std::string host = dnsQueue_.front();
+        dnsQueue_.erase(dnsQueue_.begin());
+        lock.unlock();
+        std::string ip;
+        const bool ok = resolveIPv4(host, ip);   // may take seconds; no lock held
+        lock.lock();
+        DnsEntry& e = dnsCache_[host];
+        e.asked = true;
+        e.queued = false;
+        e.ok = ok;
+        e.at = std::chrono::steady_clock::now();
+        if (ok) e.ip = ip;                       // a failed lookup keeps the last good answer
+        else Bucks::logOut() << "DEBUG: cannot resolve " << host << std::endl;
+    }
 }
 
 namespace {
@@ -872,6 +968,14 @@ bool Network::addSeedNode(const std::string& hostPort) {
 // once at start and then every 30 minutes, so a seed restart cut seed-only nodes off for that
 // long (audit NET-NEW-1).
 void Network::maintainConnections() {
+    // Dials other threads asked for (connectToPeer) start at once.
+    std::vector<QueuedDial> asked;
+    {
+        std::lock_guard<std::mutex> lock(queueMutex);
+        asked.swap(dialQueue_);
+    }
+    for (const QueuedDial& d : asked) startConnect(d.ip, d.port, d.kind);
+
     const auto now = std::chrono::steady_clock::now();
     if (now - lastMaintain_ < std::chrono::seconds(1)) return;
     lastMaintain_ = now;
@@ -886,21 +990,23 @@ void Network::maintainConnections() {
         for (const auto& [fd, peer] : peers) {
             if (peer->getState() == PeerState::DISCONNECTED) continue;
             links.push_back({peer->getIP(), peer->getPort(), peer->outbound(), now - peer->getConnectionTime()});
-            if (peer->kind() == ConnKind::SEED) ++outbound;
+            if (peer->kind() == ConnKind::SEED || peer->kind() == ConnKind::AUTO) ++outbound;
         }
+    }
+    for (const PendingConnect& pc : pending_) {
+        links.push_back({pc.ip, pc.port, true, std::chrono::steady_clock::duration::zero()});
+        if (pc.kind == ConnKind::SEED || pc.kind == ConnKind::AUTO) ++outbound;
     }
 
     for (size_t i = 0; i < targets.size(); ++i) {
         const DialTarget& t = targets[i];
-        // Resolved without peersMutex held.
         std::string ip;
+        if (!lookupHost(t.host, ip)) continue;   // the resolver thread is on it
         const Link* link = nullptr;
-        if (resolveIPv4(t.host, ip)) {
-            for (const Link& l : links) {
-                // Outbound entries carry the dialled port; an inbound socket from the same
-                // host also means the link exists, whichever side opened it.
-                if (l.ip == ip && (!l.outbound || l.port == t.port)) { link = &l; break; }
-            }
+        for (const Link& l : links) {
+            // Outbound entries carry the dialled port; an inbound socket from the same
+            // host also means the link exists, whichever side opened it.
+            if (l.ip == ip && (!l.outbound || l.port == t.port)) { link = &l; break; }
         }
         if (link) {
             if (link->age >= kStableConnection) {
@@ -914,21 +1020,24 @@ void Network::maintainConnections() {
         if (t.kind == ConnKind::SEED && outbound >= MAX_OUTBOUND_PEERS) continue;
 
         if (t.kind == ConnKind::SEED) Bucks::logOut() << "DEBUG: Connecting to seed node " << t.host << ":" << t.port << std::endl;
-        const bool ok = dial(t.host, t.port, t.kind);
-        if (ok && t.kind == ConnKind::SEED) ++outbound;
+        const bool started = startConnect(ip, t.port, t.kind);
+        if (started) {
+            links.push_back({ip, t.port, true, std::chrono::steady_clock::duration::zero()});
+            if (t.kind == ConnKind::SEED) ++outbound;
+        }
         std::lock_guard<std::mutex> lock(peersMutex);
         auto& dt = dialTargets_[i];
-        // Back off even after a connect that succeeded, so a peer that accepts and then drops
+        // Back off even after a connect that succeeds, so a peer that accepts and then drops
         // us is not hammered.
         dt.nextAttempt = now + std::chrono::seconds(dt.backoffSeconds);
-        if (!ok) Bucks::logOut() << "DEBUG: cannot reach " << t.host << ":" << t.port
-                                 << ", retrying in " << dt.backoffSeconds << " s" << std::endl;
+        if (!started) Bucks::logOut() << "DEBUG: cannot dial " << t.host << ":" << t.port
+                                      << ", retrying in " << dt.backoffSeconds << " s" << std::endl;
         dt.backoffSeconds = std::min(dt.backoffSeconds * 2, kMaxBackoffSeconds);
     }
 }
 
 // A peer that was disconnected from inside one of its own handlers (oversized frame, write timeout) still
-// has an entry here with a closed descriptor. Remove those before the next select() (audit NET-1).
+// has an entry here with a closed descriptor. Remove those before the next poll() (audit NET-1).
 void Network::reapDisconnectedPeers() {
     std::lock_guard<std::mutex> lock(peersMutex);
     for (auto it = peers.begin(); it != peers.end();) {
@@ -938,47 +1047,45 @@ void Network::reapDisconnectedPeers() {
 }
 
 void Network::run() {
+    // poll(), not select(): an fd_set holds descriptors below FD_SETSIZE (1024) only, and a node
+    // with a raised descriptor limit would write past it (audit NET-NEW-9).
+    std::vector<pollfd> fds;
     while (running) {
         reapDisconnectedPeers();
-        fd_set readFds;
-        FD_ZERO(&readFds);
-        FD_SET(listenSocket, &readFds);
-
-        int maxFd = static_cast<int>(listenSocket);
+        fds.clear();
+        fds.push_back({listenSocket, POLLIN, 0});
         {
             std::lock_guard<std::mutex> lock(peersMutex);
-            for (auto const& [fd, peer] : peers) {
-                FD_SET(fd, &readFds);
-                if (fd > maxFd) maxFd = fd;
-            }
+            for (auto const& [fd, peer] : peers) fds.push_back({fd, POLLIN, 0});
         }
+        const size_t firstPending = fds.size();
+        for (const PendingConnect& pc : pending_) fds.push_back({pc.fd, POLLOUT, 0});
 
-        timeval tv{0, 100000}; 
-        int activity = select(maxFd + 1, &readFds, nullptr, nullptr, &tv);
-
+        int activity = ::poll(fds.data(), nfds_t(fds.size()), 100);
         if (activity < 0) {
-#ifdef _WIN32
-            if (WSAGetLastError() == WSAEINTR) continue;
-#else
             if (errno == EINTR) continue;
-#endif
-            // Any other error (EBADF from a stale descriptor, ...): clean up and back off, never spin.
+            // Any other error: clean up and back off, never spin.
             reapDisconnectedPeers();
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
 
+        std::vector<short> dialEvents;
+        for (size_t i = firstPending; i < fds.size(); ++i) dialEvents.push_back(fds[i].revents);
+        completeConnects(dialEvents);
         pruneZombiePeers();
         maintainConnections();
         update();
 
-        if (FD_ISSET(listenSocket, &readFds)) {
+        if (fds[0].revents & POLLIN) {
             acceptNewConnection();
         }
 
         handleSocketIO();
         flushQueues();
     }
+    for (const PendingConnect& pc : pending_) closeSocket(pc.fd);
+    pending_.clear();
 }
 
 size_t Network::peerCount() const {
@@ -1239,7 +1346,7 @@ void Network::handleAddrMessage(const std::vector<std::string>& addresses) {
     {
         std::lock_guard<std::mutex> lock(peersMutex);
         for (const auto& addr : addresses) {
-            if (peers.size() + toConnect.size() >= MAX_PEERS / 2) break;
+            if (peers.size() + toConnect.size() >= MAX_PEERS / 2 || toConnect.size() >= MAX_OUTBOUND_PEERS) break;
 
             size_t colonPos = addr.find(':');
             if (colonPos == std::string::npos) continue;
@@ -1248,7 +1355,8 @@ void Network::handleAddrMessage(const std::vector<std::string>& addresses) {
             int portNum = 0;
             // The address comes from a peer: never let a bad port throw out of the network thread (audit NET-2).
             try { portNum = std::stoi(addr.substr(colonPos + 1)); } catch (...) { continue; }
-            if (portNum < 1 || portNum > 65535 || ip.empty() || ip.size() > 253) continue;
+            // Numeric IPv4 only: a peer-supplied name would need a lookup on the network thread.
+            if (portNum < 1 || portNum > 65535 || !isIPv4Literal(ip)) continue;
             uint16_t port = static_cast<uint16_t>(portNum);
 
             bool alreadyConnected = false;
@@ -1263,7 +1371,7 @@ void Network::handleAddrMessage(const std::vector<std::string>& addresses) {
 
     for (auto& [ip, port] : toConnect) {
         Bucks::logOut() << "DEBUG: Connecting to discovered peer " << ip << ":" << port << std::endl;
-        connectToPeer(ip, port);
+        startConnect(ip, port, ConnKind::AUTO);
     }
 }
 

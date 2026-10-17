@@ -124,6 +124,7 @@ enum class ConnKind {
     INBOUND,
     MANUAL,     // --connect, or connectToPeer
     SEED,       // --seed, ChainParams::seedNodes
+    AUTO,       // an address learned from peers
 };
 
 class Network;
@@ -197,7 +198,8 @@ public:
     void start(uint16_t listenPort);
     void stop();
 
-    // Outbound peer connection
+    // Outbound peer connection. Starts the dial and returns: false if the host does not resolve
+    // (looked up on the calling thread) or the peer table is full. The network thread completes it.
     bool connectToPeer(const std::string& host, uint16_t port);
 
     // A peer to keep (--connect): redialled with exponential backoff (5 s up to 5 min) whenever
@@ -276,7 +278,41 @@ private:
     void addDialTarget(const std::string& host, uint16_t port, ConnKind kind);
     std::chrono::steady_clock::time_point lastMaintain_;
     void maintainConnections();
-    bool dial(const std::string& host, uint16_t port, ConnKind kind);
+
+    // Dials in progress: non-blocking connects in run()'s poll() set. Network thread only.
+    struct PendingConnect {
+        int fd;
+        std::string ip;
+        uint16_t port;
+        ConnKind kind;
+        std::chrono::steady_clock::time_point deadline;
+    };
+    std::vector<PendingConnect> pending_;
+    struct QueuedDial {
+        std::string ip;
+        uint16_t port;
+        ConnKind kind;
+    };
+    std::vector<QueuedDial> dialQueue_;   // from connectToPeer; guarded by queueMutex
+    bool startConnect(const std::string& ip, uint16_t port, ConnKind kind);
+    void completeConnects(const std::vector<short>& revents);
+
+    // Host names of seeds and --connect peers are looked up on this thread, never on the
+    // network thread.
+    struct DnsEntry {
+        std::string ip;                   // last good answer
+        bool ok = false;                  // the last lookup succeeded
+        bool asked = false;
+        bool queued = false;
+        std::chrono::steady_clock::time_point at;
+    };
+    std::mutex dnsMutex_;
+    std::condition_variable dnsCv_;
+    std::map<std::string, DnsEntry> dnsCache_;
+    std::vector<std::string> dnsQueue_;
+    std::thread dnsThread_;
+    bool lookupHost(const std::string& host, std::string& ip);
+    void resolverLoop();
 
     std::thread networkThread;
     
