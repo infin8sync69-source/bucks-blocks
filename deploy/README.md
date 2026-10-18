@@ -8,7 +8,7 @@ Files in this directory, used by `bootstrap-ubuntu.sh`:
 | `bucks.service` | `/etc/systemd/system/bucks.service` | The node, as user `bucks`, sandboxed, logs to the journal |
 | `roles/seed.env`, `roles/miner.env`, `roles/console.env` | `/etc/bucks/bucks.env` (one of them) | The node's flags for that role |
 | `nginx-bucks-console.conf` | `/etc/nginx/sites-available/bucks-console.conf` | TLS, IP allowlist and basic auth in front of the operator console |
-| `bucks-healthcheck.sh` + `.service` + `.timer` | `/usr/local/sbin/bucks-healthcheck`, every 5 minutes | One status line; the unit fails on CRITICAL (service down, API silent, wrong network, fork alert, stale tip, miner stopped) |
+| `bucks-healthcheck.sh` + `.service` + `.timer` | `/usr/local/sbin/bucks-healthcheck`, every 5 minutes (the first run 5 minutes after the timer starts) | One status line; the unit fails on CRITICAL (service down, API silent, wrong network, fork alert, stale tip, miner stopped) |
 | `bucks-backup.sh` + `.service` + `.timer` | `/usr/local/sbin/bucks-backup`, daily | Encrypted copy of `wallets.json`, a consistent `chain.sqlite` snapshot and the configuration |
 
 ## Layout on the server
@@ -72,8 +72,10 @@ release stays in `/opt/bucks/releases/`; to roll back, point `/opt/bucks/current
 
 ## Backups
 
-`bucks-backup.timer` is enabled but fails until you name a GnuPG recipient whose **private key is not on
-this server**: import the public key into root's keyring and put `BUCKS_BACKUP_GPG_RECIPIENT=<key id>` in
+The bootstrap enables and starts `bucks-backup.timer` and `bucks-healthcheck.timer` (both also start on
+every boot), so a bootstrapped host checks itself and backs up from the first day. The backup unit fails
+(one clear line in the journal) until you name a GnuPG recipient whose **private key is not on this
+server**: import the public key into root's keyring and put `BUCKS_BACKUP_GPG_RECIPIENT=<key id>` in
 `/etc/bucks/backup.env`. Copy `/var/backups/bucks` off the machine as well. Restore steps are at the top
 of `bucks-backup.sh`.
 

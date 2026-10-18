@@ -204,7 +204,10 @@ install -m 0644 "$DEPLOY_DIR/bucks-backup.service" "$DEPLOY_DIR/bucks-backup.tim
     "$DEPLOY_DIR/bucks-healthcheck.service" "$DEPLOY_DIR/bucks-healthcheck.timer" /etc/systemd/system/
 install -d -m 0700 /var/backups/bucks
 systemctl daemon-reload
-systemctl enable bucks.service bucks-backup.timer bucks-healthcheck.timer >/dev/null
+systemctl enable bucks.service >/dev/null
+# The timers run from now on, not only after the next reboot. (The health check waits 5 minutes after
+# the timer starts for its first run; the backup unit fails until BUCKS_BACKUP_GPG_RECIPIENT is set.)
+systemctl enable --now bucks-healthcheck.timer bucks-backup.timer >/dev/null
 systemd-analyze verify /etc/systemd/system/bucks.service && log "bucks.service verifies"
 
 # ---------------------------------------------------------------- 7. firewall

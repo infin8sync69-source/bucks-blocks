@@ -114,6 +114,21 @@ foreach(rule IN LISTS ufw_rules)
     endif()
 endforeach()
 
+# --- the bootstrap starts the timers, not only enables them (enable alone waits for the next boot) ---
+file(READ "${D}/bootstrap-ubuntu.sh" bootstrap)
+string(REGEX MATCH "(^|\n)[ \t]*systemctl enable --now[^\n]*" now_line "${bootstrap}")
+foreach(timer bucks-backup.timer bucks-healthcheck.timer)
+    string(FIND "${now_line}" "${timer}" pos)
+    if(pos EQUAL -1)
+        list(APPEND errors "bootstrap-ubuntu.sh does not start ${timer} ('systemctl enable --now ${timer}')")
+    endif()
+endforeach()
+# A monotonic OnBootSec has long passed when the bootstrap starts the timer: the first check would run at once.
+file(READ "${D}/bucks-healthcheck.timer" hc_timer)
+if(hc_timer MATCHES "(^|\n)OnBootSec=")
+    list(APPEND errors "bucks-healthcheck.timer uses OnBootSec= (use OnActiveSec=: it fires the moment the timer is started)")
+endif()
+
 # --- the shell scripts parse ---
 find_program(BASH bash)
 if(BASH)

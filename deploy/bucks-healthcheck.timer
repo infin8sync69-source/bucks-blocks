@@ -3,7 +3,9 @@
 Description=Bucks health check every 5 minutes
 
 [Timer]
-OnBootSec=5min
+# Relative to the timer's own start (a boot, or the bootstrap enabling it), so starting it later never
+# runs a check at once. OnBootSec would: its time has long passed.
+OnActiveSec=5min
 OnUnitActiveSec=5min
 
 [Install]
