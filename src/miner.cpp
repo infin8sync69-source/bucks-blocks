@@ -2,8 +2,11 @@
 #include "log.h"
 
 #include <algorithm>
+#include <cstring>
 #include <ctime>
 #include <iostream>
+#include <system_error>
+#include <thread>
 
 #include "coins.h"
 #include "connect_block.h"
@@ -227,17 +230,158 @@ bool BlockAssembler::createNewBlock(const Script& minerScript, const AssemblerOp
     return false;
 }
 
+// ---------------------------------------------------------------- header hashing
+
+// SHA256_Init/Update/Final are deprecated in OpenSSL 3 but are the only
+// OpenSSL interface that copies a midstate cheaply (see HeaderHasher).
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
+HeaderHasher::HeaderHasher(const BlockHeader& header) {
+    const std::vector<uint8_t> bytes = header.serialize();   // 84 bytes: time at 72, nonce at 80
+    SHA256_Init(&mid_);
+    SHA256_Update(&mid_, bytes.data(), 64);
+    std::memcpy(tail_, bytes.data() + 64, sizeof tail_);
+}
+
+void HeaderHasher::setTimestamp(uint32_t timestamp) {
+    for (int b = 0; b < 4; ++b) tail_[8 + b] = uint8_t(timestamp >> (8 * b));
+}
+
+Hash256 HeaderHasher::hash(uint32_t nonce) const {
+    uint8_t tail[20];
+    std::memcpy(tail, tail_, 16);
+    for (int b = 0; b < 4; ++b) tail[16 + b] = uint8_t(nonce >> (8 * b));
+    SHA256_CTX c = mid_;
+    SHA256_Update(&c, tail, sizeof tail);
+    uint8_t first[32];
+    SHA256_Final(first, &c);
+    Hash256 out;
+    SHA256_Init(&c);
+    SHA256_Update(&c, first, sizeof first);
+    SHA256_Final(out.data(), &c);
+    return out;
+}
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
+bool HeaderHasher::meetsTarget(uint32_t nonce, const U256& target) const {
+    return U256::fromBytesBE(hash(nonce)) <= target;
+}
+
 // ---------------------------------------------------------------- miner loop
+
+// One template's search, shared by all its threads. The first thread to end
+// it (block found, stop, stale tip, refresh, time limit, error) sets the
+// outcome; the others see `done` and return.
+struct Miner::Round {
+    enum class Outcome { RESTART, STOPPED, FOUND, FAILED };
+    std::atomic<bool> done{false};
+    Outcome outcome = Outcome::RESTART;
+    Block block;          // FOUND: the solved block
+    std::string error;    // FAILED
+
+    bool finish(Outcome o) {
+        bool expected = false;
+        if (!done.compare_exchange_strong(expected, true)) return false;
+        outcome = o;
+        return true;
+    }
+};
 
 Miner::Miner(ChainState& chain, BlockAssembler& assembler, Clock clock)
     : chain_(chain), assembler_(assembler), clock_(std::move(clock)) {
     if (!clock_) clock_ = [] { return int64_t(std::time(nullptr)); };
 }
 
+void Miner::sampleRate(bool restart) {
+    using namespace std::chrono;
+    const steady_clock::time_point now = steady_clock::now();
+    const uint64_t h = hashes_.load();
+    if (restart) {
+        // A run that starts long after the previous one measures from scratch; back-to-back
+        // runs (one per block) keep the window.
+        if (now - rateAt_ > seconds(10)) {
+            rate_ = 0;
+            rateAt_ = now;
+            rateHashes_ = h;
+        }
+        return;
+    }
+    const double dt = duration<double>(now - rateAt_).count();
+    if (dt < 2.0) return;
+    rate_ = uint64_t(double(h - rateHashes_) / dt);
+    rateAt_ = now;
+    rateHashes_ = h;
+}
+
+void Miner::search(BlockTemplate& t, unsigned index, const U256& target, int64_t began, int64_t started,
+                   const std::atomic<bool>& stop, Round& round) {
+    using Outcome = Round::Outcome;
+    uint64_t extraNonce = uint64_t(index) << 48;
+    if (index) BlockAssembler::setExtraNonce(t, extraNonce);
+    HeaderHasher hasher(t.block.header);
+    uint64_t counted = 0;   // hashes not yet added to hashes_
+    auto end = [&](Outcome o) {
+        hashes_ += counted;
+        counted = 0;
+        return round.finish(o);
+    };
+
+    for (;;) {
+        for (uint64_t n = 0; n < nonceSpace_; ++n) {
+            if (n % checkInterval_ == 0) {
+                hashes_ += counted;
+                counted = 0;
+                if (index == 0) {
+                    if (batchHook_) batchHook_();
+                    sampleRate(false);
+                }
+                if (round.done.load()) return;
+                if (stop.load()) { end(Outcome::STOPPED); return; }
+                if (chain_.tipSequence() != t.tipSequence) {   // the tip moved: this template is stale
+                    if (end(Outcome::RESTART)) ++staleRestarts_;
+                    return;
+                }
+                const int64_t now = clock_();
+                if (timeLimit_ > 0 && now - began >= timeLimit_) { end(Outcome::STOPPED); return; }
+                if (refreshSeconds_ > 0 && now - started >= refreshSeconds_) {
+                    end(Outcome::RESTART);   // pick up new mempool transactions
+                    return;
+                }
+                // Time may move forward, never backwards.
+                if (now > int64_t(t.block.header.timestamp)) {
+                    t.block.header.timestamp = uint32_t(now);
+                    hasher.setTimestamp(t.block.header.timestamp);
+                }
+            } else if (round.done.load(std::memory_order_relaxed)) {
+                hashes_ += counted;   // another thread ended the round
+                return;
+            }
+            ++counted;
+            if (hasher.meetsTarget(uint32_t(n), target)) {
+                t.block.header.nonce = uint32_t(n);
+                if (end(Outcome::FOUND)) round.block = t.block;
+                return;
+            }
+        }
+        // The whole nonce space failed: change the coinbase and go again.
+        BlockAssembler::setExtraNonce(t, ++extraNonce);
+        hasher = HeaderHasher(t.block.header);
+        ++rollovers_;
+    }
+}
+
 MineResult Miner::mineOne(const Script& minerScript, const AssemblerOptions& options,
                           const std::atomic<bool>& stop, std::string& err) {
+    using Outcome = Round::Outcome;
     const ChainParams& params = chain_.params();
     int64_t began = 0;
+    sampleRate(true);
     for (;;) {
         if (stop.load()) return MineResult::STOPPED;
 
@@ -250,49 +394,60 @@ MineResult Miner::mineOne(const Script& minerScript, const AssemblerOptions& opt
         ++templates_;
         const int64_t started = clock_();
         if (!began) { began = started; }
-        bool restart = false;
-        uint64_t extraNonce = 0;
-
-        while (!restart) {
-            for (uint64_t n = 0; n < nonceSpace_; ++n) {
-                if (n % checkInterval_ == 0) {
-                    if (batchHook_) batchHook_();
-                    if (stop.load()) return MineResult::STOPPED;
-                    if (chain_.tipSequence() != t.tipSequence) {   // the tip moved: this template is stale
-                        ++staleRestarts_;
-                        restart = true;
-                        break;
-                    }
-                    const int64_t now = clock_();
-                    if (timeLimit_ > 0 && now - began >= timeLimit_) return MineResult::STOPPED;
-                    hashes_ += (n % checkInterval_ == 0 && n > 0) ? checkInterval_ : 0;
-                    if (refreshSeconds_ > 0 && now - started >= refreshSeconds_) {
-                        restart = true;   // pick up new mempool transactions
-                        break;
-                    }
-                    // Time may move forward, never backwards and never past the future limit.
-                    if (now > int64_t(t.block.header.timestamp) &&
-                        now <= clock_() + int64_t(Consensus::MAX_FUTURE_BLOCK_TIME))
-                        t.block.header.timestamp = uint32_t(now);
-                }
-                t.block.header.nonce = uint32_t(n);
-                if (Pow::checkProofOfWork(t.block.header.hash(), t.block.header.bits, params.powLimit)) {
-                    lastHash_ = t.block.header.hash();
-                    std::unique_lock<std::mutex> guard;
-                    if (lock_) guard = std::unique_lock<std::mutex>(*lock_);
-                    const ValidationState st = chain_.ProcessNewBlock(t.block, true);
-                    if (!st.valid()) {
-                        err = "node rejected our block: " + st.code;
-                        return MineResult::FAILED;
-                    }
-                    return MineResult::FOUND;
-                }
-            }
-            if (restart) break;
-            // The whole nonce space failed: change the coinbase and go again.
-            BlockAssembler::setExtraNonce(t, ++extraNonce);
-            ++rollovers_;
+        U256 target;
+        if (!Pow::bitsValid(t.block.header.bits, params.powLimit, &target)) {
+            err = "template has invalid bits";
+            return MineResult::FAILED;
         }
+
+        // Thread 0 is the calling thread; each helper hashes its own copy of the template.
+        Round round;
+        std::vector<std::thread> helpers;
+        for (unsigned i = 1; i < threads_; ++i) {
+            try {
+                helpers.emplace_back([this, own = t, i, &target, began, started, &stop, &round]() mutable {
+                    try {
+                        search(own, i, target, began, started, stop, round);
+                    } catch (const std::exception& e) {
+                        if (round.finish(Outcome::FAILED)) round.error = std::string("miner thread: ") + e.what();
+                    }
+                });
+            } catch (const std::system_error& e) {
+                logErr() << "miner: only " << i << " of " << threads_ << " threads started: " << e.what() << "\n";
+                break;
+            }
+        }
+        try {
+            search(t, 0, target, began, started, stop, round);
+        } catch (...) {
+            round.finish(Outcome::FAILED);
+            for (std::thread& h : helpers) h.join();
+            throw;
+        }
+        for (std::thread& h : helpers) h.join();
+
+        if (round.outcome == Outcome::RESTART) continue;
+        if (round.outcome == Outcome::STOPPED) return MineResult::STOPPED;
+        if (round.outcome == Outcome::FAILED) {
+            err = round.error;
+            return MineResult::FAILED;
+        }
+        // Never submit a block that only the midstate code thinks is solved.
+        const Hash256 hash = round.block.header.hash();
+        if (!Pow::checkProofOfWork(hash, round.block.header.bits, params.powLimit)) {
+            err = "BUG: midstate hash differs from the header hash";
+            logErr() << err << "\n";
+            return MineResult::FAILED;
+        }
+        lastHash_ = hash;
+        std::unique_lock<std::mutex> guard;
+        if (lock_) guard = std::unique_lock<std::mutex>(*lock_);
+        const ValidationState st = chain_.ProcessNewBlock(round.block, true);
+        if (!st.valid()) {
+            err = "node rejected our block: " + st.code;
+            return MineResult::FAILED;
+        }
+        return MineResult::FOUND;
     }
 }
 

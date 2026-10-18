@@ -90,12 +90,20 @@ public:
     std::optional<Transaction> mempoolTransaction(const Hash256& txid) const;
 
     // ---- Mining ----
-    // Builds a template and hashes on the calling thread; returns when a block was found
-    // and accepted, on stop/timeout, or on failure. The hash of the block is stored in *found.
+    // Builds a template and hashes on the calling thread plus threads - 1 helpers; returns
+    // when a block was found and accepted, on stop/timeout, or on failure. The hash of the
+    // block is stored in *found.
     MineResult mine(const Script& minerScript, const AssemblerOptions& options,
                     const std::atomic<bool>& stop, std::string& err, Hash256* found = nullptr,
-                    int64_t timeLimitSeconds = 0);
+                    int64_t timeLimitSeconds = 0, unsigned threads = 1);
     uint64_t minerHashes() const { return miner_->hashes(); }
+    uint64_t minerHashRate() const { return miner_->hashRate(); }   // all threads, recent seconds
+
+    struct MiningInfo {
+        std::string blockedReason;   // why no block template can be built now ("" = it can)
+        uint32_t bits = 0;           // proof of work required of the next block
+    };
+    MiningInfo miningInfo() const;
 
     // ---- Notifications (called without the chain lock held) ----
     using TipListener = std::function<void(const Hash256& hash, uint32_t height)>;
