@@ -481,6 +481,7 @@ std::shared_ptr<const Registry> loadRegistryFrom(const std::string& dir, std::st
 
         // Every phrase made with a list depends on its exact bytes, so a pinned list that changed is refused
         // instead of silently decoding phrases to other wallets (audit WAL-14). Release lists must be pinned.
+        // The pinned bytes use LF line endings; .gitattributes keeps a checkout from converting them.
         if (item.contains("sha256")) {
             const auto& pin = item["sha256"];
             if (!pin.is_string() || pin.get<std::string>().size() != 64 ||

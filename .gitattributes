@@ -1,0 +1,3 @@
+# wordlists/manifest.json pins the SHA-256 of each list's exact bytes (LF line endings), and the node refuses a list
+# that differs. A checkout that converts line endings (Git for Windows with core.autocrlf) would break every pin.
+wordlists/*.txt -text
