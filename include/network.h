@@ -303,7 +303,6 @@ private:
     bool versionSeen_ = false;
     uint64_t remoteNonce_ = 0;
     bool answeredGetAddr_ = false;
-    size_t lowWorkHeaders_ = 0;
 
     // Encryption (Phase 5)
     std::unique_ptr<P2PSessionEncryption> encryption;
@@ -348,6 +347,12 @@ public:
 
     Node& getNode() { return node; }
     const NetworkOptions& options() const { return options_; }
+
+    // Headers a peer address made us store that lead nowhere (audit NET-NEW-3). Counted per address, not per
+    // connection: a peer that reconnects must not get a fresh budget. Returns false (and counts nothing) when
+    // `fresh` more would pass options().lowWorkHeaderBudget. A batch that leads past our tip clears the count.
+    bool chargeLowWorkHeaders(const std::string& ip, size_t fresh);
+    void forgiveLowWorkHeaders(const std::string& ip);
     const std::array<uint8_t, 4>& magic() const { return magic_; }
 
     // How many blocks from peers were rejected with each result category. Loopback peers
@@ -410,6 +415,7 @@ private:
     static constexpr size_t kMaxBans = 10000;
     mutable std::map<std::string, std::chrono::steady_clock::time_point> bannedUntil_;
     std::map<std::string, std::chrono::steady_clock::time_point> lastConnectionTimes;
+    std::map<std::string, size_t> lowWorkHeadersByIp_;   // see chargeLowWorkHeaders
     mutable std::mutex securityMutex;
 
     // Peer Discovery (Phase 6)

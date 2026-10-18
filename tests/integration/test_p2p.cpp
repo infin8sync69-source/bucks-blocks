@@ -681,6 +681,46 @@ TEST(P2pAudit, HeadersThatLeadNowhereAreCapped) {
     netA.stop();
 }
 
+// The budget belongs to the peer address: dropping the connection and dialling again must not hand out a fresh one.
+TEST(P2pAudit, ReconnectingDoesNotRefillTheHeaderBudget) {
+    NodeHarness a, b;
+    ASSERT_TRUE(a.node && b.node);
+    Wallet w;
+    w.generateKeys();
+    for (int i = 0; i < 5; ++i) ASSERT_TRUE(mineOne(*a.node, w));
+
+    NetworkOptions small;
+    small.lowWorkHeaderBudget = 8;
+    Network netA(*a.node, small);
+    const uint16_t portA = freePort();
+    netA.start(portA);
+    {
+        Network netB(*b.node);
+        netB.start(freePort());
+        ASSERT_TRUE(netB.connectToPeer("127.0.0.1", portA));
+        ASSERT_TRUE(waitFor([&] { return netA.peerCount() == 1 && netB.peerCount() == 1; }));
+        const std::vector<BlockHeader> spend = forkFromGenesis(*a.node, 4, 0);
+        sendToAll(netB, headersMessage(spend));
+        ASSERT_TRUE(waitFor([&] { return a.node->knowsHeader(spend.back().hash()); }));
+        const std::vector<BlockHeader> rest = forkFromGenesis(*a.node, 4, 1);
+        sendToAll(netB, headersMessage(rest));
+        ASSERT_TRUE(waitFor([&] { return a.node->knowsHeader(rest.back().hash()); }));   // exactly the budget
+        netB.stop();
+    }
+    ASSERT_TRUE(waitFor([&] { return netA.peerCount() == 0; }));
+
+    Network netB2(*b.node);
+    netB2.start(freePort());
+    ASSERT_TRUE(netB2.connectToPeer("127.0.0.1", portA));
+    ASSERT_TRUE(waitFor([&] { return netA.peerCount() == 1 && netB2.peerCount() == 1; }));
+    const std::vector<BlockHeader> more = forkFromGenesis(*a.node, 1, 2);
+    sendToAll(netB2, headersMessage(more));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    EXPECT_FALSE(a.node->knowsHeader(more.back().hash())) << "a reconnect refilled the budget";
+    netB2.stop();
+    netA.stop();
+}
+
 // NET-NEW-5, NET-13: 10/8 and 192.168/16 were never banned (a seed in a cloud VPC or behind NAT had no
 // misbehaviour enforcement) and bans lasted until a restart. Only loopback is spared now, and bans end.
 TEST(P2pAudit, BansEndAndSpareOnlyLoopback) {

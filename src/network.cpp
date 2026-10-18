@@ -719,8 +719,23 @@ void Peer::askForAddresses() {
     sendMsg(NetMessage(MessageType::GETADDR, {}));
 }
 
+bool Network::chargeLowWorkHeaders(const std::string& ip, size_t fresh) {
+    std::lock_guard<std::mutex> lock(securityMutex);
+    // Bounded like the connection throttle: past the cap the table starts over, which only gives budgets back.
+    if (lowWorkHeadersByIp_.size() > 4096 && !lowWorkHeadersByIp_.count(ip)) lowWorkHeadersByIp_.clear();
+    size_t& used = lowWorkHeadersByIp_[ip];
+    if (used + fresh > options_.lowWorkHeaderBudget) return false;
+    used += fresh;
+    return true;
+}
+
+void Network::forgiveLowWorkHeaders(const std::string& ip) {
+    std::lock_guard<std::mutex> lock(securityMutex);
+    lowWorkHeadersByIp_.erase(ip);
+}
+
 // Counts the headers of a batch that we do not know yet and that do not lead to more work than our
-// active tip, and refuses the batch once this peer's total would pass lowWorkHeaderBudget. Such
+// active tip, and refuses the batch once this peer address's total would pass lowWorkHeaderBudget. Such
 // headers are stored for ever and a fork from genesis can be replayed to every node, so one
 // connection may not make us store an unlimited number of them (audit NET-NEW-3). A batch that
 // does lead past the tip resets the count: an honest peer on a heavier branch is never limited,
@@ -738,18 +753,17 @@ bool Peer::withinHeaderBudget(const std::vector<BlockHeader>& headers) {
         work += proof;
     }
     if (work > node.tip().chainWork) {
-        lowWorkHeaders_ = 0;
+        network.forgiveLowWorkHeaders(ip);
         return true;
     }
     size_t fresh = 0;
     for (const BlockHeader& h : headers)
         if (!node.knowsHeader(h.hash())) ++fresh;
-    if (lowWorkHeaders_ + fresh > network.options().lowWorkHeaderBudget) {
-        Bucks::logErr() << "DEBUG: Peer " << ip << " sent " << fresh << " more headers that lead nowhere ("
-                        << lowWorkHeaders_ << " already); not storing them" << std::endl;
+    if (!network.chargeLowWorkHeaders(ip, fresh)) {
+        Bucks::logErr() << "DEBUG: Peer " << ip << " sent " << fresh << " more headers that lead nowhere "
+                        << "(over the budget for this address); not storing them" << std::endl;
         return false;
     }
-    lowWorkHeaders_ += fresh;
     return true;
 }
 
