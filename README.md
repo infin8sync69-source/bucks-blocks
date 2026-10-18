@@ -1,7 +1,7 @@
 # Bucks
 
 Bucks is a proof-of-work cryptocurrency node written in C++17: SHA256d proof of work on an 84-byte
-block header, a SQLite chain store, a mempool, a CPU miner, encrypted peer-to-peer networking
+block header with a per-block difficulty adjustment (aserti3-2d, 2-day half-life), a SQLite chain store, a mempool, a CPU miner, encrypted peer-to-peer networking
 (ECDH + AES-256-GCM), HD wallets restored from 13- or 25-word phrases on 2048-word Arabic and English
 lists, a token-authenticated REST API and a web console that the node serves itself.
 

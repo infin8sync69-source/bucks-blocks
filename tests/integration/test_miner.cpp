@@ -11,6 +11,7 @@
 #include "persistent_chain.h"
 #include "pow.h"
 #include "test_chain.h"
+#include "validation_rules.h"
 
 using namespace Bucks;
 using namespace Bucks::TestUtil;
@@ -32,10 +33,9 @@ uint64_t readLE64(const std::vector<uint8_t>& v, size_t at) {
     return r;
 }
 
-// Regtest with a harder limit (about 2^16 hashes per block) and a genesis mined for it.
-ChainParams hardRegtest() {
-    ChainParams p = chainParams(NetworkId::REGTEST);
-    p.powLimitBits = 0x1f00ffff;
+// `p` with another proof-of-work limit and its genesis re-mined to match.
+ChainParams withLimit(ChainParams p, uint32_t limitBits) {
+    p.powLimitBits = limitBits;
     p.powLimit = Pow::decodeCompact(p.powLimitBits).target;
     for (p.genesisNonce = 0;; ++p.genesisNonce) {
         p.genesisMerkleRoot = Genesis::build(p).header.merkleRoot;
@@ -160,9 +160,11 @@ TEST(Miner, TemplateAtHalving) {
     EXPECT_EQ(t.block.transactions[0].outputs[0].scriptPubKey, ownedBy(7));
 }
 
-// MIN-3
+// MIN-3: the Bitcoin retarget's period rules (H-TW1) move the template time.
 TEST(Miner, TimewarpAwareTime) {
-    Rig r;
+    ChainParams p = chainParams(NetworkId::REGTEST);
+    p.powAlgorithm = PowAlgorithm::BITCOIN;
+    Rig r(p);
     r.grow(2014);
     const int64_t now = r.chain.now();
     // Block 2015 is dated 3,000 s ahead of the clock (allowed up to 7,200).
@@ -181,11 +183,62 @@ TEST(Miner, TimewarpAwareTime) {
     EXPECT_EQ(r.chain.tip()->height, 2016u);
 }
 
+// MIN-3b: ASERT (regtest's rule set, as on main and test) has no period rules,
+// so the same template is dated by the clock, 3,000 s before its parent.
+TEST(Miner, AsertTimeIgnoresPeriods) {
+    Rig r;
+    ASSERT_EQ(r.chain.params().powAlgorithm, PowAlgorithm::ASERT);
+    r.grow(2014);
+    const int64_t now = r.chain.now();
+    Block b = r.chain.build(r.chain.tip(), {}, 0, uint32_t(now + 3000 - r.chain.tip()->header.timestamp));
+    ASSERT_TRUE(r.chain.submit(b).valid());
+
+    BlockTemplate t;
+    std::string err;
+    ASSERT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
+    EXPECT_EQ(t.block.header.height, 2016u);
+    EXPECT_EQ(int64_t(t.block.header.timestamp), now);
+    std::string mineErr;
+    EXPECT_EQ(r.mine(mineErr), MineResult::FOUND) << mineErr;
+    EXPECT_EQ(r.chain.tip()->height, 2016u);
+}
+
+// MIN-8: ASERT with retargeting on, end to end. Blocks one second apart are
+// ahead of schedule, so every block is harder than its parent; the template
+// carries the ASERT bits, the parent's bits are refused, a mined block is
+// accepted. Limit 0x1e7fffff (the largest ASERT admits): about 2^17 hashes per block.
+TEST(Miner, AsertBitsEndToEnd) {
+    ChainParams p = withLimit(chainParams(NetworkId::REGTEST), 0x1e7fffff);
+    p.powNoRetargeting = false;
+    Rig r(p);
+    ASSERT_TRUE(r.chain.ok()) << r.chain.error();
+    for (int i = 0; i < 3; ++i) ASSERT_TRUE(r.chain.submit(r.chain.build(r.chain.tip(), {}, 0, 1)).valid());
+    const uint32_t want = Rules::GetNextWorkRequired(r.chain.tip(), r.chain.params());
+    EXPECT_LT(Pow::decodeCompact(want).target, Pow::decodeCompact(r.chain.tip()->header.bits).target);
+
+    BlockTemplate t;
+    std::string err;
+    ASSERT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
+    EXPECT_EQ(t.block.header.bits, want);
+
+    Block easier = r.chain.build(r.chain.tip(), {}, 1, 1);
+    easier.header.bits = r.chain.tip()->header.bits;
+    for (easier.header.nonce = 0;; ++easier.header.nonce)
+        if (Pow::checkProofOfWork(easier.header.hash(), easier.header.bits, p.powLimit)) break;
+    EXPECT_EQ(r.chain.submit(easier).code, "bad-diffbits");
+
+    std::string mineErr;
+    ASSERT_EQ(r.mine(mineErr), MineResult::FOUND) << mineErr;
+    EXPECT_EQ(r.chain.tip()->height, 4u);
+    EXPECT_EQ(r.chain.tip()->header.bits, want);
+}
+
 // MIN-4
 TEST(Miner, ExtraNonceRollover) {
-    // A harder limit and a nonce space of 10, so the miner must roll the extra
-    // nonce many times.
-    Rig r(hardRegtest());
+    // A harder limit (about 2^16 hashes per block) and a nonce space of 10,
+    // so the miner must roll the extra nonce many times.
+    ChainParams p = withLimit(chainParams(NetworkId::REGTEST), 0x1f00ffff);
+    Rig r(p);
     ASSERT_TRUE(r.chain.ok()) << r.chain.error();
     r.miner.setNonceSpaceForTesting(10);
     std::string err;
@@ -479,7 +532,7 @@ TEST(Miner, OneThreadMinesTheReferenceBlock) {
     // Regtest with a mempool transaction, and the harder limit where the search runs
     // through tens of thousands of nonces.
     for (const bool hard : {false, true}) {
-        const ChainParams p = hard ? hardRegtest() : chainParams(NetworkId::REGTEST);
+        const ChainParams p = hard ? withLimit(chainParams(NetworkId::REGTEST), 0x1f00ffff) : chainParams(NetworkId::REGTEST);
         Rig r(p);
         ASSERT_TRUE(r.chain.ok()) << r.chain.error();
         if (!hard) {
@@ -505,7 +558,7 @@ TEST(Miner, OneThreadMinesTheReferenceBlock) {
 // Every thread hashes its own extra nonce, and whatever thread wins, its block is the
 // reference block for that extra nonce: only the search order changed, not the block.
 TEST(Miner, ThreadsSearchDisjointExtraNonces) {
-    const ChainParams p = hardRegtest();
+    const ChainParams p = withLimit(chainParams(NetworkId::REGTEST), 0x1f00ffff);
     Rig r(p);
     ASSERT_TRUE(r.chain.ok()) << r.chain.error();
     r.miner.setThreads(4);

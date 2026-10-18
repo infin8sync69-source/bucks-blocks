@@ -62,17 +62,23 @@ bool ContextualCheckBlockHeader(const BlockHeader& header, const BlockIndex* par
     if (time <= parent->medianTimePast())
         return state.invalid(ValidationResult::INVALID, "time-too-old");
 
-    // H-TW1: the first block of a retarget period may not be more than 600 s
-    // earlier than its parent (BIP94 style timewarp fix).
-    if (height % int64_t(Consensus::RETARGET_INTERVAL) == 0 &&
-        time < int64_t(parent->header.timestamp) - int64_t(Consensus::TIMEWARP_GRACE))
-        return state.invalid(ValidationResult::INVALID, "time-timewarp-attack");
+    // H-TW1 and H-TW2 protect the 2016-block window of the Bitcoin retarget.
+    // ASERT has no window: a late timestamp lowers only the next block's
+    // difficulty, by at most 2^(7200 / halfLife) with H-FUTURE, and an early
+    // one raises it, so H-MTP and H-FUTURE are its time rules.
+    if (params.powAlgorithm == PowAlgorithm::BITCOIN) {
+        // H-TW1: the first block of a retarget period may not be more than 600 s
+        // earlier than its parent (BIP94 style timewarp fix).
+        if (height % int64_t(Consensus::RETARGET_INTERVAL) == 0 &&
+            time < int64_t(parent->header.timestamp) - int64_t(Consensus::TIMEWARP_GRACE))
+            return state.invalid(ValidationResult::INVALID, "time-timewarp-attack");
 
-    // H-TW2: the last block of a period may not be earlier than the first.
-    if (height % int64_t(Consensus::RETARGET_INTERVAL) == Consensus::RETARGET_INTERVAL - 1) {
-        const BlockIndex* first = parent->getAncestor(uint32_t(height - (Consensus::RETARGET_INTERVAL - 1)));
-        if (first && time < int64_t(first->header.timestamp))
-            return state.invalid(ValidationResult::INVALID, "time-period-negative");
+        // H-TW2: the last block of a period may not be earlier than the first.
+        if (height % int64_t(Consensus::RETARGET_INTERVAL) == Consensus::RETARGET_INTERVAL - 1) {
+            const BlockIndex* first = parent->getAncestor(uint32_t(height - (Consensus::RETARGET_INTERVAL - 1)));
+            if (first && time < int64_t(first->header.timestamp))
+                return state.invalid(ValidationResult::INVALID, "time-period-negative");
+        }
     }
 
     // H-CKPT(a): the checkpoint height must carry the checkpoint hash.
@@ -104,8 +110,27 @@ uint32_t CalculateNextWorkRequired(uint32_t lastBits, int64_t firstTime, int64_t
                                           Consensus::TARGET_TIMESPAN);
 }
 
+uint32_t GetNextASERTWorkRequired(const BlockIndex* parent, const ChainParams& params) {
+    // Anchor = genesis (height 0, its own bits). The specification uses the
+    // anchor's parent time; genesis has none, so it is taken as genesis.time -
+    // 600, a parent on schedule. Block 1 then keeps the genesis bits and the
+    // schedule is genesis.time + 600 * height. Equivalently, in the
+    // specification's terms: anchor = block 1 (bits = powLimitBits), anchor
+    // parent time = genesis.time.
+    const BlockIndex* genesis = parent->getAncestor(0);
+    if (!genesis) return parent->header.bits;
+    const int64_t anchorParentTime = int64_t(genesis->header.timestamp) - Consensus::TARGET_SPACING;
+    const U256 target = Pow::calculateASERT(Pow::decodeCompact(genesis->header.bits).target,
+                                            Consensus::TARGET_SPACING,
+                                            int64_t(parent->header.timestamp) - anchorParentTime,
+                                            int64_t(parent->height), params.powLimit,
+                                            params.asertHalfLife);
+    return Pow::encodeCompact(target);
+}
+
 uint32_t GetNextWorkRequired(const BlockIndex* parent, const ChainParams& params) {
     if (params.powNoRetargeting) return parent->header.bits;
+    if (params.powAlgorithm == PowAlgorithm::ASERT) return GetNextASERTWorkRequired(parent, params);
     const uint64_t height = uint64_t(parent->height) + 1;
     if (height % Consensus::RETARGET_INTERVAL != 0) return parent->header.bits;
     // A child at a retarget height always has a window ancestor (height - 2016).

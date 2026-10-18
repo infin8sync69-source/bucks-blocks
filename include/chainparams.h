@@ -13,6 +13,12 @@ namespace Bucks {
 
 enum class NetworkId : uint8_t { MAIN = 0, TEST = 1, REGTEST = 2 };
 
+// Difficulty rule of a network (section 6.5).
+enum class PowAlgorithm : uint8_t {
+    BITCOIN = 0,  // retarget every 2016 blocks, 4x clamp, period timewarp rules H-TW1/H-TW2
+    ASERT = 1,    // aserti3-2d every block, anchored at genesis; no period rules
+};
+
 struct Checkpoint {
     uint32_t height;
     Hash256 hash;
@@ -38,7 +44,9 @@ struct ChainParams {
     // Proof of work (section 6)
     uint32_t    powLimitBits;          // minimum difficulty; also the genesis bits
     U256        powLimit;              // decodeCompact(powLimitBits)
-    bool        powNoRetargeting;      // true only on regtest
+    bool        powNoRetargeting;      // true only on regtest: every block keeps its parent's bits
+    PowAlgorithm powAlgorithm;         // bits rule when retargeting; also picks the time rules
+    int64_t     asertHalfLife;         // seconds per doubling of the target (ASERT only)
 
     uint32_t    halvingInterval;
 
@@ -60,9 +68,9 @@ const ChainParams& chainParams(NetworkId id);
 bool parseNetworkName(const std::string& name, NetworkId& out);
 
 // Startup assertions of section 3.7 that do not need the genesis block:
-// powLimit decodes from powLimitBits, the retarget product cannot overflow,
-// checkpoints are sorted and start at genesis, the inscription is printable
-// ASCII and fits.
+// powLimit decodes from powLimitBits, the retarget (or ASERT) product cannot
+// overflow, the ASERT half-life is positive, checkpoints are sorted and start
+// at genesis, the inscription is printable ASCII and fits.
 // Returns false and fills `err` on failure; the node then exits with code 3.
 bool checkChainParams(const ChainParams& p, std::string& err);
 

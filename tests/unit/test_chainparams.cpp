@@ -41,6 +41,12 @@ TEST(Params, PowLimitDecodes) {
     EXPECT_EQ(chainParams(NetworkId::MAIN).powLimitBits, 0x1d00ffffu);
     EXPECT_TRUE(chainParams(NetworkId::REGTEST).powNoRetargeting);
     EXPECT_FALSE(chainParams(NetworkId::MAIN).powNoRetargeting);
+    EXPECT_FALSE(chainParams(NetworkId::TEST).powNoRetargeting);
+    // aserti3-2d with a 2-day half-life on every network (regtest only for its time rules).
+    for (NetworkId id : kAll) {
+        EXPECT_EQ(chainParams(id).powAlgorithm, PowAlgorithm::ASERT) << chainParams(id).name;
+        EXPECT_EQ(chainParams(id).asertHalfLife, 172800) << chainParams(id).name;
+    }
 }
 
 TEST(Params, OverflowingLimitRejected) {
@@ -49,8 +55,41 @@ TEST(Params, OverflowingLimitRejected) {
     p.powLimit = Pow::decodeCompact(p.powLimitBits).target;
     std::string err;
     EXPECT_FALSE(checkChainParams(p, err));
+    p.powAlgorithm = PowAlgorithm::BITCOIN;
+    EXPECT_FALSE(checkChainParams(p, err));
     p.powNoRetargeting = true;  // fine when nothing retargets
     EXPECT_TRUE(checkChainParams(p, err)) << err;
+}
+
+// ASERT needs bits(powLimit) + 17 <= 256 and a positive half-life; the Bitcoin
+// retarget needs bits(powLimit) + bits(4T) <= 256 (23 bits).
+TEST(Params, AsertGuards) {
+    auto withLimit = [](PowAlgorithm algo, uint32_t bits) {
+        ChainParams p = chainParams(NetworkId::MAIN);
+        p.powAlgorithm = algo;
+        p.powLimitBits = bits;
+        p.powLimit = Pow::decodeCompact(bits).target;
+        return p;
+    };
+    std::string err;
+    EXPECT_TRUE(checkChainParams(withLimit(PowAlgorithm::ASERT, 0x1e7fffff), err)) << err;
+    EXPECT_FALSE(checkChainParams(withLimit(PowAlgorithm::ASERT, 0x1f00ffff), err));
+    EXPECT_EQ(err, "powLimit * 2^17 overflows 256 bits (ASERT)");
+    EXPECT_FALSE(checkChainParams(withLimit(PowAlgorithm::BITCOIN, 0x1e7fffff), err));
+    EXPECT_EQ(err, "powLimit * 4T overflows 256 bits");
+    EXPECT_TRUE(checkChainParams(withLimit(PowAlgorithm::BITCOIN, 0x1e00ffff), err)) << err;
+
+    ChainParams p = chainParams(NetworkId::MAIN);
+    p.asertHalfLife = 0;
+    EXPECT_FALSE(checkChainParams(p, err));
+    EXPECT_EQ(err, "ASERT half-life must be positive");
+    p.powNoRetargeting = true;
+    EXPECT_TRUE(checkChainParams(p, err)) << err;
+
+    p = chainParams(NetworkId::MAIN);
+    p.powAlgorithm = static_cast<PowAlgorithm>(7);
+    EXPECT_FALSE(checkChainParams(p, err));
+    EXPECT_EQ(err, "unknown difficulty algorithm");
 }
 
 TEST(Params, BadCheckpointsAndLimitMismatch) {
