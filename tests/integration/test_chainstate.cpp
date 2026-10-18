@@ -292,6 +292,54 @@ TEST(ChainState, ApprovalCoversTheGrownBranchOnly) {
     EXPECT_EQ(t.state().forkAlert().otherTip, other.back().getHash());
 }
 
+// An approval is used up by the activation it asked for. If a routine reorg later displaces the approved block,
+// its old branch must not keep a standing approval and overtake a much longer chain without the operator.
+TEST(ChainState, AUsedApprovalDoesNotCoverALaterDeepReorg) {
+    TestChain t(regtestWithDepth(5));
+    branch(t, t.state().tip(), 10, 0);
+    const BlockIndex* fork = t.state().activeChain()[4];
+    std::vector<Block> side = branch(t, fork, 7, 1);   // heights 5..11, parked
+    const Hash256 approvedTip = side.back().getHash();
+    std::string err;
+    ASSERT_TRUE(t.state().approveReorg(approvedTip, err)) << err;
+    ASSERT_EQ(t.state().tip()->hash, approvedTip);
+
+    // A three-block branch from two below the approved block displaces it: depth 2, allowed.
+    const BlockIndex* below = t.state().activeChain()[9];
+    std::vector<Block> shallow = branch(t, below, 3, 3);
+    ASSERT_EQ(t.state().tip()->hash, shallow.back().getHash());
+    ASSERT_FALSE(t.state().activeChain().contains(t.state().find(approvedTip)));
+    ASSERT_FALSE(t.state().forkAlert().active);
+
+    // The active chain grows well past the old branch; then the old branch is extended from the approved block
+    // until it overtakes: 23 blocks from the fork, far beyond the limit, and nobody approved it.
+    branch(t, t.state().tip(), 20, 0);
+    const Hash256 ourTip = t.state().tip()->hash;
+    branch(t, t.state().find(approvedTip), 22, 1);
+    EXPECT_EQ(t.state().tip()->hash, ourTip);
+    EXPECT_TRUE(t.state().forkAlert().active);
+}
+
+// A refused approval is not left armed either.
+TEST(ChainState, ARefusedApprovalIsNotKept) {
+    TestChain t(regtestWithDepth(5));
+    branch(t, t.state().tip(), 10, 0);
+    const BlockIndex* fork = t.state().activeChain()[4];
+    std::vector<Block> side = branch(t, fork, 7, 1);   // heights 5..11, parked
+    ASSERT_TRUE(t.state().forkAlert().active);
+    branch(t, t.state().tip(), 10, 0);                 // our chain moves on to 20
+    const Hash256 ourTip = t.state().tip()->hash;
+
+    std::string err;
+    EXPECT_FALSE(t.state().approveReorg(side.back().getHash(), err));
+    EXPECT_NE(err.find("no more work"), std::string::npos) << err;
+
+    // The parked branch catches up later: a deep fork again, and nobody approved this one.
+    branch(t, t.state().find(side.back().getHash()), 12, 1);
+    EXPECT_EQ(t.state().tip()->hash, ourTip);
+    EXPECT_TRUE(t.state().forkAlert().active);
+}
+
 // approveReorg says so when the approved branch turns out invalid, and the node stays on its chain.
 TEST(ChainState, ApprovingAnInvalidBranchFails) {
     TestChain t(regtestWithDepth(5));

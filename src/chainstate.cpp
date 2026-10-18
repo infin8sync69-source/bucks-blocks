@@ -299,6 +299,9 @@ bool ChainState::approveReorg(const Hash256& tipHash, std::string& err) {
         err = fatalError_;
         return false;
     }
+    // The approval is for this activation only. Left armed, a later routine reorg that displaces the approved
+    // block would leave its old branch with a standing approval, free of the depth limit (audit CON-7).
+    approved_.erase(tipHash);
     // Report what happened, not what was asked (audit CON-7).
     if (!chain_.contains(approved)) {
         if (approved->failed()) {
@@ -313,7 +316,7 @@ bool ChainState::approveReorg(const Hash256& tipHash, std::string& err) {
 }
 
 // The operator's approval covers the reorg that brings the approved block into the active chain, also after its
-// branch has grown. Once it is in, a later deep reorg needs a new approval.
+// branch has grown. It lasts for the approveReorg call only; a later deep reorg, on that branch too, needs a new one.
 bool ChainState::approvedReorgTo(const BlockIndex* best) const {
     for (const Hash256& h : approved_) {
         const BlockIndex* a = index_.find(h);
