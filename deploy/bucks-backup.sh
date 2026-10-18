@@ -57,7 +57,14 @@ install -d -m 0700 "$DEST"
 install -d -m 0700 -o "$RUN_AS" "$STAGE"
 work="$STAGE/$NETWORK-$stamp"
 as_owner mkdir -m 0700 "$work"
-cleanup() { rm -rf -- "$work"; }
+# Root's own copies go to a directory the service user cannot touch: cp would follow a symlink planted in $work.
+rootwork=$(mktemp -d "$DEST/.stage.XXXXXX")
+out=""
+cleanup() {
+    rm -rf -- "$work" "$rootwork"
+    # A failed tar | gpg leaves the half-written archive behind.
+    if [ -n "$out" ]; then rm -f -- "$out.part"; fi
+}
 trap cleanup EXIT
 
 # 1. wallet file(s)
@@ -82,19 +89,19 @@ fi
 
 # 3. configuration (the API token is a secret too; it only travels inside the encrypted archive)
 for f in "$ENV_FILE" /etc/bucks/api-token; do
-    [ -r "$f" ] && cp -p "$f" "$work/$(basename "$f")"
+    [ -r "$f" ] && cp -p "$f" "$rootwork/$(basename "$f")"
 done
 
 # 4. pack, encrypt, checksum
 base="$DEST/bucks-$NETWORK-$stamp.tar.gz"
 if [ -n "$RECIPIENT" ]; then
     out="$base.gpg"
-    tar -C "$work" -czf - . | gpg --batch --yes --quiet --trust-model always \
+    tar -czf - -C "$work" . -C "$rootwork" . | gpg --batch --yes --quiet --trust-model always \
         --recipient "$RECIPIENT" --output "$out.part" --encrypt
 else
     out="$base"
     log "WARNING: writing an UNENCRYPTED archive with private keys (BUCKS_BACKUP_ALLOW_PLAINTEXT=1)"
-    tar -C "$work" -czf "$out.part" .
+    tar -czf "$out.part" -C "$work" . -C "$rootwork" .
 fi
 mv -f "$out.part" "$out"
 (cd "$DEST" && sha256sum "$(basename "$out")" > "$(basename "$out").sha256")
