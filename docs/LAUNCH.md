@@ -32,6 +32,9 @@ mainnet wallets):
 - [ ] **Owner decision: release tag name and GitHub default branch** (gate HYG-1): a plain `git clone`
       currently gets an unrelated branch with no code.
 - [ ] **Owner decision: licence** of the released code (gate HYG-2).
+- [ ] **Owner decision: release checkpoints and `minimumChainWork`** (`docs/MAINNET_INPUTS.md` item 3): they
+      stay empty in the first release, because no chain exists to take them from, and the next release adds
+      them from the running chain (see "After launch"); or the owner chooses otherwise now.
 - [ ] **Owner decision: launch hashrate**: how many miner hosts and threads run at launch. Far more than
       needed hands the first periods' coins to whoever mines first; far less makes blocks slow (see the
       first decision).
@@ -108,7 +111,9 @@ In `src/chainparams.cpp`, `makeMain()`:
 ```
 
 `makeTest()` overrides every genesis field, so testnet does not change. The genesis checkpoint is added
-automatically. Release checkpoints and `minimumChainWork` stay empty for the first release.
+automatically. Release checkpoints and `minimumChainWork` stay empty for the first release unless the
+owner decision in step 0 says otherwise. Set `BUCKS_VERSION` in `include/version.h` to the release number
+if it changes (a node reports it with its network, for example `0.2.0-main`).
 
 ```bash
 cmake --build build -j"$(nproc)"

@@ -46,7 +46,8 @@ cmake --build build -j"$(nproc)"
 ctest --test-dir build --output-on-failure
 ```
 
-- Requirements: CMake 3.14 or newer, a C++17 compiler (GCC or Clang), OpenSSL 3.0 or newer.
+- Requirements: CMake 3.20 or newer (the build itself needs 3.14, but `ctest --test-dir` below needs 3.20 and
+  `cmake --install --prefix` 3.15; Ubuntu 22.04 and 24.04 ship 3.22 and 3.28), a C++17 compiler (GCC or Clang), OpenSSL 3.0 or newer.
   SQLite is compiled in from `src/sqlite3.c`; the `sqlite3` package is not needed to build.
   Python 3 runs the independent genesis check in `ctest`.
 - There is no release tag before launch, and GitHub's default branch does not hold the code yet
@@ -121,9 +122,9 @@ or genesis for this build or data directory, 4 storage failure, 5 P2P port in us
 
 ### REST API
 
-Requests and responses are JSON. Read-only chain routes need no token: `GET /api/status`,
-`/api/blockchain/info`, `/api/blocks/recent`, `/api/blocks/height/<n>`, `/api/blocks/hash/<hash>`,
-`/api/mining/status`. Everything else needs the token in an `X-API-Token` (or
+Requests and responses are JSON. Read-only routes need no token: `GET /api/status`,
+`/api/auth/status`, `/api/blockchain/info`, `/api/blocks/recent`, `/api/blocks/height/<n>`,
+`/api/blocks/hash/<hash>`, `/api/economy/status`, `/api/mining/status`. Everything else needs the token in an `X-API-Token` (or
 `Authorization: Bearer`) header, for example `GET /api/wallets`, `POST /api/wallets/create`,
 `POST /api/wallets/restore`, `POST /api/transactions/send`, `POST /api/mining/start` and
 `/api/mining/stop`, `POST /api/node/approve-reorg`. `src/server.cpp` is the reference.
@@ -159,7 +160,8 @@ These are kept for reference and are not part of the supported build or deployme
 - `run_pilot.sh`: an old three-node local pilot. It kills **every** process whose command line
   contains `build/bucks`, so never run it on a server that runs a real node.
 - `mining_node.ps1`, `setup_mining_node.ps1`, `run.ps1`, `run_tests.ps1`, `run_perf.ps1`,
-  `run_system.ps1`: Windows only (PowerShell, MinGW in `tools/mingw64`); they start the default
+  `run_system.ps1`: Windows only (PowerShell; they expect a MinGW toolchain at a hard-coded path
+  on the original author's machine, and `tools/mingw64` holds only three runtime DLLs); they start the default
   network and read a `wallets.json` from the repository root.
 - `fix_app.js`, `concat_app.js`, `update_main.js`, `check-frontend.js`, `test-prop.js`,
   `test_ws.cpp`: one-off development scripts for the earlier `frontend/` UI; the node serves `web/`.
