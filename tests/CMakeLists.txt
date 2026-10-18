@@ -86,7 +86,7 @@ if(SHELLCHECK)
     add_test(NAME shellcheck
         COMMAND ${SHELLCHECK} --severity=warning
                 deploy/bootstrap-ubuntu.sh deploy/bucks-backup.sh deploy/bucks-healthcheck.sh
-                tools/soak.sh tools/ci.sh
+                tools/soak.sh tools/ci.sh tools/hashrate_bench.sh
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 else()
     message(STATUS "shellcheck not found: the deploy and tool scripts are only syntax-checked")
