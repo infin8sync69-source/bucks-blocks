@@ -116,7 +116,7 @@ public:
                                           size_t max) const;
 
     // Hashes of blocks whose data we do not have yet on the way from the active
-    // chain to `towards` (closest to the tip first, at most `max`). Empty unless
+    // chain to `towards` (oldest first, at most `max`). Empty unless
     // `towards` is known, not failed, not parked and has more work than the tip.
     // Used to decide what to download from the peer that announced `towards`.
     std::vector<Hash256> missingBlocks(const Hash256& towards, size_t max) const;

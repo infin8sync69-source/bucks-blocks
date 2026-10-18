@@ -89,10 +89,11 @@ TEST(Genesis, MainnetIsMinedAndConfigured) {
     EXPECT_EQ(p.checkpoints.at(0).hash, p.genesisHash);
     EXPECT_FALSE(p.genesisInscription.empty());
     EXPECT_GT(p.genesisTime, 1'790'000'000u);       // after the testnet genesis, not a placeholder
-    // Real work went into it: at least 32 leading zero bits at the mainnet limit 0x1d00ffff.
-    EXPECT_EQ(p.powLimitBits, 0x1d00ffffu);
+    // Real work went into it: mined at the proof-of-work limit, and the hash is as small as that limit demands
+    // (the limit is an owner decision, so nothing here depends on its value).
+    EXPECT_EQ(g.header.bits, p.powLimitBits);
     EXPECT_TRUE(Pow::checkProofOfWork(g.getHash(), g.header.bits, p.powLimit));
-    for (int i = 0; i < 4; ++i) EXPECT_EQ(g.getHash()[i], 0) << i;
+    EXPECT_LE(U256::fromBytesBE(g.getHash()).bits(), p.powLimit.bits());
 }
 
 TEST(Genesis, MismatchesAreDetected) {

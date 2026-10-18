@@ -369,6 +369,34 @@ TEST(ChainState, ApprovingAnInvalidBranchFails) {
     EXPECT_EQ(err, "no parked branch with that tip");
 }
 
+// A peer's best known block that turned out invalid stops counting: it must not hold the peer's download
+// accounting (the most work it announced) while valid announcements with less work are ignored.
+TEST(ChainState, AFailedBlockIsNotMoreWork) {
+    TestChain t;
+    branch(t, t.state().tip(), 3, 0);
+    const Hash256 ourTip = t.state().tip()->hash;
+    const BlockIndex* parent = t.state().activeChain()[0];
+    // The first block's coinbase claims one unit too much: only ConnectBlock can see it.
+    Block bad = t.build(parent, {}, 1, 600, Rules::Subsidy(parent->height + 1, t.params()) + 1);
+    ASSERT_TRUE(t.submit(bad).valid());
+    const BlockIndex* at = t.state().find(bad.getHash());
+    Hash256 badTip;
+    for (int i = 0; i < 3; ++i) {   // the third overtakes the tip, so the bad block is connected and fails
+        Block b = t.build(at, {}, 1);
+        ValidationState st = t.submit(b);
+        EXPECT_EQ(st.valid(), i < 2) << i << " " << st.code;
+        at = t.state().find(b.getHash());
+        badTip = b.getHash();
+    }
+    ASSERT_TRUE(t.state().find(badTip)->failed());
+    ASSERT_EQ(t.state().tip()->hash, ourTip);
+
+    EXPECT_FALSE(t.state().hasMoreWork(badTip, hashWith(9)));        // not "more work" than an unknown block
+    EXPECT_FALSE(t.state().hasMoreWork(badTip, ourTip));
+    EXPECT_TRUE(t.state().hasMoreWork(ourTip, badTip));              // a failed best is replaced by a valid one
+    EXPECT_TRUE(t.state().hasMoreWork(ourTip, hashWith(9)));
+}
+
 // CS-10: an unrequested block far above the tip is not stored.
 TEST(ChainState, UnrequestedFarBlock) {
     TestChain source;

@@ -410,3 +410,25 @@ TEST(Miner, HeaderOnlyParentAndBodiedChildDoNotStopMiningAfterRestart) {
     EXPECT_EQ(c.state().tip()->height, 1u);
     EXPECT_EQ(c.state().miningBlockedReason(), "");
 }
+
+// Connecting stored blocks while the node starts (after a crash, or --reindex) is not a download in progress: a
+// chain whose tip is old must not hold the miner for ten minutes after it.
+TEST(Miner, ReindexOfAnOldChainDoesNotLookLikeADownload) {
+    ChainParams p = chainParams(NetworkId::REGTEST);
+    p.id = NetworkId::TEST;
+    PersistentChain c(p);
+    ASSERT_TRUE(c.open().ok);
+    for (int i = 0; i < 3; ++i) ASSERT_TRUE(c.submit(c.build(c.state().tip())).valid());
+    EXPECT_EQ(c.state().miningBlockedReason(), "node is syncing");   // live, old blocks arriving: a download
+
+    for (int mode = 0; mode < 2; ++mode) {
+        c.close(true);
+        LoadOptions o;
+        o.reindex = mode == 0;
+        o.reindexChainstate = mode == 1;
+        const LoadResult r = c.open(o);
+        ASSERT_TRUE(r.ok) << r.error;
+        ASSERT_EQ(c.state().tip()->height, 3u) << mode;
+        EXPECT_EQ(c.state().miningBlockedReason(), "") << "mode=" << mode;
+    }
+}

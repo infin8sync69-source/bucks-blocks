@@ -97,9 +97,9 @@ std::vector<Hash256> ChainState::missingBlocks(const Hash256& towards, size_t ma
 
 bool ChainState::hasMoreWork(const Hash256& a, const Hash256& b) const {
     const BlockIndex* ea = index_.find(a);
-    if (!ea) return false;
+    if (!ea || ea->failed()) return false;
     const BlockIndex* eb = index_.find(b);
-    return !eb || ea->chainWork > eb->chainWork;
+    return !eb || eb->failed() || ea->chainWork > eb->chainWork;   // a failed block is nothing to download towards
 }
 
 std::string ChainState::miningBlockedReason() const {
@@ -809,7 +809,7 @@ bool ChainState::reindexFromBlocks(std::string& err) {
             persistStatus(e);
             propagateHaveChainData(e);
         } else {
-            Bucks::logErr() << "reindex: dropping unusable block " << hexStr(std::vector<uint8_t>(hash.begin(), hash.end())) << "\n";
+            Bucks::logErr() << "reindex: dropping unusable block " << describeHash(hash) << "\n";
             store_.deleteBlockData(hash);
         }
         if (fatalExitCode_) {
@@ -881,6 +881,7 @@ LoadResult ChainState::load(const LoadOptions& opt) {
 
     // Blocks that were stored but not connected before shutdown.
     if (!activateBestChain(err)) return failure(fatalExitCode_ ? fatalExitCode_ : EXIT_DATABASE_CORRUPT, err);
+    lastTipMove_ = 0;   // connecting stored blocks at startup (also --reindex) is not a download in progress
 
     LoadResult ok;
     ok.ok = true;
