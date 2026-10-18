@@ -1,13 +1,17 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
+#include <thread>
 
 #include "consensus.h"
 #include "genesis.h"
 #include "mempool.h"
 #include "miner.h"
+#include "persistent_chain.h"
 #include "pow.h"
 #include "test_chain.h"
+#include "validation_rules.h"
 
 using namespace Bucks;
 using namespace Bucks::TestUtil;
@@ -27,6 +31,28 @@ uint64_t readLE64(const std::vector<uint8_t>& v, size_t at) {
     uint64_t r = 0;
     for (int i = 0; i < 8; ++i) r |= uint64_t(v[at + i]) << (8 * i);
     return r;
+}
+
+// `p` with another proof-of-work limit and its genesis re-mined to match.
+ChainParams withLimit(ChainParams p, uint32_t limitBits) {
+    p.powLimitBits = limitBits;
+    p.powLimit = Pow::decodeCompact(p.powLimitBits).target;
+    for (p.genesisNonce = 0;; ++p.genesisNonce) {
+        p.genesisMerkleRoot = Genesis::build(p).header.merkleRoot;
+        p.genesisHash = Genesis::build(p).getHash();
+        if (Pow::checkProofOfWork(p.genesisHash, p.powLimitBits, p.powLimit)) break;
+    }
+    p.checkpoints = {Checkpoint{0, p.genesisHash}};
+    return p;
+}
+
+// What the miner did before the midstate search: hash the whole header for
+// every nonce from 0 and stop at the first one that meets the target.
+Block referenceSolve(BlockTemplate t, const ChainParams& p) {
+    for (uint32_t n = 0;; ++n) {
+        t.block.header.nonce = n;
+        if (Pow::checkProofOfWork(t.block.header.hash(), t.block.header.bits, p.powLimit)) return t.block;
+    }
 }
 
 // A chain with a mempool, an assembler and a miner, all on one clock.
@@ -134,9 +160,11 @@ TEST(Miner, TemplateAtHalving) {
     EXPECT_EQ(t.block.transactions[0].outputs[0].scriptPubKey, ownedBy(7));
 }
 
-// MIN-3
+// MIN-3: the Bitcoin retarget's period rules (H-TW1) move the template time.
 TEST(Miner, TimewarpAwareTime) {
-    Rig r;
+    ChainParams p = chainParams(NetworkId::REGTEST);
+    p.powAlgorithm = PowAlgorithm::BITCOIN;
+    Rig r(p);
     r.grow(2014);
     const int64_t now = r.chain.now();
     // Block 2015 is dated 3,000 s ahead of the clock (allowed up to 7,200).
@@ -155,20 +183,61 @@ TEST(Miner, TimewarpAwareTime) {
     EXPECT_EQ(r.chain.tip()->height, 2016u);
 }
 
+// MIN-3b: ASERT (regtest's rule set, as on main and test) has no period rules,
+// so the same template is dated by the clock, 3,000 s before its parent.
+TEST(Miner, AsertTimeIgnoresPeriods) {
+    Rig r;
+    ASSERT_EQ(r.chain.params().powAlgorithm, PowAlgorithm::ASERT);
+    r.grow(2014);
+    const int64_t now = r.chain.now();
+    Block b = r.chain.build(r.chain.tip(), {}, 0, uint32_t(now + 3000 - r.chain.tip()->header.timestamp));
+    ASSERT_TRUE(r.chain.submit(b).valid());
+
+    BlockTemplate t;
+    std::string err;
+    ASSERT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
+    EXPECT_EQ(t.block.header.height, 2016u);
+    EXPECT_EQ(int64_t(t.block.header.timestamp), now);
+    std::string mineErr;
+    EXPECT_EQ(r.mine(mineErr), MineResult::FOUND) << mineErr;
+    EXPECT_EQ(r.chain.tip()->height, 2016u);
+}
+
+// MIN-8: ASERT with retargeting on, end to end. Blocks one second apart are
+// ahead of schedule, so every block is harder than its parent; the template
+// carries the ASERT bits, the parent's bits are refused, a mined block is
+// accepted. Limit 0x1e7fffff (the largest ASERT admits): about 2^17 hashes per block.
+TEST(Miner, AsertBitsEndToEnd) {
+    ChainParams p = withLimit(chainParams(NetworkId::REGTEST), 0x1e7fffff);
+    p.powNoRetargeting = false;
+    Rig r(p);
+    ASSERT_TRUE(r.chain.ok()) << r.chain.error();
+    for (int i = 0; i < 3; ++i) ASSERT_TRUE(r.chain.submit(r.chain.build(r.chain.tip(), {}, 0, 1)).valid());
+    const uint32_t want = Rules::GetNextWorkRequired(r.chain.tip(), r.chain.params());
+    EXPECT_LT(Pow::decodeCompact(want).target, Pow::decodeCompact(r.chain.tip()->header.bits).target);
+
+    BlockTemplate t;
+    std::string err;
+    ASSERT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
+    EXPECT_EQ(t.block.header.bits, want);
+
+    Block easier = r.chain.build(r.chain.tip(), {}, 1, 1);
+    easier.header.bits = r.chain.tip()->header.bits;
+    for (easier.header.nonce = 0;; ++easier.header.nonce)
+        if (Pow::checkProofOfWork(easier.header.hash(), easier.header.bits, p.powLimit)) break;
+    EXPECT_EQ(r.chain.submit(easier).code, "bad-diffbits");
+
+    std::string mineErr;
+    ASSERT_EQ(r.mine(mineErr), MineResult::FOUND) << mineErr;
+    EXPECT_EQ(r.chain.tip()->height, 4u);
+    EXPECT_EQ(r.chain.tip()->header.bits, want);
+}
+
 // MIN-4
 TEST(Miner, ExtraNonceRollover) {
     // A harder limit (about 2^16 hashes per block) and a nonce space of 10,
     // so the miner must roll the extra nonce many times.
-    ChainParams p = chainParams(NetworkId::REGTEST);
-    p.powLimitBits = 0x1f00ffff;
-    p.powLimit = Pow::decodeCompact(p.powLimitBits).target;
-    for (p.genesisNonce = 0;; ++p.genesisNonce) {
-        p.genesisMerkleRoot = Genesis::build(p).header.merkleRoot;
-        p.genesisHash = Genesis::build(p).getHash();
-        if (Pow::checkProofOfWork(p.genesisHash, p.powLimitBits, p.powLimit)) break;
-    }
-    p.checkpoints = {Checkpoint{0, p.genesisHash}};
-
+    ChainParams p = withLimit(chainParams(NetworkId::REGTEST), 0x1f00ffff);
     Rig r(p);
     ASSERT_TRUE(r.chain.ok()) << r.chain.error();
     r.miner.setNonceSpaceForTesting(10);
@@ -219,20 +288,34 @@ TEST(Miner, SyncRule) {
     BlockTemplate t;
     std::string err;
 
-    // (a) The tip (genesis) is years older than the clock and nothing better is known: mining works.
+    // (a) The tip (genesis) is months older than the clock and nothing better is known: mining works.
     EXPECT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
 
-    // (b) A header with more work is known but its block is not connected.
+    // (b) A header with more work is known but its block is not: mining goes on (audit CON-1).
     Block better = r.chain.build(r.chain.tip());
     ASSERT_TRUE(r.chain.state().ProcessNewBlockHeaders({better.header}).valid());
+    EXPECT_EQ(r.chain.state().miningBlockedReason(), "");
+    EXPECT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
+
+    // (c) Initial block download: the block arrives and connects, but the new tip is still more than a day
+    // old, so the node is catching up and does not mine on it.
+    ASSERT_TRUE(r.chain.submit(better).valid());
     EXPECT_FALSE(r.assembler.createNewBlock(ownedBy(7), {}, t, err));
     EXPECT_EQ(err, "node is syncing");
-    EXPECT_EQ(r.chain.state().miningBlockedReason(), "node is syncing");
 
-    // The block arrives: the tip catches up and mining is allowed again.
-    ASSERT_TRUE(r.chain.submit(better).valid());
+    // Ten minutes without another block: the download has stalled (or the network has), mining resumes.
+    r.chain.now() += 601;
     EXPECT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
     EXPECT_EQ(t.block.header.height, 2u);
+
+    // More old blocks close the gate again; a block from today opens it at once.
+    ASSERT_TRUE(r.chain.submit(r.chain.build(r.chain.tip())).valid());
+    EXPECT_EQ(r.chain.state().miningBlockedReason(), "node is syncing");
+    const uint32_t gap = uint32_t(r.chain.now() - 60 - int64_t(r.chain.tip()->header.timestamp));
+    ASSERT_TRUE(r.chain.submit(r.chain.build(r.chain.tip(), {}, 0, gap)).valid());
+    EXPECT_EQ(r.chain.state().miningBlockedReason(), "");
+    EXPECT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
+    EXPECT_EQ(t.block.header.height, 4u);
 
     // Regtest has no restriction, even with a better unconnected header.
     Rig reg;
@@ -341,22 +424,191 @@ TEST(Miner, StopRequestEndsTheLoop) {
     EXPECT_EQ(r.chain.tip()->height, 0u);
 }
 
-// Audit CON-1: a header whose block never arrives must not hold mining forever.
-TEST(Miner, HeaderWithoutABlockStopsGatingAfterTenMinutes) {
+// Audit CON-1: a header whose block never arrives, plus a real child block on top of it, used to stop mining for
+// good (also across restarts). Neither may hold the gate, not even for a while.
+TEST(Miner, HeaderOnlyParentAndBodiedChildDoNotStopMining) {
     ChainParams p = chainParams(NetworkId::REGTEST);
     p.id = NetworkId::TEST;
+    for (bool requested : {false, true}) {
+        Rig r(p);
+        ASSERT_TRUE(r.chain.ok());
+        const Block h1 = r.chain.build(r.chain.tip(), {}, 9);
+        ASSERT_TRUE(r.chain.state().ProcessNewBlockHeaders({h1.header}).valid());   // H1's body never comes
+        const Block h2 = buildTestBlock(p, r.chain.state().find(h1.getHash()), {}, 9);
+        ASSERT_TRUE(r.chain.submit(h2, requested).valid());
+        const BlockIndex* e2 = r.chain.state().find(h2.getHash());
+        ASSERT_NE(e2, nullptr);
+        EXPECT_TRUE(e2->status & HAVE_DATA);
+        EXPECT_FALSE(e2->haveChainData);
+
+        EXPECT_EQ(r.chain.state().miningBlockedReason(), "") << "requested=" << requested;
+        std::string err;
+        ASSERT_EQ(r.mine(err), MineResult::FOUND) << err;
+        EXPECT_EQ(r.chain.tip()->height, 1u);
+        EXPECT_NE(r.chain.tip()->hash, h1.getHash());
+        // H1 is still worth fetching, but only from a peer that announced H2 (or H1).
+        EXPECT_EQ(r.chain.state().missingBlocks(h2.getHash(), 16), std::vector<Hash256>{h1.getHash()});
+        EXPECT_TRUE(r.chain.state().missingBlocks(Hash256{}, 16).empty());
+    }
+}
+
+TEST(Miner, HeaderOnlyParentAndBodiedChildDoNotStopMiningAfterRestart) {
+    ChainParams p = chainParams(NetworkId::REGTEST);
+    p.id = NetworkId::TEST;
+    PersistentChain c(p);
+    ASSERT_TRUE(c.open().ok);
+    const Block h1 = c.build(c.state().tip(), {}, 9);
+    ASSERT_TRUE(c.state().ProcessNewBlockHeaders({h1.header}).valid());
+    const Block h2 = c.build(c.state().find(h1.getHash()), {}, 9);
+    ASSERT_TRUE(c.state().ProcessNewBlock(h2, false).valid());
+    EXPECT_EQ(c.state().miningBlockedReason(), "");
+
+    for (bool clean : {true, false}) {
+        c.close(clean);
+        c.now() += 7 * 86'400;
+        const LoadResult r = c.open();
+        ASSERT_TRUE(r.ok) << r.error;
+        ASSERT_NE(c.state().find(h2.getHash()), nullptr);
+        EXPECT_EQ(c.state().tip()->height, 0u);
+        EXPECT_EQ(c.state().miningBlockedReason(), "") << "clean=" << clean;
+    }
+    // And the chain still grows on its own tip.
+    const uint32_t gap = uint32_t(c.now() - int64_t(c.state().tip()->header.timestamp));
+    ASSERT_TRUE(c.submit(c.build(c.state().tip(), {}, 0, gap)).valid());
+    EXPECT_EQ(c.state().tip()->height, 1u);
+    EXPECT_EQ(c.state().miningBlockedReason(), "");
+}
+
+// Connecting stored blocks while the node starts (after a crash, or --reindex) is not a download in progress: a
+// chain whose tip is old must not hold the miner for ten minutes after it.
+TEST(Miner, ReindexOfAnOldChainDoesNotLookLikeADownload) {
+    ChainParams p = chainParams(NetworkId::REGTEST);
+    p.id = NetworkId::TEST;
+    PersistentChain c(p);
+    ASSERT_TRUE(c.open().ok);
+    for (int i = 0; i < 3; ++i) ASSERT_TRUE(c.submit(c.build(c.state().tip())).valid());
+    EXPECT_EQ(c.state().miningBlockedReason(), "node is syncing");   // live, old blocks arriving: a download
+
+    for (int mode = 0; mode < 2; ++mode) {
+        c.close(true);
+        LoadOptions o;
+        o.reindex = mode == 0;
+        o.reindexChainstate = mode == 1;
+        const LoadResult r = c.open(o);
+        ASSERT_TRUE(r.ok) << r.error;
+        ASSERT_EQ(c.state().tip()->height, 3u) << mode;
+        EXPECT_EQ(c.state().miningBlockedReason(), "") << "mode=" << mode;
+    }
+}
+
+// ---------------------------------------------------------------- midstate and threads (audit ML-2)
+
+TEST(Miner, HeaderHasherEqualsTheHeaderHash) {
+    BlockHeader h;
+    h.height = 123'456;
+    h.timestamp = 1'800'000'000;
+    h.bits = 0x1d00ffff;
+    for (int i = 0; i < 32; ++i) {
+        h.prevBlockHash[i] = uint8_t(7 * i + 1);
+        h.merkleRoot[i] = uint8_t(255 - 3 * i);   // bytes 24..31 sit in the hashed tail
+    }
+    HeaderHasher hasher(h);
+    const U256 target = Pow::decodeCompact(0x207fffff).target;
+    for (uint32_t nonce : {0u, 1u, 0x80u, 0x12345678u, 0xFFFFFFFFu}) {
+        h.nonce = nonce;
+        EXPECT_EQ(hasher.hash(nonce), h.hash()) << nonce;
+        EXPECT_EQ(hasher.meetsTarget(nonce, target),
+                  Pow::checkProofOfWork(h.hash(), 0x207fffff, target)) << nonce;
+    }
+    h.timestamp += 3601;
+    hasher.setTimestamp(h.timestamp);
+    h.nonce = 99;
+    EXPECT_EQ(hasher.hash(99), h.hash());
+}
+
+// The single-thread miner produces exactly the block the old per-nonce loop produced:
+// same template, same coinbase, same first nonce, byte for byte.
+TEST(Miner, OneThreadMinesTheReferenceBlock) {
+    // Regtest with a mempool transaction, and the harder limit where the search runs
+    // through tens of thousands of nonces.
+    for (const bool hard : {false, true}) {
+        const ChainParams p = hard ? withLimit(chainParams(NetworkId::REGTEST), 0x1f00ffff) : chainParams(NetworkId::REGTEST);
+        Rig r(p);
+        ASSERT_TRUE(r.chain.ok()) << r.chain.error();
+        if (!hard) {
+            r.grow(101);
+            ASSERT_TRUE(r.mempool.accept(r.spend(0, 20'000), r.chain.state()).valid());
+        }
+        for (int i = 0; i < 3; ++i) {
+            BlockTemplate t;
+            std::string err;
+            ASSERT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
+            const Block expected = referenceSolve(t, p);
+
+            ASSERT_EQ(r.mine(err), MineResult::FOUND) << err;
+            std::vector<uint8_t> bytes;
+            ASSERT_TRUE(r.chain.store().getBlock(r.chain.tip()->hash, bytes));
+            EXPECT_EQ(bytes, expected.serialize()) << "hard " << hard << " block " << i;
+            EXPECT_EQ(r.chain.tip()->hash, expected.getHash());
+        }
+        EXPECT_EQ(r.mempool.size(), 0u);
+    }
+}
+
+// Every thread hashes its own extra nonce, and whatever thread wins, its block is the
+// reference block for that extra nonce: only the search order changed, not the block.
+TEST(Miner, ThreadsSearchDisjointExtraNonces) {
+    const ChainParams p = withLimit(chainParams(NetworkId::REGTEST), 0x1f00ffff);
     Rig r(p);
-    ASSERT_TRUE(r.chain.ok());
-    BlockTemplate t;
-    std::string err;
+    ASSERT_TRUE(r.chain.ok()) << r.chain.error();
+    r.miner.setThreads(4);
+    for (int i = 0; i < 6; ++i) {
+        BlockTemplate t;
+        std::string err;
+        ASSERT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
 
-    Block phantom = r.chain.build(r.chain.tip());
-    ASSERT_TRUE(r.chain.state().ProcessNewBlockHeaders({phantom.header}).valid());   // its body never comes
-    EXPECT_EQ(r.chain.state().miningBlockedReason(), "node is syncing");
+        ASSERT_EQ(r.mine(err), MineResult::FOUND) << err;
+        std::vector<uint8_t> bytes;
+        ASSERT_TRUE(r.chain.store().getBlock(r.chain.tip()->hash, bytes));
+        const Block mined = Block::deserialize(bytes);
+        const uint64_t extraNonce = readLE64(mined.transactions[0].inputs[0].scriptSig, 4);
+        EXPECT_LT(extraNonce >> 48, 4u) << "thread index";
+        EXPECT_EQ(extraNonce & 0xFFFF'FFFF'FFFFull, 0u) << "no rollover in a 2^32 nonce space";
 
-    r.chain.now() += 599;
-    EXPECT_EQ(r.chain.state().miningBlockedReason(), "node is syncing");
-    r.chain.now() += 2;   // 601 s after the header was first stored
-    EXPECT_EQ(r.chain.state().miningBlockedReason(), "");
-    EXPECT_TRUE(r.assembler.createNewBlock(ownedBy(7), {}, t, err)) << err;
+        BlockAssembler::setExtraNonce(t, extraNonce);
+        EXPECT_EQ(bytes, referenceSolve(t, p).serialize()) << "block " << i;
+    }
+    EXPECT_EQ(r.chain.tip()->height, 6u);
+}
+
+// Testnet's limit (2^24 hashes per block) keeps four threads busy for seconds: the rate is
+// reported while they hash, and a stop ends every thread at once.
+TEST(Miner, ThreadsReportARateAndStopPromptly) {
+    Rig r(chainParams(NetworkId::TEST));
+    ASSERT_TRUE(r.chain.ok()) << r.chain.error();
+    r.miner.setThreads(4);
+    std::atomic<bool> stopped{false};
+    std::thread worker([&] {
+        std::string err;
+        while (!r.stop.load())
+            if (r.mine(err) == MineResult::FAILED) break;
+        stopped = true;
+    });
+    const auto began = std::chrono::steady_clock::now();
+    while (r.miner.hashRate() == 0 && std::chrono::steady_clock::now() - began < std::chrono::seconds(20))
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+    const uint64_t rate = r.miner.hashRate();
+    const uint64_t average = uint64_t(double(r.miner.hashes()) / seconds);
+
+    const auto stopAt = std::chrono::steady_clock::now();
+    r.stop = true;
+    worker.join();
+    const double stopSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - stopAt).count();
+
+    EXPECT_TRUE(stopped.load());
+    EXPECT_GT(rate, 0u);
+    EXPECT_GT(rate, average / 4) << "rate " << rate << " vs. average " << average;
+    EXPECT_LT(rate, average * 4) << "rate " << rate << " vs. average " << average;
+    EXPECT_LT(stopSeconds, 2.0);
 }

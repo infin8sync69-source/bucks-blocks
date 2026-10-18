@@ -69,7 +69,7 @@ All `file:line` references point to the current tree (2026-10-08). The consensus
 | D5 | Header stays 84 bytes (keeps `height`); version 2. The 84-byte layout cannot be hashed by stock Bitcoin ASIC chips. | §4.4, §3.6 |
 | D6 | Launch difficulty = minimum difficulty = `0x1d00ffff` (about 2^32 hashes per block). | §3.6 |
 | D7 | Chain work is exact 256-bit `floor(2^256/(target+1))`; most cumulative work wins; ties keep the first-seen block. | §6.4, §8.3 |
-| D8 | Bitcoin retarget formula (2016 blocks, 4x clamp, powLimit clamp) in signed 64-bit time, plus two timewarp rules (BIP94 600 s rule, BIP54 non-negative period rule). | §6.5, §6.6 |
+| D8 | Difficulty: aserti3-2d (ASERT, the Bitcoin Cash 2020-11-15 specification) on every block, 2-day half-life, anchored at genesis, on main and test; time rules are MTP and the 2-hour future limit (audit NEW-2). The Bitcoin retarget (2016 blocks, 4x clamp, powLimit clamp, signed 64-bit time, timewarp rules BIP94 600 s and BIP54 non-negative period) stays selectable per network (`ChainParams::powAlgorithm`). | §6.5, §6.6 |
 | D9 | BIP34-style height (fixed 4-byte LE) in every coinbase; BIP30 check on every output; merkle mutation detection (CVE-2012-2459); 64-byte transactions invalid. | §4.3, §4.6, §7 |
 | D10 | One validation path. Peers, the miner, startup checks and reorgs all call the same functions. | §7.2 |
 | D11 | Block index keyed by hash; a reorg is one atomic storage commit; on any failure nothing changes. | §8 |
@@ -116,11 +116,11 @@ All of these live in `include/consensus.h` and nowhere else. The duplicates in `
 | `MAX_NULLDATA_PAYLOAD` | 1,024 bytes | gold events must fit (coordinate with gold spec) |
 | `SIGHASH_ALL` | 0x01 (the only allowed value) | |
 | `TARGET_SPACING` | 600 s | |
-| `RETARGET_INTERVAL` | 2016 blocks | |
-| `TARGET_TIMESPAN` (T) | 1,209,600 s | |
+| `RETARGET_INTERVAL` | 2016 blocks | Bitcoin retarget only |
+| `TARGET_TIMESPAN` (T) | 1,209,600 s | Bitcoin retarget only |
 | `MAX_FUTURE_BLOCK_TIME` | 7,200 s | was hardcoded 7200 (`validation.cpp:167`) |
 | `MTP_WINDOW` | 11 blocks | |
-| `TIMEWARP_GRACE` | 600 s | new |
+| `TIMEWARP_GRACE` | 600 s | new; Bitcoin retarget only |
 | `LOCKTIME_THRESHOLD` | 500,000,000 | below = height, at/above = UNIX time |
 | `SEQUENCE_FINAL` | 0xFFFFFFFF | was unused (`consensus.h:122`) |
 | `REQUIRE_STRICT_DER`, `REQUIRE_LOW_S` | true | already used by `src/crypto.cpp:552, 571` |
@@ -157,6 +157,7 @@ New files `include/chainparams.h`, `src/chainparams.cpp`. There is no mutable gl
 ```cpp
 namespace Bucks {
 enum class NetworkId : uint8_t { MAIN = 0, TEST = 1, REGTEST = 2 };
+enum class PowAlgorithm : uint8_t { BITCOIN = 0, ASERT = 1 };
 struct Checkpoint { uint32_t height; Hash256 hash; };
 
 struct ChainParams {
@@ -176,6 +177,8 @@ struct ChainParams {
     uint32_t    powLimitBits;            // minimum difficulty; also the genesis bits
     U256        powLimit;                // decodeCompact(powLimitBits)
     bool        powNoRetargeting;        // true only on regtest
+    PowAlgorithm powAlgorithm;           // bits rule (§6.5); also picks the time rules (§6.6)
+    int64_t     asertHalfLife;           // seconds; ASERT only
     // Money
     uint32_t    halvingInterval;
     // Chain selection safety (§8.5)
@@ -192,12 +195,14 @@ const ChainParams& chainParams(NetworkId id);
 
 | Field | main | test | regtest |
 |---|---|---|---|
-| `netMagic` (wire bytes) | `B7 C5 E3 A9` | `B7 C5 E3 7F` | `B7 C5 E3 5D` |
+| `netMagic` (wire bytes) | `B7 C5 E3 A9` | `B7 C5 E3 6B` | `B7 C5 E3 5D` |
 | `defaultP2PPort` | 8733 | 18733 | 18744 |
 | `defaultApiPort` | 8080 | 18080 | 18090 |
 | `p2pkhAddressVersion` | 0x1A (addresses start with `B`) | 0x41 (`T`) | 0x7F (`t`) |
 | `powLimitBits` = genesis bits | `0x1d00ffff` | `0x1e00ffff` (about 2^24 hashes; changed 2026-10-14 so one laptop mines testnet in seconds) | `0x207fffff` |
 | `powNoRetargeting` | false | false | true |
+| `powAlgorithm` | ASERT | ASERT | ASERT (bits never change; it picks the time rules) |
+| `asertHalfLife` | 172,800 s | 172,800 s | 172,800 s (unused) |
 | `halvingInterval` | 210,000 | 210,000 | 150 |
 | `maxAutoReorgDepth` | 100 | 100 | 100 (tests may override) |
 | `minimumChainWork` | 0 at launch, raised every release | 0, raised every release | 0 |
@@ -206,6 +211,7 @@ const ChainParams& chainParams(NetworkId id);
 | genesis time | launch time | fixed at implementation | 1767225600 (2026-01-01 00:00:00 UTC) |
 
 Notes:
+- The testnet magic changed again with ASERT (it was `B7 C5 E3 7F`): blocks of the older testnet break the new difficulty rule, so its peers cannot connect. Delete testnet data from before ASERT.
 - All three magics differ from Bitcoin's and from the old Bucks magic `F5 B3 B4 D9` (`include/network.h:27`), so old nodes and other networks cannot talk to v2 nodes.
 - P2P ports no longer reuse Bitcoin's 8333 (`src/main.cpp:48`, NET-18).
 - Address version bytes no longer equal Bitcoin's 0x00 (CRY-17). The wallet (`src/wallet.cpp:204`) MUST use `params.p2pkhAddressVersion` for encoding and MUST reject any other version when decoding.
@@ -229,9 +235,9 @@ The genesis block creates **no coins**: there is no premine and no placeholder p
 4. When the node opens an existing datadir, the stored network name and genesis hash (storage spec, `chain_state` table) MUST equal the params. Otherwise: `FATAL: datadir belongs to network <x> genesis <y>`, exit code 3. An empty datadir is initialised with the genesis index entry (status `HEADER_VALID | HAVE_DATA | DATA_CHECKED | CONNECTED_VALID | IN_MAIN_CHAIN`, chain work = `blockProof(bits)`), an empty UTXO set, the initial gold state (gold spec) and best block = genesis. Genesis has no undo record and is never disconnected; `ConnectBlock` is never run on it.
 
 **Launch procedure (mainnet; testnet at implementation time):**
-1. The owner fixes the inscription (ASCII, at most 96 bytes) and the genesis time (the announced launch time).
-2. Run `bucks-mine-genesis --network=main --time=<t> --inscription="<text>"` (new tool `tools/mine_genesis.cpp`, separate CMake target, not linked into the node). It prints nonce, merkle root and hash. At 2^32 expected hashes this takes minutes on one CPU core. If the 32-bit nonce space is exhausted, the tool increments `time` by 1 and continues, and prints the final time.
-3. Paste the values into `src/chainparams.cpp`; add checkpoint `{0, hash}`.
+1. The owner fixes the inscription (printable ASCII, at most 96 bytes; `checkChainParams` and the tool refuse anything else) and the genesis time (the announced launch time).
+2. Run `bucks-mine-genesis --network=main --time=<t> --inscription="<text>"` (new tool `tools/mine_genesis.cpp`, separate CMake target, not linked into the node). It prints nonce, merkle root and hash, and its progress on stderr every ten seconds. At 2^32 expected hashes this takes about 35 minutes on one CPU thread on average (measured), proportionally less on several (`--threads=<n>`, default all cores). If the 32-bit nonce space is exhausted (about 37% of the time), the tool increments `time` by 1 and continues, and prints the final time: use the printed time.
+3. Check the printed values independently: `python3 tools/verify_genesis.py --time <t> --nonce <n> --bits 1d00ffff --inscription "<text>" --merkle <root> --hash <hash>`. Paste them into `src/chainparams.cpp` (the checkpoint `{0, hash}` follows from `genesisHash`). ctest then checks them twice: `Genesis.MainnetIsMinedAndConfigured` (skipped until this step) and `genesis_independent` (the same script on `src/chainparams.cpp`).
 4. Publish the hash and inscription in the launch announcement before the launch time (fair launch).
 
 **Regtest genesis vector** (computed by an independent Python implementation):
@@ -250,13 +256,14 @@ The genesis block creates **no coins**: there is no premine and no placeholder p
 **Decision:** `powLimitBits` = genesis bits = `0x1d00ffff` on main and test. Target = `0xffff × 2^208`; expected work per block = 2^32 ≈ 4.3 × 10^9 hashes. This is Bitcoin's own minimum difficulty.
 
 **Why:**
-1. *No overflow.* The retarget multiplies target × timespan before dividing (§6.5). With today's `0x1f00ffff` (`include/consensus.h:81`) the product needs 263 bits and overflows 256-bit arithmetic. With `0x1d00ffff` it needs 247 bits. The node asserts this at startup (§3.7).
-2. *No stall.* One ordinary CPU core (about 10^7 SHA256d per second) finds a block in about 7 minutes, so the chain keeps moving even if only one small miner is online.
+1. *No overflow.* The Bitcoin retarget multiplies target × timespan before dividing (§6.5). With today's `0x1f00ffff` (`include/consensus.h:81`) the product needs 263 bits and overflows 256-bit arithmetic. With `0x1d00ffff` it needs 247 bits. ASERT multiplies by less than 2^17 (241 bits). The node asserts this at startup (§3.7).
+2. *No stall.* The node's built-in miner hashes about 2 × 10^6 SHA256d per second per CPU thread (midstate search, measured on a 2.8 GHz Xeon without SHA extensions; CPUs with them are faster). One thread finds a block in about 35 minutes on average, a 4-core server in about 9 minutes, so the chain keeps moving even if only one small miner is online. (This section first assumed 10^7 per core; the node's miner reached 0.5 × 10^6 on one thread until the midstate and thread changes of audit ML-2.) With ASERT a miner who raised the difficulty and leaves costs one slow block: that block still needs the old difficulty, and its late timestamp lowers the difficulty by 2^(delay / 2 days) at once (§6.5). Under the Bitcoin retarget the same departure stalled the chain for thousands of days (audit NEW-2).
 3. *No instant supply grab.* It is 65,536 times harder than today's 2^16 hashes per block, which let one GPU make thousands of blocks per second (CON-17).
 4. *Header spam costs real work.* Each fake header costs at least 2^32 hashes (§8.6).
 
 **What it does not solve, and the mitigations:**
-- *Early supply capture.* If launch hashrate is much higher than 2^32 hashes per 10 minutes, the first difficulty periods run fast until the 4x-per-period increase catches up. Mitigation: announce launch time and genesis inscription in advance so everyone can mine from block 1. The owner may set a higher launch difficulty if the launch hashrate is known (§16 Q1); never set it higher than what the expected launch miners produce in 10 minutes, because a 2016-block period at too-high difficulty can stall the chain for months.
+- *Early supply capture.* If launch hashrate is much higher than 2^32 hashes per 10 minutes, blocks run fast until ASERT catches up: the difficulty doubles for every 2 days (288 blocks) the chain runs ahead of schedule, so a 140-fold jump (1 GH/s) costs about 2,000 extra blocks (under the Bitcoin retarget: five 2016-block periods). Mitigation: announce launch time and genesis inscription in advance so everyone can mine from block 1. The owner may set a higher launch difficulty if the launch hashrate is known (§16 Q1).
+- *Schedule lag at the limit.* While the total hashrate is below 2^32 hashes per 600 s (about 7.2 MH/s), blocks come slower than 600 s even at the limit, and the chain falls behind its ASERT schedule (genesis time + 600 s × height). The difficulty cannot go below the limit, so nothing corrects that lag; a large miner who arrives later mines at the limit until the chain is back on schedule, about lag / 600 blocks (30 days of one 0.5 MH/s miner, then 1 GH/s: about 4,000 blocks; test DIFF-6). The Bitcoin retarget gives that miner the rest of the period at the limit and then only 4 times more difficulty per period. Mitigation: enough hashrate at launch to keep the schedule.
 - *51% attacks while hashrate is small.* Mitigations: checkpoints and `minimumChainWork` in every release; the automatic reorg limit (§8.5); recommendation to exchanges: wait at least 120 confirmations in the first year (above the 100-block reorg limit, so a node that saw the deposit confirmed will not reorg it away automatically); merge mining is an owner decision (§16 Q3).
 - *Rented Bitcoin ASICs.* Stock Bitcoin ASIC chips hash exactly 80-byte headers (fixed padding in the second SHA-256 block). The 84-byte Bucks header (§4.4) cannot be computed by them, so the Bitcoin ASIC fleet cannot simply be pointed at Bucks. This is a deliberate deviation from Bitcoin's 80-byte header. Custom hardware could still be built later.
 
@@ -264,7 +271,7 @@ The genesis block creates **no coins**: there is no premine and no placeholder p
 
 The node MUST abort (exit code 3) if any of these fail:
 1. `powLimit == decodeCompact(powLimitBits)` and the decode is valid (not negative, no overflow, not zero).
-2. If `!powNoRetargeting`: `powLimit × 4 × T < 2^256` (checked with `U256` bit lengths: `bits(powLimit) + bits(4T) ≤ 256`).
+2. `powAlgorithm` is BITCOIN or ASERT. If `!powNoRetargeting`: for BITCOIN `powLimit × 4 × T < 2^256` (checked with `U256` bit lengths: `bits(powLimit) + bits(4T) ≤ 256`); for ASERT `powLimit × 2^17 < 2^256` (`bits(powLimit) + 17 ≤ 256`, so at most `0x1e7fffff`) and `asertHalfLife > 0`.
 3. Genesis checks of §3.5.
 4. `checkpoints` is sorted, starts with `{0, genesisHash}`.
 5. All networks have distinct `netMagic`, ports and address versions (unit test, not runtime).
@@ -632,11 +639,56 @@ Chain work is computed only from headers that passed H-BITS, H-POW and H-DIFF, a
 | `0x207fffff` | 2 |
 | `0x1c05a3f4` | `0x2d62f2a3b3` = 194,933,597,107 |
 
-### 6.5 Difficulty retarget (rule H-DIFF)
+### 6.5 Difficulty (rule H-DIFF)
+
+`ChainParams::powAlgorithm` selects the rule. Main and test use ASERT (§6.5.1); the Bitcoin retarget (§6.5.2) stays available for a network that selects it. Both depend only on the parent and its ancestors, never on the new block itself, so the miner may move its own timestamp.
 
 ```
 GetNextWorkRequired(parent, params) -> bits
     if params.powNoRetargeting: return parent.bits
+    if params.powAlgorithm == ASERT: return GetNextASERTWorkRequired(parent, params)
+    return the Bitcoin retarget below
+```
+
+#### 6.5.1 ASERT (aserti3-2d), main and test
+
+The Bitcoin Cash upgrade specification `2020-11-15-asert.md` (version 0.6), unchanged except for the anchor:
+
+```
+GetNextASERTWorkRequired(parent, params) -> bits
+    g = parent.getAncestor(0)                          // anchor = genesis, height 0
+    anchorParentTime = int64(g.time) - 600             // genesis has no parent: one on schedule
+    return EncodeCompact(CalculateASERT(DecodeCompact(g.bits), 600,
+                                        int64(parent.time) - anchorParentTime,   // timeDiff, signed
+                                        parent.height,                           // heightDiff
+                                        params.powLimit, params.asertHalfLife))
+
+CalculateASERT(refTarget, spacing, timeDiff, heightDiff, powLimit, halfLife) -> target
+    exponent = trunc_div((timeDiff - spacing * (heightDiff + 1)) * 65536, halfLife)   // int64, toward zero
+    shifts = exponent >> 16                            // arithmetic shift: floor
+    frac = exponent - shifts * 65536                   // 0 <= frac < 65536
+    factor = 65536 + ((195766423245049 * frac + 971821376 * frac^2
+                       + 5127 * frac^3 + 2^47) >> 48)  // uint64; 2^(frac / 65536) * 65536
+    target = refTarget * factor                        // < 2^256 by §3.7
+    shifts = shifts - 16
+    if shifts <= 0:  target = target >> -shifts        // 0 if -shifts >= 256
+    elif shifts >= 256 or (target << shifts) >> shifts != target: target = powLimit   // exact value >= 2^256
+    else:            target = target << shifts
+    if target == 0: return 1
+    return min(target, powLimit)
+```
+
+- **Anchor.** The specification's anchor must have a parent (height > 0), whose time is used. Bucks anchors at genesis and takes genesis.time − 600 as that parent time, a parent mined on schedule. Then block 1 carries the genesis bits, the schedule is block h at genesis.time + 600 × h, and a block whose parent is on schedule carries the genesis bits. This is exactly the specification with anchor = block 1 (whose bits always equal the genesis bits), anchor parent time = genesis.time (test DIFF-2). (Bitcoin Cash Node, for a genesis anchor, uses the genesis time itself, which would make block 1 already 0.24% harder.)
+- **Half-life 172,800 s (2 days)**, as on Bitcoin Cash mainnet: the target doubles for every 2 days the parent is behind schedule and halves for every 2 days ahead. A timestamp at the H-FUTURE limit (+7,200 s) lowers the next block's difficulty by at most 2^(7200/172800) = 2.9%, and the next honest timestamp undoes it. A shorter half-life recovers faster from moderate drops but lets that timestamp buy more (1 hour: 4 times easier). Testnet uses the mainnet value so the soak runs mainnet's rule; Bitcoin Cash's testnet-only rules (1-hour half-life, minimum difficulty after 20 minutes) are not used.
+- **Absolute schedule.** Only the parent's height and time and the genesis enter, so the result does not depend on the path to the parent and no rounding accumulates (test DIFF-3).
+- **No overflow.** timeDiff and heightDiff come from 32-bit fields (|timeDiff| ≤ 2^33, heightDiff < 2^32), so the exponent's product stays below 2^58 in int64; the polynomial stays below 2^64 for every frac (largest at frac = 65535: 2^64 − 1.8 × 10^14); refTarget × factor < 2^256 by §3.7.
+- **Behaviour** (tests DIFF-4 to DIFF-6, expected solve times): steady hashrate settles at 600 s blocks. Audit NEW-2's case (1 GH/s for 22 days next to the 0.5 MH/s node miner, then it leaves): the first block afterwards needs the old difficulty and takes about 14 days (no rule that uses only the parent can avoid this); the next block is back at the limit (about 2.7 hours for 0.5 MH/s). Under the Bitcoin retarget (the audit's replay: periods 1 to 5, then the node alone) the next 2016-block period takes about 28,000 days. A 10-fold drop at equilibrium takes about 8 days (about 400 blocks) to get back under 900 s blocks.
+- **Vectors.** The official aserti3-2d vectors (Bitcoin Cash Node qa-assets: 12 runs, 14,000 blocks, powLimit `0x1d00ffff`, 600 s, 172,800 s) are in `tests/unit/data/aserti3-2d/` and checked by `Pow.AsertVectors` (truncating instead of flooring the exponent changes 75% of them). `tools/aserti3_2d.py` is an independent Python reference written from the specification; it passes all 14,000 and agreed with the C++ code on 500,000 random cases (limits `0x1d00ffff`, `0x1e00ffff`, `0x1e7fffff`; half-lives 1 s to 10^7 s). `Pow.AsertEdgeVectors` adds the testnet limit, the largest admitted limit, shifts of 256 bits or more and the target-1 floor.
+
+#### 6.5.2 Bitcoin retarget (selectable; not used by a shipped network)
+
+```
+GetNextWorkRequired(parent, params) -> bits        // powAlgorithm == BITCOIN
     h = parent.height + 1
     if h % 2016 != 0: return parent.bits
     first = parent.getAncestor(h - 2016)            // Bitcoin's window: 2016 blocks, 2015 intervals
@@ -675,14 +727,14 @@ Vectors (the first four are Bitcoin Core's `pow_tests`, recomputed independently
 | Rule | Check (h = header height, all arithmetic in int64) | Reject code | Result |
 |---|---|---|---|
 | H-MTP | `time > MTP(parent)` | `time-too-old` | INVALID |
-| H-TW1 | if `h % 2016 == 0`: `time ≥ parent.time − 600` | `time-timewarp-attack` | INVALID |
-| H-TW2 | if `h % 2016 == 2015`: `time ≥ ancestor(h − 2015).time` | `time-period-negative` | INVALID |
+| H-TW1 | Bitcoin retarget only: if `h % 2016 == 0`: `time ≥ parent.time − 600` | `time-timewarp-attack` | INVALID |
+| H-TW2 | Bitcoin retarget only: if `h % 2016 == 2015`: `time ≥ ancestor(h − 2015).time` | `time-period-negative` | INVALID |
 | H-FUTURE | `time ≤ now + 7,200` | `time-too-new` | TIME_TOO_NEW |
 
 - H-TW1 is the timewarp fix of the Great Consensus Cleanup as enforced on Bitcoin testnet4 (BIP94, 600 s). It ties the first block of each period to the previous period, so the timespan can no longer be stretched by back-dating period starts. (BIP54 uses the same rule with a 7,200 s grace; Bucks uses the stricter 600 s.)
 - H-TW2 is BIP54's fix for negative-timespan games: the last block of a period cannot be earlier than the first. Together with signed arithmetic the measured timespan is never negative.
 - We keep Bitcoin's 2015-interval window (the "off-by-one") because H-TW1 closes the attack it enabled, and the formula stays identical to Bitcoin's well-studied one.
-- These rules apply on all networks, including regtest, so tests exercise them.
+- H-TW1 and H-TW2 apply only when `powAlgorithm` is BITCOIN (no shipped network; tests use a parameter copy). ASERT has no period to stretch: a timestamp moves only the next block's difficulty, a late one by at most 2.9% (H-FUTURE) and an early one upwards, so H-MTP and H-FUTURE are its time rules, as on Bitcoin Cash. Regtest selects ASERT (with constant bits) so its time rules match main and test.
 - H-FUTURE is the only header rule that depends on the local clock; it is never cached as invalid.
 
 ---
@@ -775,8 +827,8 @@ Checks stop at the first failure; the first failing rule decides the result.
 | H-HEIGHT | height == parent.height + 1 | `bad-height` | INVALID |
 | H-DIFF | bits == `GetNextWorkRequired(parent)` | `bad-diffbits` | INVALID |
 | H-MTP | time > MTP(parent) | `time-too-old` | INVALID |
-| H-TW1 | timewarp rule (§6.6) | `time-timewarp-attack` | INVALID |
-| H-TW2 | non-negative period rule (§6.6) | `time-period-negative` | INVALID |
+| H-TW1 | timewarp rule (§6.6; Bitcoin retarget only) | `time-timewarp-attack` | INVALID |
+| H-TW2 | non-negative period rule (§6.6; Bitcoin retarget only) | `time-period-negative` | INVALID |
 | H-CKPT | (a) at a checkpoint height the hash MUST equal the checkpoint; (b) a new header MUST NOT have height below the last checkpoint present in the index | `checkpoint-mismatch` / `bad-fork-prior-to-checkpoint` | INVALID |
 | H-FUTURE | time ≤ now + 7,200 (checked last) | `time-too-new` | TIME_TOO_NEW |
 
@@ -1144,7 +1196,7 @@ Properties (each is tested in §15):
 1. keeps its current chain and keeps mining on it;
 2. logs `CRITICAL: deep fork: <depth> blocks below tip <hash>, other branch <hash> has <x> more work` once per new best header on that branch;
 3. reports `forkAlert {forkHeight, ourTip, otherTip, workDifference}` in `/api/blockchain/info` (API spec) so wallets and exchanges can stop crediting deposits;
-4. switches only after operator action: start flag `--approve-deep-reorg=<blockhash>` or the authenticated admin API `reconsider(hash)`. An admin `invalidate(hash)` (sets `FAILED_VALID` with code `manual-invalidate`) exists for emergencies.
+4. switches only after operator action: start flag `--approve-deep-reorg=<blockhash>` or the authenticated admin API `reconsider(hash)`. An admin `invalidate(hash)` (sets `FAILED_VALID` with code `manual-invalidate`) exists for emergencies. As built: `POST /api/node/approve-reorg {"tipHash"}` for a parked tip. The approval covers the branch to that tip, also after it has grown, and also when it needs more than `2 × maxAutoReorgDepth + 32` blocks to overtake the tip; it is used up by that one call, whether or not the branch got in, so a routine reorg that later displaces the approved block does not leave its old branch free of the limit, and any later deep fork needs a new approval. The call succeeds only if the approved tip is then in the active chain, otherwise it answers 409 with the reason (for example an invalid block on the branch, which also clears the alert) (audit CON-7).
 
 Trade-off (deviation from Bitcoin, which has no such limit): a long network partition (more than about 16 hours) needs operator action to heal, and a node syncing from scratch follows the most-work chain while running nodes refuse a deep reorg; in exchange, a hashrate majority cannot silently rewrite more than 100 blocks of history on running nodes, which matters while hashrate is small (CON-17). Owner decision on the value: §16 Q2.
 
@@ -1152,14 +1204,14 @@ Trade-off (deviation from Bitcoin, which has no such limit): a long network part
 
 **Minimum chain work and initial block download.** `IsInitialBlockDownload()` is true while `tip.chainWork < params.minimumChainWork` or `tip.time < now − 86,400`; once false it stays false until restart. `minimumChainWork` is raised each release to the chain work of a block about one week before the release. While it is true, the mempool ignores transactions from peers and the API reports "syncing".
 
-**When the miner may work.** The template builder refuses (error "node is syncing") while `tip.chainWork < params.minimumChainWork`, or while a header chain with more work than the tip is known, not yet connected, and not under a fork alert (`bestHeader.chainWork > tip.chainWork`, ignoring fork-alert branches, so a node in fork alert keeps mining as stated above). The tip age does **not** block mining, so the launch (tip = genesis) works and a young chain whose only miner was offline for a day can restart. Regtest has no restriction.
+**When the miner may work.** The template builder refuses (error "node is syncing") while `tip.chainWork < params.minimumChainWork`; while the node is catching up, that is the tip is more than a day old (`tip.time < now − 86,400`) and the tip moved within the last ten minutes; or while a block that can connect (its data and all its ancestors' data are stored, more work than the tip, not under a fork alert) is waiting. Headers alone, and blocks whose ancestors' data is missing, never block mining: anyone can send a valid header and a child block without ever sending the parent, and that used to stop mining for good (audit CON-1, 2026-10-17). Fork-alert branches are ignored, so a node in fork alert keeps mining as stated above. A tip that is old but not moving does **not** block mining, so the launch (tip = genesis) works and a young chain whose only miner was offline for a day can restart. Regtest has no restriction. The API `syncing` flag follows the IBD rule above (it latches until restart) and the template builder follows this rule, so the two can differ: a node started on an old chain whose tip stopped moving reports `syncing: true` and can already mine (the launch from an older genesis shows this).
 
 ### 8.6 Unconnected blocks, orphans and DoS bounds
 
 - **No orphan-block pool.** A header or block whose parent is unknown returns MISSING_PARENT and nothing is stored; the P2P layer asks the peer for headers with a locator (§8.9). (Old code returned `false` and penalised the peer, `src/blockchain.cpp:316`, `src/network.cpp:445-448`.)
 - **Unrequested blocks** are stored only if they have more work than the tip and are at most 288 blocks above it (§8.2).
 - **Header spam** costs real work: every stored header passes H-POW at the expected difficulty (at least 2^32 hashes on main) and cannot fork below the last checkpoint. Filling 1 GB of index memory (about 4 million headers) costs at least 1.7 × 10^16 hashes at launch difficulty. Per-peer limits on unconnecting headers and request rates belong to the P2P spec (NET-7).
-- **Block data is requested only for headers on the best header chain**, at most 16 in flight per peer (P2P spec). Peers can no longer make the node request arbitrary announced hashes (old: `src/network.cpp:354-359, 398-404`).
+- **Block data is requested only for validated headers, and only from a peer that announced them**: on the way from the active chain to the most-work block that peer sent a header, an `inv` or the block for, at most 16 in flight per peer (P2P spec). Peers can no longer make the node request arbitrary announced hashes (old: `src/network.cpp:354-359, 398-404`), and a header whose block nobody has no longer gets honest peers dropped as stalling (audit CON-1).
 - **Known-invalid blocks** are rejected at the header stage through the persisted `FAILED_*` flags (`duplicate-invalid`, `bad-prevblk`) without re-validation.
 
 ### 8.7 Startup
@@ -1341,8 +1393,9 @@ createNewBlock(minerP2PKHScript, minerTag (≤ 88 ASCII bytes, default "Bucks"),
   header.version = 2; header.height = h; header.prevBlockHash = tip.hash
   header.bits = GetNextWorkRequired(tip)
   minTime = MTP(tip) + 1
-  if h % 2016 == 0:    minTime = max(minTime, tip.time - 600)                       // H-TW1
-  if h % 2016 == 2015: minTime = max(minTime, tip.getAncestor(h - 2015).time)       // H-TW2
+  if powAlgorithm == BITCOIN:   // period rules; ASERT has none
+    if h % 2016 == 0:    minTime = max(minTime, tip.time - 600)                     // H-TW1
+    if h % 2016 == 2015: minTime = max(minTime, tip.getAncestor(h - 2015).time)     // H-TW2
   header.time = max(now, minTime); if header.time > now + 7,200: fail "local clock is behind the chain"
   sizeLeft  = 1,000,000 - 84 - 3 - 1,000          // header, tx count, COINBASE_RESERVED_SIZE
   sigopLeft = 20,000
@@ -1608,6 +1661,9 @@ The gold spec plugs in after step 11 (real `GoldRules`), the storage spec's stor
 | POW-3 | `Pow.BlockProofVectors` | — | `blockProof` | §6.4 table | `workForBits` returned 0 (CON-2, NET-V1) |
 | POW-4 | `Pow.RetargetVectors` | — | `CalculateNextWorkRequired` | §6.5 table; −3,600 s → `0x1c0168fd` | uint32 wrap made it 4× easier (CON-7) |
 | POW-5 | `Pow.OverflowGuard` | params with `0x1f00ffff` and retargeting on | startup assertions | abort | product overflowed |
+| POW-6 | `Pow.AsertVectors` | `tests/unit/data/aserti3-2d` (official, 14,000 blocks) | `CalculateASERT` | every target matches | — |
+| POW-7 | `Pow.AsertEdgeVectors`, `Pow.AsertExactDoublingAndHalving` | limits `0x1e00ffff`, `0x1e7fffff`; shifts ≥ 256; target 1; whole half-lives | `CalculateASERT` | values of `tools/aserti3_2d.py`; exact powers of two | — |
+| PAR-4 | `Params.AsertGuards` | ASERT with `0x1e7fffff` / `0x1f00ffff`; half-life 0; unknown algorithm | §3.7 | pass / abort / abort / abort | — |
 | PAR-1 | `Params.Distinct` | 3 networks | compare | magics, ports, address versions differ | one magic for all, Bitcoin's port 8333 |
 | PAR-2 | `Params.PowLimitDecodes` | 3 networks | §3.7 checks | pass | — |
 | PAR-3 | `Params.ChainWorkAccumulates` | `TestChain`, 10 blocks | tip chain work | 22 (2 per regtest block incl. genesis) | always 0 |
@@ -1620,6 +1676,13 @@ The gold spec plugs in after step 11 (real `GoldRules`), the storage spec's stor
 | HDR-7 | `HeaderRules.PeriodNotNegative` | block 2015 earlier than block 0 but above MTP | stage B | INVALID `time-period-negative` | negative span accepted |
 | HDR-8 | `HeaderRules.CheckpointFork` | regtest copy with checkpoint at height 5 | header forking at height 3 | INVALID `bad-fork-prior-to-checkpoint` | no checkpoints |
 | HDR-9 | `HeaderRules.UnknownParent` | header with random prev | `ProcessNewBlockHeaders` | MISSING_PARENT, nothing stored, no penalty | peer penalised 20 per block (NET-8) |
+| HDR-10 | `HeaderRules.AsertHasOnlyMtpAndFutureRules` | the HDR-6 and HDR-7 headers under ASERT (main) | stage B | VALID; time = MTP and time > now + 7,200 still refused | — |
+| DIFF-1 | `Difficulty.AsertAnchorIsGenesis` | genesis bits `0x1c0ffff0` | 300 blocks on schedule; one half-life late; two ahead | genesis bits kept; target × 2; target / 4 | — |
+| DIFF-2 | `Difficulty.AsertMatchesSpecificationForm` | random chains, times going backwards | compare with anchor = block 1, parent time = genesis time | equal | — |
+| DIFF-3 | `Difficulty.AsertIgnoresThePath` | steady and erratic chains with the same tip height and time | bits | equal | — |
+| DIFF-4 | `Difficulty.SteadyHashrateKeeps600Seconds` | 50 MH/s; expected and random solve times | mean block time | 600 ± 3 s / 600 ± 15 s | — |
+| DIFF-5 | `Difficulty.HashrateLeavesRecoversInOneBlock` | 1 GH/s for 22 days, then 0.5 MH/s | next blocks | one slow block (> 10 days), then < 1.2 × a limit block; Bitcoin retarget after periods 1 to 5: next period > 10,000 days (about 28,000) | stall of about 28,000 days (NEW-2) |
+| DIFF-6 | `Difficulty.SlowStartLetsANewMinerCatchUpAtTheLimit` | 30 days at 0.5 MH/s, then 1 GH/s | blocks at the limit | about schedule lag / 596 s (documents §3.6) | — |
 
 ### 15.3 Transactions, signatures, connect and undo
 
@@ -1693,10 +1756,12 @@ The gold spec plugs in after step 11 (real `GoldRules`), the storage spec's stor
 | MP-10 | `Mempool.NonStandardSequence` | sequence 0x12345678 | accept | TX_POLICY | — |
 | MIN-1 | `Miner.TemplateRespectsLimits` | 2 MB of valid mempool txs | `createNewBlock`, then process | ≤ 1,000,000 bytes, best fee rates first, test validity passes, block accepted | whole mempool in one block (CON-16, API-17, DB-9) |
 | MIN-2 | `Miner.TemplateAtHalving` | regtest tip at 149 | template | coinbase 25 BUCKS + fees | fixed 50 BUCKS |
-| MIN-3 | `Miner.TimewarpAwareTime` | regtest; block 2015 dated 3,000 s ahead of the clock | template for 2016 | time ≥ tip.time − 600 | — |
+| MIN-3 | `Miner.TimewarpAwareTime` | regtest with the Bitcoin retarget; block 2015 dated 3,000 s ahead of the clock | template for 2016 | time ≥ tip.time − 600 | — |
+| MIN-3b | `Miner.AsertTimeIgnoresPeriods` | regtest (ASERT); the same chain | template for 2016 | time = the clock | — |
+| MIN-8 | `Miner.AsertBitsEndToEnd` | regtest with retargeting on, limit `0x1e7fffff`; blocks 1 s apart | template; a block with the parent's bits; mine | template bits = ASERT bits; `bad-diffbits`; block accepted | — |
 | MIN-4 | `Miner.ExtraNonceRollover` | test hook: nonce space of 10 | mine | extra nonce increments, merkle root changes, block found | nonce wrapped silently |
 | MIN-5 | `Miner.StaleTemplateAbandoned` | tip changes during hashing | mine | restart on the new tip; no stale submit | — |
-| MIN-7 | `Miner.SyncRule` | main-like params on a synthetic index: (a) tip 2 days old, no better header; (b) a better header known but not connected | `createNewBlock` | (a) template built; (b) "node is syncing" | — |
+| MIN-7 | `Miner.SyncRule` | main-like params on a synthetic index: (a) tip months old, no better header; (b) a better header known, its block not; (c) old blocks connecting; (d) then ten minutes without one; (e) a block from today | `createNewBlock` | (a), (b), (d), (e) template built; (c) "node is syncing" | — |
 | MIN-6 | `ServerAuth.MineToSecondWallet` (existing test, regtest) | as today | `POST /api/mining/mine` | 200, height + 1, reward to wallet 1, wallet 0 unchanged | keeps the CRY-9/OPS-3 regression |
 | P2P-1 | `Network.InvalidBlockCategory` | two regtest nodes on loopback | node 1 sends a block with a bad coinbase | node 2 records category INVALID for that peer (counter, since loopback is exempt from bans) | every failure scored the same |
 | P2P-2 | `Network.ConvergeAfterFork` | two nodes mine different 3-block branches, then connect | sync | both on the most-work branch, no penalties | permanent split and bans (NET-8) |
@@ -1710,7 +1775,7 @@ Each has a default that this spec already uses; the implementation can start wit
 
 | # | Question | Default (used in this spec) |
 |---|---|---|
-| Q1 | **Launch difficulty.** Keep the minimum difficulty `0x1d00ffff` (about 2^32 hashes per block), or start higher because you know the launch hashrate? Too high can stall the first 2016 blocks for months. | `0x1d00ffff` |
+| Q1 | **Launch difficulty.** Keep the minimum difficulty `0x1d00ffff` (about 2^32 hashes per block), or start higher because you know the launch hashrate? Too high costs one slow block under ASERT (under the Bitcoin retarget it could stall the first 2016 blocks for months). | `0x1d00ffff` |
 | Q2 | **Automatic reorg limit.** Refuse automatic reorgs deeper than 100 blocks (about 17 hours) and require operator action? `0` disables the limit (pure Bitcoin behaviour). A smaller value protects exchanges sooner but makes network partitions harder to heal. | 100 |
 | Q3 | **Merge mining with Bitcoin.** Not included. It would give Bucks Bitcoin-level hashrate protection, but changes the header format, mining software and the trust model. | no |
 | Q4 | **Address prefix.** Base58Check version 0x1A (addresses start with `B`), or a bech32m format such as `bk1…` (better error detection, more code in the wallet)? | 0x1A |

@@ -8,6 +8,19 @@ using namespace Bucks;
 
 namespace {
 std::string hex(const Hash256& h) { return hexStr(std::vector<uint8_t>(h.begin(), h.end())); }
+
+// Mainnet as it is before launch, whatever makeMain() says: the refusal path stays tested after the launch
+// commit (audit ML-5).
+ChainParams unconfiguredMain() {
+    ChainParams p = chainParams(NetworkId::MAIN);
+    p.genesisTime = 0;
+    p.genesisNonce = 0;
+    p.genesisInscription.clear();
+    p.genesisMerkleRoot = Hash256{};
+    p.genesisHash = Hash256{};
+    p.checkpoints = {Checkpoint{0, Hash256{}}};
+    return p;
+}
 }
 
 TEST(Genesis, RegtestVector) {
@@ -55,8 +68,32 @@ TEST(Genesis, CreatesNoCoins) {
 TEST(Genesis, MainnetUnconfigured) {
     // ST-7 (library part): the node refuses a network without a genesis hash.
     std::string err;
-    EXPECT_FALSE(Genesis::check(chainParams(NetworkId::MAIN), err));
+    const ChainParams p = unconfiguredMain();
+    EXPECT_TRUE(checkChainParams(p, err)) << err;
+    EXPECT_FALSE(Genesis::check(p, err));
     EXPECT_NE(err.find("not configured"), std::string::npos) << err;
+}
+
+// Skipped until the launch commit sets the mainnet genesis (docs/MAINNET_INPUTS.md, item 1); from then on it
+// holds the values to the rules. tools/verify_genesis.py (ctest genesis_independent) recomputes them without this
+// code.
+TEST(Genesis, MainnetIsMinedAndConfigured) {
+    const ChainParams& p = chainParams(NetworkId::MAIN);
+    if (!p.genesisConfigured()) GTEST_SKIP() << "the mainnet genesis is not set yet";
+    std::string err;
+    EXPECT_TRUE(checkChainParams(p, err)) << err;   // inscription: printable ASCII, at most 96 bytes
+    EXPECT_TRUE(Genesis::check(p, err)) << err;     // merkle root, hash and proof of work
+    const Block g = Genesis::build(p);
+    EXPECT_EQ(g.header.merkleRoot, p.genesisMerkleRoot);
+    EXPECT_EQ(g.getHash(), p.genesisHash);
+    EXPECT_EQ(p.checkpoints.at(0).hash, p.genesisHash);
+    EXPECT_FALSE(p.genesisInscription.empty());
+    EXPECT_GT(p.genesisTime, 1'790'000'000u);       // after the testnet genesis, not a placeholder
+    // Real work went into it: mined at the proof-of-work limit, and the hash is as small as that limit demands
+    // (the limit is an owner decision, so nothing here depends on its value).
+    EXPECT_EQ(g.header.bits, p.powLimitBits);
+    EXPECT_TRUE(Pow::checkProofOfWork(g.getHash(), g.header.bits, p.powLimit));
+    EXPECT_LE(U256::fromBytesBE(g.getHash()).bits(), p.powLimit.bits());
 }
 
 TEST(Genesis, MismatchesAreDetected) {

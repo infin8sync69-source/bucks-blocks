@@ -9,6 +9,7 @@
 #include "wallet.h"
 #include "crypto.h"
 #include "bip_8192.h"
+#include "version.h"
 #include <openssl/rand.h>
 #include <openssl/crypto.h>
 #include <ctime>
@@ -34,6 +35,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <filesystem>
+#include <system_error>
 
 #ifdef _WIN32
 #ifndef _WIN32_WINNT
@@ -51,17 +53,49 @@ using json = nlohmann::json;
 
 namespace Bucks {
 
-// The Arabic list shown as "the actual Arabic words": the first non-placeholder Arabic list (release or
-// draft), else the default list.
-static std::string canonicalMnemonicLanguage() {
-    for (const auto& lang : mnemonicLanguages()) {
-        auto wl = findWordlist(lang);
-        if (wl && wl->normalizer == "arabic" && wl->status != "dev" && wl->status != "test") return lang;
-    }
-    return defaultMnemonicLanguage();
+// "dev" and "test" lists are placeholders that exist to be replaced.
+static bool placeholderList(const Wordlist& wl) {
+    return wl.status == "dev" || wl.status == "test";
 }
 
-constexpr const char* BUCKS_NODE_VERSION = "0.2.0-testnet";
+// The main network never offers or accepts a placeholder list (audit WAL-3).
+static bool listAllowed(const Wordlist& wl, bool mainNet) {
+    return !(mainNet && placeholderList(wl));
+}
+
+static std::vector<std::string> allowedMnemonicLanguages(bool mainNet) {
+    std::vector<std::string> out;
+    for (const auto& lang : mnemonicLanguages()) {
+        auto wl = findWordlist(lang);
+        if (wl && listAllowed(*wl, mainNet)) out.push_back(lang);
+    }
+    return out;
+}
+
+// The Arabic list shown as "the actual Arabic words": the first non-placeholder Arabic list (release or
+// draft), else, off the main network, the library default. "" when there is none.
+static std::string canonicalMnemonicLanguage(bool mainNet) {
+    for (const auto& lang : mnemonicLanguages()) {
+        auto wl = findWordlist(lang);
+        if (wl && wl->normalizer == "arabic" && !placeholderList(*wl)) return lang;
+    }
+    return mainNet ? "" : defaultMnemonicLanguage();
+}
+
+// What a create request without "language" gets, and what GET /api/wallets/languages calls the default: the
+// first non-placeholder Arabic list, else the first non-placeholder list, else, off the main network, the
+// library default. "" when nothing qualifies.
+static std::string defaultWalletLanguage(bool mainNet) {
+    std::string firstOther;
+    for (const auto& lang : mnemonicLanguages()) {
+        auto wl = findWordlist(lang);
+        if (!wl || placeholderList(*wl)) continue;
+        if (wl->normalizer == "arabic") return lang;
+        if (firstOther.empty()) firstOther = lang;
+    }
+    if (!firstOther.empty()) return firstOther;
+    return mainNet ? "" : defaultMnemonicLanguage();
+}
 
 namespace fs = std::filesystem;
 
@@ -142,20 +176,40 @@ bool readTextFile(const std::string& path, std::string& out) {
     return true;
 }
 
-// Create `path` (and parents) and make it private to the owner.
-bool ensurePrivateDir(const std::string& path, std::string* err) {
+// Create `path` (and missing parents) private to the owner. A directory that already exists is never
+// chmodded: the operator may have pointed --datadir at their home. When other users can reach it, *warning
+// says so and how to close it (audit WAL-8).
+bool ensurePrivateDir(const std::string& path, std::string* err, std::string* warning) {
     std::error_code ec;
     if (!fs::exists(path, ec)) {
+        std::vector<fs::path> created;
+        for (fs::path p = fs::path(path); !p.empty() && !fs::exists(p, ec); p = p.parent_path()) {
+            created.push_back(p);
+            if (p == p.parent_path()) break;
+        }
         fs::create_directories(path, ec);
         if (ec) { if (err) *err = ec.message(); return false; }
-    } else if (!fs::is_directory(path, ec)) {
+#ifndef _WIN32
+        for (const fs::path& p : created) {
+            if (::chmod(p.c_str(), 0700) != 0) {
+                if (err) *err = std::string("chmod 0700 failed: ") + std::strerror(errno);
+                return false;
+            }
+        }
+#endif
+        return true;
+    }
+    if (!fs::is_directory(path, ec)) {
         if (err) *err = "not a directory";
         return false;
     }
 #ifndef _WIN32
-    if (::chmod(path.c_str(), 0700) != 0) {
-        if (err) *err = std::string("chmod 0700 failed: ") + std::strerror(errno);
-        return false;
+    struct stat st {};
+    if (warning && ::stat(path.c_str(), &st) == 0 && (st.st_mode & 077) != 0) {
+        std::ostringstream w;
+        w << path << " is open to other users (mode " << std::oct << (st.st_mode & 0777)
+          << "); the node leaves it as it is. Close it with: chmod 700 " << path;
+        *warning = w.str();
     }
 #endif
     return true;
@@ -211,6 +265,21 @@ bool splitHostPort(const std::string& hp, std::string& name, std::string& port) 
                                       [](char c) { return std::isdigit(static_cast<unsigned char>(c)); }))
         return false;
     return !name.empty();
+}
+
+// 127.0.0.0/8 and ::1, also as an IPv4-mapped address or a bind name.
+bool isLoopbackAddress(std::string a) {
+    a = lowerAscii(trimWs(a));
+    if (a.size() > 2 && a.front() == '[' && a.back() == ']') a = a.substr(1, a.size() - 2);
+    if (startsWith(a, "::ffff:")) a = a.substr(7);
+    return a == "localhost" || a == "::1" || startsWith(a, "127.");
+}
+
+// Host and port of a Host header or an origin's authority, with the scheme's default port written as none.
+bool hostAndPort(const std::string& hp, const std::string& scheme, std::string& name, std::string& port) {
+    if (!splitHostPort(hp, name, port)) return false;
+    if ((scheme == "http" && port == "80") || (scheme == "https" && port == "443")) port.clear();
+    return true;
 }
 
 void appendCompactSize(std::vector<uint8_t>& buf, uint64_t v) {
@@ -348,18 +417,29 @@ Server::Server(Node& n, Network* net, const ServerConfig& cfg)
       isRunning(false),
       svr(new httplib::Server()) {
 
+    minerThreads = config.mineThreads ? config.mineThreads : std::max(1u, std::thread::hardware_concurrency());
+    if (!config.mineAddress.empty()) {
+        try {
+            fixedPayoutScript = Wallet::addressToP2PKHScript(config.mineAddress, node.params().p2pkhAddressVersion);
+        } catch (const std::exception&) {
+            startupError = "--mine-address " + config.mineAddress + " is not a valid " + node.params().name + " address";
+            Bucks::logErr() << "✗ " << startupError << "\n";
+        }
+    }
     dataDirPath = config.dataDir.empty() ? defaultDataDir() : config.dataDir;
     // One wallet file per network, next to that network's chain (and its process lock): two nodes can no longer
     // overwrite each other's keys through a shared file (audit WAL-2).
     const std::string walletDir = (fs::path(dataDirPath) / node.params().name).string();
     walletFilePath = (fs::path(walletDir) / "wallets.json").string();
 
-    std::string err;
-    if (!ensurePrivateDir(dataDirPath, &err) || !ensurePrivateDir(walletDir, &err)) {
+    std::string err, dataWarning, walletWarning;
+    if (!ensurePrivateDir(dataDirPath, &err, &dataWarning) || !ensurePrivateDir(walletDir, &err, &walletWarning)) {
         startupError = "cannot create data directory " + dataDirPath + ": " + err;
         walletErr = startupError;
         Bucks::logErr() << "✗ " << startupError << "\n";
     } else {
+        for (const std::string* w : {&dataWarning, &walletWarning})
+            if (!w->empty() && config.enableLogging) Bucks::logErr() << "⚠ " << *w << "\n";
         loadWallets();
     }
 
@@ -401,6 +481,18 @@ bool Server::resolveApiToken() {
         return true;
     }
     if (!config.apiTokenFile.empty()) {
+#ifndef _WIN32
+        // A token other users can read is everyone's token (audit WAL-9).
+        struct stat st {};
+        if (::stat(config.apiTokenFile.c_str(), &st) == 0 && (st.st_mode & 077) != 0) {
+            std::ostringstream why;
+            why << "API token file " << config.apiTokenFile << " is open to other users (mode " << std::oct
+                << (st.st_mode & 0777) << "); restrict it with: chmod 600 " << config.apiTokenFile;
+            startupError = why.str();
+            Bucks::logErr() << "✗ " << startupError << "\n";
+            return false;
+        }
+#endif
         std::string t;
         if (!readTextFile(config.apiTokenFile, t)) {
             startupError = "cannot read API token file " + config.apiTokenFile;
@@ -418,6 +510,11 @@ bool Server::resolveApiToken() {
     const char* envToken = std::getenv("BUCKS_API_TOKEN");
     if (envToken && !trimWs(envToken).empty()) {
         apiToken = trimWs(envToken);
+        if (apiToken.size() < kMinToken) {
+            startupError = "BUCKS_API_TOKEN must be at least 16 characters";
+            Bucks::logErr() << "✗ " << startupError << "\n";
+            return false;
+        }
         return true;
     }
     try {
@@ -505,7 +602,7 @@ bool Server::start(int port) {
         //    behind a trusted proxy)
         if (config.enableRateLimit && rateLimiter) {
             std::string key = req.remote_addr;
-            if (config.trustProxy && req.has_header("X-Forwarded-For")) {
+            if (forwardedHeadersTrusted(req.remote_addr) && req.has_header("X-Forwarded-For")) {
                 // The proxy appends the address it saw, so the LAST entry is the one a client cannot forge (audit WAL-6).
                 std::string xff = req.get_header_value("X-Forwarded-For");
                 std::string last = trimWs(xff.substr(xff.rfind(',') == std::string::npos ? 0 : xff.rfind(',') + 1));
@@ -545,7 +642,9 @@ bool Server::start(int port) {
             //    custom header and an Origin/Referer we recognise.
             if (kind == AuthKind::Cookie && req.method != "GET" && req.method != "HEAD") {
                 std::string src = origin.empty() ? req.get_header_value("Referer") : origin;
-                if (req.get_header_value("X-Bucks-CSRF") != "1" || src.empty() || !originAllowed(src)) {
+                const bool tls = browserUsesTls(req.remote_addr, req.get_header_value("X-Forwarded-Proto"));
+                if (req.get_header_value("X-Bucks-CSRF") != "1" || src.empty() ||
+                    !originAllowed(src, req.get_header_value("Host"), tls)) {
                     reply(res, 403, errorJson("CSRF check failed: X-Bucks-CSRF: 1 and a matching Origin are required"));
                     return httplib::Server::HandlerResponse::Handled;
                 }
@@ -588,9 +687,13 @@ bool Server::start(int port) {
         }
     });
 
-    // The generated token is handed over through a private file (OPS-2/API-13).
+    // The generated token is handed over through a private file (OPS-2/API-13), one per network so that a test
+    // node sharing the datadir cannot overwrite or delete the main node's (audit NEW-5). The main network keeps
+    // <datadir>/.cookie, where it always was.
     if (tokenGenerated) {
-        cookieFilePath = (fs::path(dataDirPath) / ".cookie").string();
+        const fs::path cookieDir = node.params().id == NetworkId::MAIN ? fs::path(dataDirPath)
+                                                                        : fs::path(dataDirPath) / node.params().name;
+        cookieFilePath = (cookieDir / ".cookie").string();
         std::string err;
         if (!writePrivateFileAtomic(cookieFilePath, apiToken + "\n", &err)) {
             Bucks::logErr() << "✗ Cannot write API token cookie " << cookieFilePath << ": " << err << "\n";
@@ -609,11 +712,7 @@ bool Server::start(int port) {
     }
     if (bound <= 0) {
         Bucks::logErr() << "✗ Cannot bind API server to " << config.bindAddress << ":" << port << "\n";
-        if (!cookieFilePath.empty()) {
-            std::error_code ec;
-            fs::remove(cookieFilePath, ec);
-            cookieFilePath.clear();
-        }
+        removeOwnCookie();
         return false;
     }
     boundPort = bound;
@@ -629,6 +728,13 @@ bool Server::start(int port) {
     }
 
     if (config.enableLogging) {
+        if (!isLoopbackAddress(config.bindAddress)) {
+            // Plain HTTP beyond this host: the token and the session cookie would cross the network in clear (NEW-3).
+            Bucks::logErr() << "⚠ The API listens on " << config.bindAddress << ", not on loopback. It speaks plain HTTP: "
+                            "put a TLS reverse proxy (with --trust-proxy and --api-secure-cookie) or an SSH tunnel in front of it\n";
+            if (config.trustProxy)
+                Bucks::logErr() << "⚠ --trust-proxy: X-Forwarded-* headers are believed only on connections from loopback\n";
+        }
         Bucks::logOut() << "✓ HTTP Server started on port " << boundPort << "\n";
         Bucks::logOut() << "✓ Web UI available at http://" << config.bindAddress << ":" << boundPort << "\n";
         if (!cookieFilePath.empty()) {
@@ -642,10 +748,13 @@ bool Server::start(int port) {
 }
 
 void Server::stop() {
-    // Stop the miner first: it reads the wallet list and the chain.
-    autoMineStop.store(true);
-    autoMining.store(false);
-    if (autoMinerThread.joinable()) autoMinerThread.join();
+    // Stop the miner first: it uses the chain. Nothing can start it again after this, so no
+    // late API request leaves a running thread behind (audit SAN-2).
+    {
+        std::lock_guard<std::mutex> ctl(minerCtlMutex);
+        minerShutdown = true;
+        stopMinerLocked();
+    }
 
     if (!isRunning) return;
 
@@ -656,10 +765,18 @@ void Server::stop() {
         serverThread->join();
     }
 
-    if (!cookieFilePath.empty()) {
+    removeOwnCookie();
+}
+
+// Deletes the token file only while it still holds this process's token: another node may have taken it over.
+void Server::removeOwnCookie() {
+    if (cookieFilePath.empty()) return;
+    std::string onDisk;
+    if (readTextFile(cookieFilePath, onDisk) && constantTimeEquals(trimWs(onDisk), apiToken)) {
         std::error_code ec;
         fs::remove(cookieFilePath, ec);
     }
+    cookieFilePath.clear();
 }
 
 bool Server::running() const {
@@ -675,10 +792,21 @@ std::string Server::walletError() const {
 }
 
 bool Server::addWallet(const Wallet& wallet) {
+    return addWallet(wallet, json::object());
+}
+
+bool Server::addWallet(const Wallet& wallet, const nlohmann::json& meta) {
     std::lock_guard<std::mutex> lock(walletMutex);
     wallets.push_back(wallet);
     wallets.back().setAddressVersion(node.params().p2pkhAddressVersion);
     wallets.back().setMnemonic(""); // phrases live only in the creation response
+    if (meta.is_object() && !meta.empty()) {
+        // Extra fields ride on the wallet's entry: saveWalletsLocked keeps the fields of entries it knows.
+        json entry = meta;
+        entry["pubKeyHex"] = wallets.back().getPublicKeyHex();
+        if (!walletDoc.contains("wallets") || !walletDoc["wallets"].is_array()) walletDoc["wallets"] = json::array();
+        walletDoc["wallets"].push_back(entry);
+    }
     return saveWalletsLocked();
 }
 
@@ -762,13 +890,42 @@ bool Server::corsOriginAllowed(const std::string& origin) const {
     return false;
 }
 
-// Same-origin (any Host we accept, over http/https) or a configured CORS origin.
-bool Server::originAllowed(const std::string& origin) const {
+// X-Forwarded-For/-Proto are believed only with --trust-proxy and only from loopback, where the reverse proxy
+// runs: a client that reaches the port directly cannot rotate its rate-limit key or fake TLS (audit OPS-09).
+bool Server::forwardedHeadersTrusted(const std::string& remoteAddr) const {
+    return config.trustProxy && isLoopbackAddress(remoteAddr);
+}
+
+// The node never speaks TLS itself; the browser uses it when the operator says so (--api-secure-cookie) or the
+// trusted proxy reports it.
+bool Server::browserUsesTls(const std::string& remoteAddr, const std::string& forwardedProto) const {
+    if (config.secureCookie) return true;
+    if (!forwardedHeadersTrusted(remoteAddr)) return false;
+    const std::string first = forwardedProto.substr(0, forwardedProto.find(','));   // the client-facing hop
+    return lowerAscii(trimWs(first)) == "https";
+}
+
+// CSRF for cookie sessions: the Origin (or Referer) must be the origin the request itself was sent to, the same
+// host and port as its Host header, or a configured --api-cors-origin exactly. When the browser is known to use
+// TLS only https passes (audit WAL-12). Behind a proxy that rewrites the port, list the public origin with
+// --api-cors-origin.
+bool Server::originAllowed(const std::string& origin, const std::string& hostHeader, bool tls) const {
     if (corsOriginAllowed(origin)) return true;
     std::string scheme, hostport;
     if (!splitOrigin(origin, scheme, hostport)) return false;
-    if (scheme != "http" && scheme != "https") return false;
-    return hostAllowed(hostport);
+    if (scheme != "https" && (scheme != "http" || tls)) return false;
+    std::string oName, oPort, hName, hPort;
+    if (!hostAndPort(hostport, scheme, oName, oPort) ||
+        !hostAndPort(lowerAscii(trimWs(hostHeader)), scheme, hName, hPort))
+        return false;
+    return oName == hName && oPort == hPort;
+}
+
+// HttpOnly and SameSite=Strict always; Secure when the browser talks TLS, so the cookie never travels over
+// plain HTTP (audit WAL-12, NEW-3, OPS-10).
+std::string Server::sessionCookie(const std::string& value, long long maxAge, bool secure) const {
+    return std::string(SESSION_COOKIE) + "=" + value + "; Path=/; HttpOnly; SameSite=Strict" +
+           (secure ? "; Secure" : "") + "; Max-Age=" + std::to_string(maxAge);
 }
 
 std::string Server::createSession() {
@@ -869,7 +1026,7 @@ void Server::setupRoutes() {
                             std::chrono::steady_clock::now() - startedAt_).count();
         json j{
             {"status", "ok"},
-            {"version", BUCKS_NODE_VERSION},
+            {"version", nodeVersionString(node.params().name)},
             {"network", node.params().name},
             {"uptimeSeconds", up},
             {"peerCount", network_ ? network_->peerCount() : 0},
@@ -886,11 +1043,14 @@ void Server::setupRoutes() {
         AuthKind kind = authenticate(req.get_header_value("Authorization"),
                                      req.get_header_value("X-API-Token"),
                                      req.get_header_value("Cookie"));
+        // The reason may name files on the node: only signed-in callers see it (audit WAL-7).
+        const std::string shownError = kind != AuthKind::None || walletErr.empty()
+            ? walletErr : "the wallet file could not be read; sign in to see why";
         json j = {
             {"authenticated", kind != AuthKind::None},
             {"method", kind == AuthKind::Token ? "token" : kind == AuthKind::Cookie ? "cookie" : ""},
             {"walletsEnabled", walletOk},
-            {"walletError", walletErr}
+            {"walletError", shownError}
         };
         // The location of the token file is not published to unauthenticated callers (audit WAL-7).
         if (!cookieFilePath.empty() && kind != AuthKind::None) j["cookieFile"] = cookieFilePath;
@@ -913,17 +1073,21 @@ void Server::setupRoutes() {
             reply(res, 500, errorJson(e.what()));
             return;
         }
-        res.set_header("Set-Cookie",
-            std::string(SESSION_COOKIE) + "=" + id +
-            "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + std::to_string(config.sessionLifetime.count()));
+        // A login page served over https makes the cookie Secure even when nothing told the node about TLS.
+        std::string scheme, hostport;
+        const bool httpsPage = splitOrigin(req.get_header_value("Origin"), scheme, hostport) && scheme == "https";
+        const bool secure = httpsPage || browserUsesTls(req.remote_addr, req.get_header_value("X-Forwarded-Proto"));
+        res.set_header("Set-Cookie", sessionCookie(id, config.sessionLifetime.count(), secure));
         reply(res, 200, json{{"success", true}, {"expiresIn", config.sessionLifetime.count()}});
     });
 
     s->Post("/api/auth/logout", [this](const httplib::Request& req, httplib::Response& res) {
         std::string id = cookieValue(req.get_header_value("Cookie"), SESSION_COOKIE);
         if (!id.empty()) destroySession(id);
-        res.set_header("Set-Cookie",
-            std::string(SESSION_COOKIE) + "=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0");
+        std::string scheme, hostport;
+        const bool httpsPage = splitOrigin(req.get_header_value("Origin"), scheme, hostport) && scheme == "https";
+        res.set_header("Set-Cookie", sessionCookie("", 0, httpsPage ||
+            browserUsesTls(req.remote_addr, req.get_header_value("X-Forwarded-Proto"))));
         reply(res, 200, json{{"success", true}});
     });
 
@@ -1019,19 +1183,14 @@ void Server::setupRoutes() {
         if (walletUnavailable(res)) return;
         std::lock_guard<std::mutex> lock(walletMutex);
         json walletArray = json::array();
-        for (const auto& wallet : wallets) {
-            uint64_t balance = 0;
-            try { balance = wallet.getBalance(node); } catch (...) {}
-            walletArray.push_back({
-                {"address", wallet.getAddress()},
-                {"balance", balance}
-            });
-        }
+        for (const auto& wallet : wallets) walletArray.push_back(walletSummaryLocked(wallet));
         res.set_content(json{{"wallets", walletArray}}.dump(), "application/json");
     });
 
-    // Mnemonic languages available for creation (index-aligned lists)
-    s->Get("/api/wallets/languages", [](const httplib::Request&, httplib::Response& res) {
+    // Mnemonic languages available for creation (index-aligned lists). "default" is what create uses when the
+    // request names none (audit WAL-3); placeholder lists are not listed on the main network.
+    s->Get("/api/wallets/languages", [this](const httplib::Request&, httplib::Response& res) {
+        const bool mainNet = node.params().id == NetworkId::MAIN;
         std::string err;
         std::vector<std::string> langs = mnemonicLanguages(&err);
         if (langs.empty()) {
@@ -1040,18 +1199,20 @@ void Server::setupRoutes() {
         }
         json arr = json::array();
         for (const auto& lang : langs) {
-            json e = {{"lang", lang}};
-            if (auto wl = findWordlist(lang)) {
-                e["normalizer"] = wl->normalizer;
-                e["status"] = wl->status;
-                e["direction"] = wl->normalizer == "arabic" ? "rtl" : "ltr";
-            }
-            arr.push_back(e);
+            auto wl = findWordlist(lang);
+            if (!wl || !listAllowed(*wl, mainNet)) continue;
+            arr.push_back({
+                {"lang", lang},
+                {"normalizer", wl->normalizer},
+                {"status", wl->status},
+                {"sha256", wl->sha256},
+                {"direction", wl->normalizer == "arabic" ? "rtl" : "ltr"}
+            });
         }
         reply(res, 200, json{
             {"success", true},
             {"languages", arr},
-            {"default", defaultMnemonicLanguage()},
+            {"default", defaultWalletLanguage(mainNet)},
             {"wordCounts", json::array({mnemonicWordCount(128), mnemonicWordCount(256)})}
         });
     });
@@ -1062,13 +1223,36 @@ void Server::setupRoutes() {
         if (walletUnavailable(res)) return;
         json body;
         if (!parseBody(req, res, body)) return;
-        std::string lang = body.contains("language") && body["language"].is_string() ? body["language"].get<std::string>() : "";
+        if (body.contains("language") && !body["language"].is_string()) {
+            reply(res, 400, errorJson("language must be a word list tag"));
+            return;
+        }
+        std::string lang = body.value("language", "");
         if (body.contains("includeCanonical") && !body["includeCanonical"].is_boolean()) {
             reply(res, 400, errorJson("includeCanonical must be true or false"));   // before anything is saved (audit WAL-4)
             return;
         }
+        const bool mainNet = node.params().id == NetworkId::MAIN;
+        std::string listErr;
+        if (mnemonicLanguages(&listErr).empty()) {
+            reply(res, 503, errorJson("Word lists unavailable: " + listErr));
+            return;
+        }
         // No language given: use the best list we ship, never the development placeholder (audit WAL-3).
-        if (lang.empty()) lang = canonicalMnemonicLanguage();
+        if (lang.empty()) lang = defaultWalletLanguage(mainNet);
+        if (lang.empty()) {
+            reply(res, 503, errorJson("No word list on this node may be used on the main network (only placeholders are installed)"));
+            return;
+        }
+        auto list = findWordlist(lang);
+        if (!list) {
+            reply(res, 400, errorJson("Unknown word list language '" + lang + "'"));
+            return;
+        }
+        if (!listAllowed(*list, mainNet)) {
+            reply(res, 400, errorJson("Word list '" + lang + "' is a placeholder and is not available on the main network"));
+            return;
+        }
         size_t entropyBits = Wallet::DEFAULT_ENTROPY_BITS;
         if (body.contains("words")) {
             if (!body["words"].is_number_unsigned()) {
@@ -1085,32 +1269,39 @@ void Server::setupRoutes() {
             Wallet w = Wallet::createNew(&mnemonic, lang, entropyBits);
             w.setAddressVersion(node.params().p2pkhAddressVersion);
             w.setMnemonic("");
-            bool persisted = addWallet(w);
-
-            std::string usedLang = lang.empty() ? defaultMnemonicLanguage() : lang;
-            std::string direction = "ltr";
-            if (auto wl = findWordlist(usedLang)) direction = wl->normalizer == "arabic" ? "rtl" : "ltr";
+            markBackupPending(w);   // until the user confirms the phrase (ONB-08)
+            // Which list (and which exact bytes of it) the phrase needs, so support can still tell years later
+            // (gate WORDLIST-1).
+            bool persisted = addWallet(w, json{{"wordlist", lang}, {"wordlistSha256", list->sha256}});
 
             json out = {
                 {"success", true},
                 {"wallet", walletJson(w)},
                 {"mnemonic", mnemonic},
                 {"wordCount", splitMnemonic(mnemonic).size()},
-                {"language", usedLang},
-                {"direction", direction},
+                {"language", lang},
+                {"wordlistStatus", list->status},
+                {"wordlistSha256", list->sha256},
+                {"direction", list->normalizer == "arabic" ? "rtl" : "ltr"},
                 {"persisted", persisted},
                 {"warning", "Write these words down now. They are shown only once and the node does not store them."}
             };
+            if (list->status != "release")
+                out["wordlistWarning"] = placeholderList(*list)
+                    ? "This phrase uses a development placeholder word list. Use it for testing only."
+                    : "This phrase uses a draft word list that may still change before release, and a phrase made now "
+                      "might not restore with later software. Keep a backup of the node's wallets.json as well.";
             if (!persisted) out["error"] = "Wallet could not be saved to " + walletFilePath + "; it exists in memory only";
             // Opt-in: the same phrase in the canonical (Arabic) list, for users who write it in
             // their own language but want to see the words the network side uses.
             std::string canonical;
-            if (body.value("includeCanonical", false) && usedLang != canonicalMnemonicLanguage()) {
+            const std::string canonLang = canonicalMnemonicLanguage(mainNet);
+            if (body.value("includeCanonical", false) && !canonLang.empty() && lang != canonLang) {
                 MnemonicError cerr = MnemonicError::OK;
-                canonical = convertMnemonic(mnemonic, canonicalMnemonicLanguage(), &cerr);
+                canonical = convertMnemonic(mnemonic, canonLang, &cerr);
                 if (cerr == MnemonicError::OK) {
                     out["canonicalMnemonic"] = canonical;
-                    out["canonicalLanguage"] = canonicalMnemonicLanguage();
+                    out["canonicalLanguage"] = canonLang;
                     out["canonicalDirection"] = "rtl";
                 }
             }
@@ -1122,50 +1313,78 @@ void Server::setupRoutes() {
         }
     });
 
-    // Restore Wallet: words and checksum are validated by Wallet::fromMnemonic
-    // (API-11); duplicates are not added twice.
+    // Restore Wallet: words and checksum are validated before any key is derived (API-11); duplicates are not
+    // added twice. An optional "language" names the list; otherwise it is detected among the lists this
+    // network accepts (gate WORDLIST-2).
     s->Post("/api/wallets/restore", [this, walletUnavailable, walletJson](const httplib::Request& req, httplib::Response& res) {
         if (walletUnavailable(res)) return;
         json body;
         if (!parseBody(req, res, body)) return;
         std::string restoreMnemonic = body.contains("mnemonic") && body["mnemonic"].is_string() ? body["mnemonic"].get<std::string>() : "";
         std::string pass = body.contains("passphrase") && body["passphrase"].is_string() ? body["passphrase"].get<std::string>() : "";
-        if (body.contains("includeCanonical") && !body["includeCanonical"].is_boolean()) {
-            reply(res, 400, errorJson("includeCanonical must be true or false"));
+        for (const char* flag : {"includeCanonical", "confirmUnused"}) {
+            if (body.contains(flag) && !body[flag].is_boolean()) {
+                reply(res, 400, errorJson(std::string(flag) + " must be true or false"));
+                return;
+            }
+        }
+        if (body.contains("language") && !body["language"].is_string()) {
+            reply(res, 400, errorJson("language must be a word list tag"));
             return;
         }
         if (trimWs(restoreMnemonic).empty()) {
             reply(res, 400, errorJson("Mnemonic required"));
             return;
         }
+        const bool mainNet = node.params().id == NetworkId::MAIN;
+        std::string lang = body.value("language", "");
+        if (!lang.empty()) {
+            auto list = findWordlist(lang);
+            if (!list) {
+                reply(res, 400, errorJson("Unknown word list language '" + lang + "'"));
+                return;
+            }
+            if (!listAllowed(*list, mainNet)) {
+                reply(res, 400, errorJson("Word list '" + lang + "' is a placeholder and is not available on the main network"));
+                return;
+            }
+        }
+        std::vector<uint8_t> entropy;
+        const MnemonicError merr = lang.empty()
+            ? mnemonicToEntropyAmong(restoreMnemonic, allowedMnemonicLanguages(mainNet), entropy, &lang)
+            : mnemonicToEntropy(restoreMnemonic, entropy, nullptr, lang);
+        if (merr != MnemonicError::OK) {
+            // The message never contains the phrase.
+            reply(res, merr == MnemonicError::WORDLIST_LOAD_FAILED ? 503 : 400,
+                  errorJson(std::string("Invalid mnemonic: ") + mnemonicErrorString(merr)));
+            return;
+        }
         try {
-            Wallet w = Wallet::fromMnemonic(restoreMnemonic, pass);
+            Wallet w = Wallet::fromMnemonic(restoreMnemonic, pass, lang);
             w.setAddressVersion(node.params().p2pkhAddressVersion);
             w.setMnemonic("");
             // Which list the phrase was written in, and (opt-in) the same phrase in the canonical list.
             json echo = json::object();
-            {
-                std::string detected;
-                if (validateMnemonic(restoreMnemonic, &detected) == MnemonicError::OK) {
-                    echo["detectedLanguage"] = detected;
-                    const std::string canonLang = canonicalMnemonicLanguage();
-                    if (body.value("includeCanonical", false)) {
-                        MnemonicError cerr = MnemonicError::OK;
-                        std::string canon = convertMnemonic(restoreMnemonic, canonLang, &cerr);
-                        if (cerr == MnemonicError::OK) {
-                            echo["canonicalMnemonic"] = canon;
-                            echo["canonicalLanguage"] = canonLang;
-                            echo["canonicalDirection"] = "rtl";
-                        }
-                        OPENSSL_cleanse(&canon[0], canon.size());
-                    }
+            echo["detectedLanguage"] = lang;
+            const std::string canonLang = canonicalMnemonicLanguage(mainNet);
+            if (body.value("includeCanonical", false) && !canonLang.empty()) {
+                MnemonicError cerr = MnemonicError::OK;
+                std::string canon = mnemonicFromEntropy(entropy, canonLang, &cerr);
+                if (cerr == MnemonicError::OK) {
+                    echo["canonicalMnemonic"] = canon;
+                    echo["canonicalLanguage"] = canonLang;
+                    echo["canonicalDirection"] = "rtl";
                 }
+                if (!canon.empty()) OPENSSL_cleanse(&canon[0], canon.size());
             }
+            OPENSSL_cleanse(entropy.data(), entropy.size());
             const std::string address = w.getAddress();
             {
                 std::lock_guard<std::mutex> lock(walletMutex);
                 for (const auto& existing : wallets) {
                     if (existing.getAddress() == address) {
+                        // Typing the whole phrase in proves the backup of a wallet whose check was never finished (ONB-08).
+                        if (backupPendingLocked(existing)) confirmBackupLocked(existing);
                         json out = {{"success", true}, {"wallet", walletJson(existing)}, {"existing", true}};
                         out.update(echo);
                         reply(res, 200, out);
@@ -1173,13 +1392,31 @@ void Server::setupRoutes() {
                     }
                 }
             }
-            bool persisted = addWallet(w);
+            // A mistyped passphrase does not fail: it gives a valid but different, empty wallet. Saving that
+            // silently makes users think their coins are gone, so ask first (audit WAL-13).
+            uint64_t coins = 0;
+            if (!pass.empty() && !body.value("confirmUnused", false) &&
+                (!node.coinCount(hash160(w.getPublicKey()), coins) || coins == 0)) {
+                reply(res, 409, json{
+                    {"success", false},
+                    {"confirmRequired", true},
+                    {"reason", "unusedWithPassphrase"},
+                    {"wallet", walletJson(w)},
+                    {"error", "This phrase and passphrase give a wallet with no coins on this node's chain (address " +
+                              address + "). A mistyped passphrase gives a different, empty wallet. Check the "
+                              "passphrase, or send the request again with confirmUnused: true to add it anyway."}
+                });
+                return;
+            }
+            const auto list = findWordlist(lang);
+            bool persisted = addWallet(w, json{{"wordlist", lang}, {"wordlistSha256", list ? list->sha256 : ""}});
             json out = {{"success", true}, {"wallet", walletJson(w)}, {"existing", false}, {"persisted", persisted}};
             out.update(echo);
             if (!persisted) out["error"] = "Wallet could not be saved to " + walletFilePath + "; it exists in memory only";
             reply(res, 200, out);
         } catch (const std::exception& e) {
             // e.what() never contains the phrase (see Wallet::fromMnemonic)
+            OPENSSL_cleanse(entropy.data(), entropy.size());
             reply(res, 400, errorJson(e.what()));
         }
     });
@@ -1257,6 +1494,22 @@ void Server::setupRoutes() {
 
         try {
             Transaction tx = sender.createTransaction(toAddress, amount, node);
+            // "maxFee" is the fee the user approved on the review screen; coin selection may have
+            // changed since (a reward matured, another payment locked coins), so never pay more (ONB-03).
+            uint64_t fee = 0;
+            const bool feeKnown = paymentFee(sender, tx, fee);
+            if (j.contains("maxFee")) {
+                if (!j["maxFee"].is_number_unsigned()) {
+                    reply(res, 400, errorJson("maxFee must be an unsigned integer"));
+                    return;
+                }
+                if (!feeKnown || fee > j["maxFee"].get<uint64_t>()) {
+                    json out = errorJson("The network fee is now higher than the fee you approved; review the payment again");
+                    if (feeKnown) out["fee"] = fee;
+                    reply(res, 409, out);
+                    return;
+                }
+            }
             const ValidationState accepted = node.submitTransaction(tx);
             if (accepted.valid()) {
                 // The network layer and WebSocket clients hear about it through the node's listeners.
@@ -1266,6 +1519,7 @@ void Server::setupRoutes() {
                     {"outputCount", tx.outputs.size()},
                     {"totalAmount", amount}
                 };
+                if (feeKnown) txJson["fee"] = fee;
                 res.set_content(json{{"success", true}, {"transaction", txJson}}.dump(), "application/json");
             } else {
                 reply(res, 400, errorJson("Transaction rejected: " + accepted.code));
@@ -1273,6 +1527,23 @@ void Server::setupRoutes() {
         } catch (const std::exception& e) {
             reply(res, 400, errorJson(e.what()));
         }
+    });
+
+    // Wallet views for the console: see the "Wallet views" section below.
+    s->Post("/api/transactions/estimate", [this](const httplib::Request& req, httplib::Response& res) {
+        json out;
+        const int status = estimatePayment(req.body, out);
+        reply(res, status, out);
+    });
+    s->Get(R"(/api/wallets/([1-9A-HJ-NP-Za-km-z]+)/history)", [this](const httplib::Request& req, httplib::Response& res) {
+        json out;
+        const int status = walletHistory(req.matches[1], req.get_param_value("limit"), req.get_param_value("depth"), out);
+        reply(res, status, out);
+    });
+    s->Post("/api/wallets/backup", [this](const httplib::Request& req, httplib::Response& res) {
+        json out;
+        const int status = confirmWalletBackup(req.body, out);
+        reply(res, status, out);
     });
 
     // Mine Block
@@ -1420,19 +1691,28 @@ void Server::setupRoutes() {
     // =========================================================
     // Auto-Mining Control
     // =========================================================
-    s->Post("/api/mining/start", [this](const httplib::Request&, httplib::Response& res) {
-        startAutoMine();
-        if (!autoMining.load()) {
-            reply(res, 400, errorJson("No wallet to mine to; create or restore one first"));
+    s->Post("/api/mining/start", [this](const httplib::Request& req, httplib::Response& res) {
+        json j;
+        if (!parseBody(req, res, j)) return;
+        std::string err;
+        if (const int status = startMining(j, err)) {
+            reply(res, status, errorJson(err));
             return;
+        }
+        std::string address;
+        {
+            std::lock_guard<std::mutex> lock(minerInfoMutex);
+            address = minerAddress;
         }
         res.set_content(json{
             {"success", true},
             {"message", "Auto-mining started"},
-            {"minerAddress", minerAddress}
+            {"minerAddress", address},
+            {"threads", minerThreads}
         }.dump(), "application/json");
     });
 
+    // Stops continuous mining and a running one-block search.
     s->Post("/api/mining/stop", [this](const httplib::Request&, httplib::Response& res) {
         stopAutoMine();
         res.set_content(json{
@@ -1460,13 +1740,38 @@ void Server::setupRoutes() {
         res.set_content(json{{"success", true}}.dump(), "application/json");
     });
 
-    s->Get("/api/mining/status", [this](const httplib::Request&, httplib::Response& res) {
-        res.set_content(json{
-            {"mining",       autoMining.load()},
-            {"minerAddress", minerAddress},
+    // Public. hashRate is live while the miner hashes (audit ML-3); blockedReason is why the
+    // node cannot build a block now, which is not the same as "syncing" (ONB-14).
+    s->Get("/api/mining/status", [this](const httplib::Request& req, httplib::Response& res) {
+        const Node::MiningInfo info = node.miningInfo();
+        const bool busy = minerBusy.load();
+        const uint64_t rate = busy ? node.minerHashRate() : 0;
+        const double expected = targetToDouble(Pow::blockProof(info.bits));   // hashes per block on average
+        json j{
+            {"mining",       autoMining.load()},   // continuous mining is on
+            {"busy",         busy},                // hashing now: continuous or one block
+            {"threads",      minerThreads},
             {"blocksFound",  blocksFound.load()},
-            {"hashRate",     hashesPerSecond.load()}
-        }.dump(), "application/json");
+            {"hashRate",     rate},
+            {"bits",         info.bits},
+            {"expectedHashesPerBlock", expected},
+            {"expectedSecondsPerBlock", rate ? json(expected / double(rate)) : json(nullptr)},
+            {"blockedReason", info.blockedReason}
+        };
+        // A payout address links this public node to its owner's coins: signed-in callers only (audit WAL-7).
+        const bool signedIn = authenticate(req.get_header_value("Authorization"), req.get_header_value("X-API-Token"),
+                                           req.get_header_value("Cookie")) != AuthKind::None;
+        {
+            std::lock_guard<std::mutex> lock(minerInfoMutex);
+            j["job"] = mineJob.id ? mineJobJsonLocked() : json(nullptr);
+            if (signedIn) {
+                j["minerAddress"] = minerAddress;
+                j["fixedPayoutAddress"] = config.mineAddress;   // --mine-address: requests cannot change the payout
+            } else if (j["job"].is_object()) {
+                j["job"].erase("minerAddress");
+            }
+        }
+        res.set_content(j.dump(), "application/json");
     });
 }
 
@@ -1487,47 +1792,32 @@ void Server::handleEconomyStatus(std::function<void(const std::string&)> respons
         {"supply_fmt", (double)supply / 100000000.0},
         {"gold_reserve", gold},
         {"gold_reserve_unit", "g"},
-        // The reserve is whatever the vault signers recorded on-chain; the
-        // node cannot verify physical gold, so UIs must label it "reported".
-        {"reserve_source", "vault-signed OP_RETURN markers (reported, not audited by the node)"},
+        // The gold module is a later phase (Node::goldReserve() is a stub): name no reserve source the node does
+        // not read, and say plainly that nothing backs the coin (gate HYG-9).
+        {"gold_module_active", false},
+        {"reserve_source", "none: the gold module is not active, so no gold reserve backs BUCKS"},
         {"price_per_buck", price}
     };
     response(j.dump());
 }
 
+// "Mine one block" runs as a background search with no time limit: at mainnet difficulty a
+// block takes hours, so a fixed 60 s cap failed nearly every time (audit ML-4). The request
+// waits up to config.mineOneWait for the block (regtest and testnet are usually that fast)
+// and otherwise answers 202; /api/mining/status then shows the search, POST
+// /api/mining/stop ends it. While continuous mining runs the request is refused instead of
+// waiting for the miner forever (NEW-5).
 int Server::mineBlock(const std::string& body, json& out) {
     try {
-        size_t minerIndex = 0;
+        json j = json::object();
         if (!trimWs(body).empty()) {
-            json j;
             try { j = json::parse(body); } catch (...) { out = errorJson("Invalid JSON body"); return 400; }
-            if (j.is_object() && j.contains("minerWalletIndex")) {
-                if (!j["minerWalletIndex"].is_number_unsigned()) {
-                    out = errorJson("minerWalletIndex must be a non-negative integer");
-                    return 400;
-                }
-                minerIndex = j["minerWalletIndex"].get<size_t>();
-            }
         }
-
-        // Copy only what the coinbase needs. The wallet list is never written
-        // here (the old `Wallet& miner = wallets[0]; miner = wallets[idx];`
-        // overwrote the primary key: CRY-9/API-5/OPS-3) and the lock is not
-        // held across the hash loop (API-8).
         std::vector<uint8_t> minerScript;
-        std::string minerAddr;
-        {
-            std::lock_guard<std::mutex> lock(walletMutex);
-            if (wallets.empty()) {
-                out = errorJson("No wallet to mine to; create or restore one first");
-                return 400;
-            }
-            if (minerIndex >= wallets.size()) {
-                out = errorJson("minerWalletIndex out of range");
-                return 400;
-            }
-            minerScript = wallets[minerIndex].getP2PKHScript();
-            minerAddr = wallets[minerIndex].getAddress();
+        std::string minerAddr, err;
+        if (const int status = resolvePayout(j, minerScript, minerAddr, err)) {
+            out = errorJson(err);
+            return status;
         }
 
         // IPFS Liveness Check
@@ -1539,53 +1829,92 @@ int Server::mineBlock(const std::string& body, json& out) {
             }
         }
 
-        // Coinbase data: the IPFS peer id travels in the miner tag, anchored CIDs in the single
-        // NULL_DATA output (at most 80 bytes per block; the rest wait for the next block). Neither
-        // goes into the scriptSig any more (API-16).
-        AssemblerOptions options;
-        if (!ipfsPeerId.empty()) options.minerTag = "IPFS:" + ipfsPeerId;
-        std::vector<std::string> anchored;
+        uint64_t id = 0;
         {
-            std::lock_guard<std::mutex> lock(anchorMutex);
-            std::string payload;
-            while (!pendingCIDs.empty()) {
-                const std::string piece = "ANCHOR:" + pendingCIDs.front();
-                const size_t extra = piece.size() + (payload.empty() ? 0 : 1);
-                if (payload.size() + extra > 80) break;
-                if (!payload.empty()) payload += ';';
-                payload += piece;
-                anchored.push_back(pendingCIDs.front());
-                pendingCIDs.erase(pendingCIDs.begin());
+            std::lock_guard<std::mutex> ctl(minerCtlMutex);
+            if (minerShutdown) {
+                out = errorJson("The node is shutting down");
+                return 503;
             }
-            options.extraPayload.assign(payload.begin(), payload.end());
-        }
-        auto requeue = [&]() {
-            std::lock_guard<std::mutex> lock(anchorMutex);
-            pendingCIDs.insert(pendingCIDs.begin(), anchored.begin(), anchored.end());
-        };
+            if (autoMining.load()) {
+                out = errorJson("Continuous mining is running and already mines every block it can; "
+                                "stop it to search for a single block");
+                return 409;
+            }
+            if (minerBusy.load()) {
+                std::lock_guard<std::mutex> lock(minerInfoMutex);
+                out = errorJson("A one-block search is already running");
+                out["job"] = mineJobJsonLocked();
+                return 409;
+            }
+            if (minerThread.joinable()) minerThread.join();   // a finished search
 
-        std::atomic<bool> noStop{false};
-        std::string mineErr;
-        Hash256 foundHash{};
-        const MineResult result = node.mine(minerScript, options, noStop, mineErr, &foundHash, 60);
-        if (result == MineResult::STOPPED) {
-            requeue();
-            out = errorJson("Mining timed out");
-            return 503;
+            // Coinbase data: the IPFS peer id travels in the miner tag, anchored CIDs in the single
+            // NULL_DATA output (at most 80 bytes per block; the rest wait for the next block). Neither
+            // goes into the scriptSig any more (API-16).
+            AssemblerOptions options;
+            if (!ipfsPeerId.empty()) options.minerTag = "IPFS:" + ipfsPeerId;
+            std::vector<std::string> anchored;
+            {
+                std::lock_guard<std::mutex> lock(anchorMutex);
+                std::string payload;
+                while (!pendingCIDs.empty()) {
+                    const std::string piece = "ANCHOR:" + pendingCIDs.front();
+                    const size_t extra = piece.size() + (payload.empty() ? 0 : 1);
+                    if (payload.size() + extra > 80) break;
+                    if (!payload.empty()) payload += ';';
+                    payload += piece;
+                    anchored.push_back(pendingCIDs.front());
+                    pendingCIDs.erase(pendingCIDs.begin());
+                }
+                options.extraPayload.assign(payload.begin(), payload.end());
+            }
+            {
+                std::lock_guard<std::mutex> lock(minerInfoMutex);
+                id = mineJob.id + 1;
+                mineJob = MineJob{};
+                mineJob.id = id;
+                mineJob.state = "running";
+                mineJob.address = minerAddr;
+                mineJob.startedAt = int64_t(std::time(nullptr));
+                minerAddress = minerAddr;
+            }
+            minerStop = false;
+            minerBusy = true;
+            try {
+                minerThread = std::thread(&Server::minerLoop, this, minerScript, options, anchored, true);
+            } catch (const std::system_error& e) {
+                minerBusy = false;
+                {
+                    std::lock_guard<std::mutex> lock(anchorMutex);
+                    pendingCIDs.insert(pendingCIDs.begin(), anchored.begin(), anchored.end());
+                }
+                finishMineJob("failed", json(), std::string("cannot start the miner: ") + e.what(), 500);
+                out = errorJson(std::string("cannot start the miner: ") + e.what());
+                return 500;
+            }
         }
-        if (result == MineResult::FAILED) {
-            requeue();
-            out = errorJson(mineErr.empty() ? "Mining failed" : mineErr);
-            return mineErr == "node is syncing" ? 503 : 500;
+        Bucks::logOut() << "[miner] Searching for one block -> " << minerAddr << " (" << minerThreads
+                        << " threads)" << std::endl;
+
+        std::unique_lock<std::mutex> lock(minerInfoMutex);
+        minerInfoCv.wait_for(lock, config.mineOneWait, [&] { return mineJob.id != id || mineJob.state != "running"; });
+        if (mineJob.id == id && mineJob.state == "found") {
+            out = json{{"success", true}, {"block", mineJob.block}, {"minerAddress", mineJob.address}};
+            return 200;
         }
-        auto mined = node.blockByHash(foundHash);
-        if (!mined) {
-            out = errorJson("Block rejected");
-            return 500;
+        if (mineJob.id == id && mineJob.state == "failed") {
+            out = errorJson(mineJob.error.empty() ? "Mining failed" : mineJob.error);
+            return mineJob.status ? mineJob.status : 500;
         }
-        for (const std::string& cid : anchored) pinCID(cid);
-        out = json{{"success", true}, {"block", blockToJSON(*mined)}, {"minerAddress", minerAddr}};
-        return 200;
+        if (mineJob.id == id && mineJob.state == "stopped") {
+            out = errorJson("Mining was stopped before a block was found");
+            return 409;
+        }
+        out = json{{"success", true}, {"pending", true}, {"minerAddress", minerAddr},
+                   {"message", "Still searching. Follow it in /api/mining/status; POST /api/mining/stop ends it."}};
+        if (mineJob.id == id) out["job"] = mineJobJsonLocked();
+        return 202;
 
     } catch (const std::exception& e) {
         out = errorJson(e.what());
@@ -1614,6 +1943,309 @@ nlohmann::json Server::txToJSON(const Transaction& tx) const {
         {"outputCount", tx.outputs.size()},
         {"totalAmount", total}
     };
+}
+
+// ============================================================================
+// Wallet views for the console (read-only, except the backup flag)
+// ============================================================================
+
+// One entry of GET /api/wallets. "balance" counts every confirmed coin; a payment can only use "spendable":
+// mining rewards younger than the coinbase maturity are "immature" and coins a pending payment spends are
+// "locked" (ONB-07). "incoming" is what unconfirmed transactions pay to the wallet, its own change included.
+json Server::walletSummaryLocked(const Wallet& w) const {
+    uint64_t balance = 0, coinsTotal = 0, immature = 0, spendable = 0, incoming = 0;
+    try {
+        const Hash160 key = hash160(w.getPublicKey());
+        balance = node.balance(key);
+        const uint64_t next = uint64_t(node.height()) + 1;
+        // The same coins (and limit) the wallet selects from when it pays.
+        for (const CoinRow& c : node.coinsByHash160(key, 20000)) {
+            coinsTotal += c.coin.amount;
+            if (c.coin.isCoinbase && next < uint64_t(c.coin.height) + Consensus::COINBASE_MATURITY) immature += c.coin.amount;
+        }
+        for (const CoinRow& c : node.spendableCoins(key, 20000)) spendable += c.coin.amount;
+        const Script own = w.getP2PKHScript();
+        for (const Transaction& tx : node.mempoolTransactions(5000))
+            for (const auto& o : tx.outputs) if (o.scriptPubKey == own) incoming += o.amount;
+    } catch (...) {}
+    const uint64_t usable = std::min(coinsTotal, balance);
+    const uint64_t locked = usable > immature + spendable ? usable - immature - spendable : 0;
+    return json{{"address", w.getAddress()}, {"balance", balance}, {"spendable", spendable},
+                {"immature", immature}, {"locked", locked}, {"incoming", incoming},
+                {"backedUp", !backupPendingLocked(w)}};
+}
+
+// Public key of a wallets.json entry, lower-case ("" when absent or not a string).
+static std::string entryPublicKey(const json& e) {
+    auto it = e.find("pubKeyHex");
+    if (it == e.end()) it = e.find("pubKey");
+    return it != e.end() && it->is_string() ? lowerAscii(it->get<std::string>()) : std::string();
+}
+
+// A created wallet's entry carries "backupConfirmed": false until the user confirms its recovery phrase
+// (ONB-08); the console keeps such a wallet from looking ready. Restored wallets, and entries written before
+// the flag existed, count as backed up. backupPending_ holds the wallets this process created that are not
+// confirmed yet: saveWalletsLocked writes their flag, and they still count if the file could not be written.
+bool Server::backupPendingLocked(const Wallet& w) const {
+    const std::string pub = lowerAscii(w.getPublicKeyHex());
+    if (backupPending_.count(pub)) return true;
+    if (!walletDoc.contains("wallets") || !walletDoc["wallets"].is_array()) return false;
+    for (const auto& e : walletDoc["wallets"]) {
+        if (e.is_object() && entryPublicKey(e) == pub) {
+            auto it = e.find("backupConfirmed");
+            return it != e.end() && it->is_boolean() && !it->get<bool>();
+        }
+    }
+    return false;
+}
+
+bool Server::confirmBackupLocked(const Wallet& w) {
+    const std::string pub = lowerAscii(w.getPublicKeyHex());
+    backupPending_.erase(pub);
+    if (walletDoc.contains("wallets") && walletDoc["wallets"].is_array()) {
+        for (auto& e : walletDoc["wallets"])
+            if (e.is_object() && entryPublicKey(e) == pub) e["backupConfirmed"] = true;
+    }
+    return saveWalletsLocked();
+}
+
+// Called before addWallet, so that the wallet's first entry on disk already carries the flag.
+void Server::markBackupPending(const Wallet& w) {
+    std::lock_guard<std::mutex> lock(walletMutex);
+    backupPending_.insert(lowerAscii(w.getPublicKeyHex()));
+}
+
+// POST /api/wallets/backup {address[, mnemonic, passphrase]}: the user confirmed the recovery phrase. The
+// console sends only the address after its own word check; a user who left the backup half-way proves the
+// phrase by sending it, and the node checks that it gives this wallet (nothing is stored).
+int Server::confirmWalletBackup(const std::string& body, json& out) {
+    if (!walletOk) {
+        out = errorJson("Wallet subsystem disabled: " + walletErr);
+        return 503;
+    }
+    json j;
+    try { j = body.empty() ? json::object() : json::parse(body); } catch (...) { out = errorJson("Invalid JSON body"); return 400; }
+    if (!j.is_object() || !j.contains("address") || !j["address"].is_string() ||
+        (j.contains("mnemonic") && !j["mnemonic"].is_string()) || (j.contains("passphrase") && !j["passphrase"].is_string())) {
+        out = errorJson("address (string) is required; mnemonic and passphrase must be strings");
+        return 400;
+    }
+    const std::string address = j["address"];
+    Wallet w;
+    {
+        std::lock_guard<std::mutex> lock(walletMutex);
+        auto it = std::find_if(wallets.begin(), wallets.end(), [&](const Wallet& x) { return x.getAddress() == address; });
+        if (it == wallets.end()) {
+            out = errorJson("No wallet with that address on this node");
+            return 404;
+        }
+        w = *it;
+    }
+    if (j.contains("mnemonic")) {
+        std::string phrase = j["mnemonic"];
+        std::string derived;
+        try {
+            Wallet check = Wallet::fromMnemonic(phrase, j.value("passphrase", ""));
+            check.setAddressVersion(node.params().p2pkhAddressVersion);
+            derived = check.getAddress();
+        } catch (const std::exception& e) {
+            OPENSSL_cleanse(&phrase[0], phrase.size());
+            out = errorJson(e.what());   // never contains the phrase (see Wallet::fromMnemonic)
+            return 400;
+        }
+        OPENSSL_cleanse(&phrase[0], phrase.size());
+        if (derived != address) {
+            out = errorJson("That phrase belongs to a different wallet");
+            return 400;
+        }
+    }
+    std::lock_guard<std::mutex> lock(walletMutex);
+    const bool persisted = confirmBackupLocked(w);
+    out = json{{"success", true}, {"address", address}, {"backedUp", true}, {"persisted", persisted}};
+    return 200;
+}
+
+// Fee of a payment this node's wallet just built: every input is one of the wallet's confirmed coins, so the fee
+// is their sum minus the outputs (dust change that went to the miner included).
+bool Server::paymentFee(const Wallet& from, const Transaction& tx, uint64_t& fee) const {
+    std::map<std::pair<Hash256, uint32_t>, uint64_t> coins;
+    for (const CoinRow& c : node.coinsByHash160(hash160(from.getPublicKey()), 20000))
+        coins[{c.op.txid, c.op.index}] = c.coin.amount;
+    uint64_t in = 0;
+    for (const auto& input : tx.inputs) {
+        auto it = coins.find({input.prevTxid, input.prevIndex});
+        if (it == coins.end()) return false;
+        in += it->second;
+    }
+    const uint64_t out = tx.totalOutput();
+    if (in < out) return false;
+    fee = in - out;
+    return true;
+}
+
+// POST /api/transactions/estimate {from, to, amount}: builds the payment exactly as /api/transactions/send
+// would and returns its fee without sending it, so the review screen can show the real fee (ONB-03).
+int Server::estimatePayment(const std::string& body, json& out) {
+    if (!walletOk) {
+        out = errorJson("Wallet subsystem disabled: " + walletErr);
+        return 503;
+    }
+    json j;
+    try { j = body.empty() ? json::object() : json::parse(body); } catch (...) { out = errorJson("Invalid JSON body"); return 400; }
+    if (!j.is_object() || !j.contains("from") || !j["from"].is_string() || !j.contains("to") || !j["to"].is_string() ||
+        !j.contains("amount") || !j["amount"].is_number_unsigned()) {
+        out = errorJson("from, to (strings) and amount (unsigned integer) are required");
+        return 400;
+    }
+    const uint64_t amount = j["amount"];
+    if (amount < Policy::DUST_LIMIT) {
+        out = errorJson("amount is below the dust limit of " + std::to_string(Policy::DUST_LIMIT) + " awraq");
+        return 400;
+    }
+    Wallet sender;
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lock(walletMutex);
+        for (const auto& w : wallets) {
+            if (w.getAddress() == j["from"].get<std::string>()) { sender = w; found = true; break; }
+        }
+    }
+    if (!found) {
+        out = errorJson("Sender wallet not found");
+        return 404;
+    }
+    try {
+        const Transaction tx = sender.createTransaction(j["to"].get<std::string>(), amount, node);
+        uint64_t fee = 0;
+        if (!paymentFee(sender, tx, fee)) {
+            out = errorJson("Could not work out the fee; try again");
+            return 503;
+        }
+        out = json{{"success", true}, {"amount", amount}, {"fee", fee}, {"total", amount + fee},
+                   {"change", tx.totalOutput() - amount}, {"inputCount", tx.inputs.size()},
+                   {"outputCount", tx.outputs.size()}, {"size", tx.serialize().size()}};
+        return 200;
+    } catch (const std::exception& e) {
+        out = errorJson(e.what());
+        return 400;
+    }
+}
+
+// GET /api/wallets/<address>/history[?limit=50&depth=1000]: what one wallet sent and received, newest first:
+// its transactions in the mempool ("pending"), then those in the newest `depth` blocks ("confirmed"). The node
+// has no address index yet (docs/design/storage-concurrency.md Q2), so the blocks are scanned and the reply
+// says how far back ("scannedFrom", "complete"). A payment from the wallet is recognised by its unlock
+// script, which carries the wallet's public key (ONB-05, NEW-7).
+int Server::walletHistory(const std::string& address, const std::string& limitText, const std::string& depthText,
+                          json& out) {
+    if (!walletOk) {
+        out = errorJson("Wallet subsystem disabled: " + walletErr);
+        return 503;
+    }
+    auto number = [](const std::string& text, size_t fallback, size_t max, size_t& value) {
+        if (text.empty()) { value = fallback; return true; }
+        if (text.size() > 6 || text.find_first_not_of("0123456789") != std::string::npos) return false;
+        value = std::stoul(text);
+        return value >= 1 && value <= max;
+    };
+    size_t limit = 0, depth = 0;
+    if (!number(limitText, 50, 500, limit) || !number(depthText, 1000, 100000, depth)) {
+        out = errorJson("limit must be 1-500 and depth 1-100000");
+        return 400;
+    }
+    Wallet w;
+    json summary;
+    {
+        std::lock_guard<std::mutex> lock(walletMutex);
+        auto it = std::find_if(wallets.begin(), wallets.end(), [&](const Wallet& x) { return x.getAddress() == address; });
+        if (it == wallets.end()) {
+            out = errorJson("No wallet with that address on this node");
+            return 404;
+        }
+        w = *it;
+        summary = walletSummaryLocked(w);
+    }
+    const Script own = w.getP2PKHScript();
+    const PublicKey& pub = w.getPublicKey();
+    const uint8_t version = node.params().p2pkhAddressVersion;
+
+    // One activity entry for `tx`, or false when it neither pays nor spends this wallet.
+    auto describe = [&](const Transaction& tx, json& e) {
+        uint64_t toSelf = 0, toOthers = 0;
+        std::string firstOther;
+        for (const auto& o : tx.outputs) {
+            Hash160 h{};
+            if (o.scriptPubKey == own) toSelf += o.amount;
+            else if (isP2PKH(o.scriptPubKey, &h)) {
+                toOthers += o.amount;
+                if (firstOther.empty()) firstOther = base58CheckEncode(version, std::vector<uint8_t>(h.begin(), h.end()));
+            }
+        }
+        bool fromSelf = false;
+        if (!tx.isCoinbase()) {
+            for (const auto& in : tx.inputs) {
+                std::vector<uint8_t> sig;
+                CompressedPubKey key{};
+                if (parseP2PKHUnlock(in.scriptSig, sig, key) && std::equal(key.begin(), key.end(), pub.begin(), pub.end())) {
+                    fromSelf = true;
+                    break;
+                }
+            }
+        }
+        if (!fromSelf && toSelf == 0) return false;
+        e = json{{"txid", hash256ToHex(tx.txid())}};
+        if (tx.isCoinbase()) { e["kind"] = "mined"; e["amount"] = toSelf; }
+        else if (fromSelf && toOthers) { e["kind"] = "sent"; e["amount"] = toOthers; e["to"] = firstOther; e["change"] = toSelf; }
+        else if (fromSelf) { e["kind"] = "self"; e["amount"] = toSelf; }
+        else { e["kind"] = "received"; e["amount"] = toSelf; }
+        return true;
+    };
+
+    json activity = json::array();
+    try {
+        for (const Transaction& tx : node.mempoolTransactions(5000)) {
+            if (activity.size() >= limit) break;
+            json e;
+            if (!describe(tx, e)) continue;
+            e["status"] = "pending";
+            if (e["kind"] == "sent" || e["kind"] == "self") {
+                uint64_t fee = 0;
+                if (paymentFee(w, tx, fee)) e["fee"] = fee;
+            }
+            activity.push_back(e);
+        }
+        const uint32_t tip = node.height();
+        uint32_t lowest = tip;
+        size_t scanned = 0;
+        bool reachedGenesis = false;
+        for (uint32_t height = tip; scanned < depth && activity.size() < limit; --height) {
+            ++scanned;
+            lowest = height;
+            if (auto block = node.blockByHeight(height)) {
+                for (auto it = block->transactions.rbegin(); it != block->transactions.rend() && activity.size() < limit; ++it) {
+                    json e;
+                    if (!describe(*it, e)) continue;
+                    e["status"] = "confirmed";
+                    e["height"] = height;
+                    e["confirmations"] = tip - height + 1;
+                    e["time"] = block->header.timestamp;
+                    activity.push_back(e);
+                }
+            }
+            if (height == 0) { reachedGenesis = true; break; }
+        }
+        out = summary;
+        out["success"] = true;
+        out["tipHeight"] = tip;
+        out["scannedFrom"] = lowest;
+        out["scannedBlocks"] = scanned;
+        out["complete"] = reachedGenesis && activity.size() < limit;
+        out["activity"] = activity;
+        return 200;
+    } catch (const std::exception& e) {
+        out = errorJson(std::string("Could not read the chain: ") + e.what());
+        return 500;
+    }
 }
 
 bool Server::checkIPFSStatus(std::string& peerId) {
@@ -1657,67 +2289,204 @@ bool Server::pinCID(const std::string& cid) {
 // Auto-mining
 // ============================================================================
 
-void Server::startAutoMine() {
-    if (autoMining.exchange(true)) return; // already running
-    autoMineStop.store(false);
+// One mining thread at a time. start, stop and "mine one block" run under minerCtlMutex,
+// which is held across the join, so two requests can never join or replace the same
+// std::thread (that aborted the node: audit SAN-2), and a start can no longer clear the stop
+// flag of a loop that is still running (NEW-6). The loop never takes minerCtlMutex.
 
-    // Check if we have any wallet to mine to
-    {
+// The coinbase pays --mine-address when it is set; otherwise the request's minerAddress (any
+// address of this network, so the UI can pay the wallet the user selected: ONB-12) or
+// minerWalletIndex, otherwise the first wallet.
+int Server::resolvePayout(const json& request, std::vector<uint8_t>& script, std::string& address,
+                          std::string& err) {
+    const bool byAddress = request.is_object() && request.contains("minerAddress");
+    const bool byIndex = request.is_object() && request.contains("minerWalletIndex");
+    if (byAddress) {
+        if (!request["minerAddress"].is_string()) {
+            err = "minerAddress must be a string";
+            return 400;
+        }
+        address = trimWs(request["minerAddress"].get<std::string>());
+        try {
+            script = Wallet::addressToP2PKHScript(address, node.params().p2pkhAddressVersion);
+        } catch (const std::exception&) {
+            err = "minerAddress is not a valid " + std::string(node.params().name) + " address";
+            return 400;
+        }
+    } else if (byIndex || config.mineAddress.empty()) {
+        // Copy only what the coinbase needs. The wallet list is never written here (the old
+        // `Wallet& miner = wallets[0]; miner = wallets[idx];` overwrote the primary key:
+        // CRY-9/API-5/OPS-3) and the lock is not held across the hash loop (API-8).
+        size_t index = 0;
+        if (byIndex) {
+            if (!request["minerWalletIndex"].is_number_unsigned()) {
+                err = "minerWalletIndex must be a non-negative integer";
+                return 400;
+            }
+            index = request["minerWalletIndex"].get<size_t>();
+        }
         std::lock_guard<std::mutex> lock(walletMutex);
         if (wallets.empty()) {
-            autoMining.store(false);
-            Bucks::logOut() << "[miner] FAILED to start auto-mining: No wallets available. Please create or restore a wallet first.\n";
-            return;
+            err = walletOk ? "No wallet to mine to; create or restore one first, or start the node with --mine-address"
+                           : "No wallet to mine to (" + walletErr + "); start the node with --mine-address";
+            return 400;
         }
-        minerAddress = wallets[0].getAddress();
+        if (index >= wallets.size()) {
+            err = "minerWalletIndex out of range";
+            return 400;
+        }
+        script = wallets[index].getP2PKHScript();
+        address = wallets[index].getAddress();
     }
+    if (!config.mineAddress.empty()) {
+        // The operator's choice holds: a leaked API token cannot quietly redirect rewards.
+        if ((byAddress || byIndex) && address != config.mineAddress) {
+            err = "This node pays every block to " + config.mineAddress +
+                  " (--mine-address); the reward address cannot be changed through the API";
+            return 409;
+        }
+        script = fixedPayoutScript;
+        address = config.mineAddress;
+    }
+    return 0;
+}
 
-    // A previous loop may have exited after stopAutoMine(); reap it first.
-    if (autoMinerThread.joinable()) autoMinerThread.join();
+bool Server::minerPayoutReady(std::string& err) {
+    std::vector<uint8_t> script;
+    std::string address;
+    return resolvePayout(json::object(), script, address, err) == 0;
+}
 
-    Bucks::logOut() << "[miner] Auto-mining started -> " << minerAddress << std::endl;
-    autoMinerThread = std::thread(&Server::autoMineLoop, this);
+bool Server::startAutoMine(std::string& err) {
+    return startMining(json::object(), err) == 0;
+}
+
+int Server::startMining(const json& request, std::string& err) {
+    std::vector<uint8_t> script;
+    std::string address;
+    if (const int status = resolvePayout(request, script, address, err)) return status;
+
+    std::lock_guard<std::mutex> ctl(minerCtlMutex);
+    if (minerShutdown) {
+        err = "The node is shutting down";
+        return 503;
+    }
+    if (autoMining.load()) {
+        std::lock_guard<std::mutex> lock(minerInfoMutex);
+        const bool chosen = request.contains("minerAddress") || request.contains("minerWalletIndex");
+        if (chosen && address != minerAddress) {
+            err = "Mining already runs and pays " + minerAddress + "; stop it to change the reward address";
+            return 409;
+        }
+        return 0;   // already running
+    }
+    if (minerBusy.load()) {
+        err = "A one-block search is running; stop it first";
+        return 409;
+    }
+    if (minerThread.joinable()) minerThread.join();   // a finished one-block search
+    {
+        std::lock_guard<std::mutex> lock(minerInfoMutex);
+        minerAddress = address;
+    }
+    minerStop = false;
+    autoMining = true;
+    minerBusy = true;
+    try {
+        minerThread = std::thread(&Server::minerLoop, this, script, AssemblerOptions{}, std::vector<std::string>{}, false);
+    } catch (const std::system_error& e) {
+        autoMining = false;
+        minerBusy = false;
+        err = std::string("cannot start the miner: ") + e.what();
+        return 500;
+    }
+    Bucks::logOut() << "[miner] Auto-mining started -> " << address << " (" << minerThreads << " threads)"
+                    << std::endl;
+    return 0;
 }
 
 void Server::stopAutoMine() {
-    autoMineStop.store(true);
-    autoMining.store(false);
-    Bucks::logOut() << "[miner] Auto-mining stopped." << std::endl;
+    std::lock_guard<std::mutex> ctl(minerCtlMutex);
+    stopMinerLocked();
 }
 
-void Server::autoMineLoop() {
-    using clock = std::chrono::steady_clock;
+void Server::stopMinerLocked() {
+    const bool wasRunning = minerThread.joinable();
+    minerStop = true;
+    if (minerThread.joinable()) minerThread.join();   // the loop checks the flag every check interval
+    const bool wasAuto = autoMining.exchange(false);
+    minerBusy = false;
+    if (wasAuto) Bucks::logOut() << "[miner] Auto-mining stopped." << std::endl;
+    else if (wasRunning) Bucks::logOut() << "[miner] Mining stopped." << std::endl;
+}
 
-    while (autoMining.load() && !autoMineStop.load()) {
-        Script script;
-        {
-            std::lock_guard<std::mutex> lk(walletMutex);
-            if (wallets.empty()) break;
-            script = wallets[0].getP2PKHScript();
-        }
+void Server::finishMineJob(const std::string& state, const json& block, const std::string& error, int status) {
+    {
+        std::lock_guard<std::mutex> lock(minerInfoMutex);
+        if (mineJob.state != "running") return;
+        mineJob.state = state;
+        mineJob.block = block;
+        mineJob.error = error;
+        mineJob.status = status;
+    }
+    minerInfoCv.notify_all();
+}
 
-        AssemblerOptions options;     // tag "Bucks"; templates are rebuilt every minute and on every new tip
+json Server::mineJobJsonLocked() const {
+    json j{{"id", mineJob.id}, {"state", mineJob.state}, {"minerAddress", mineJob.address},
+           {"startedAt", mineJob.startedAt}};
+    if (mineJob.state == "found") j["block"] = mineJob.block;
+    if (!mineJob.error.empty()) j["error"] = mineJob.error;
+    return j;
+}
+
+// Continuous mining, or one block (a "mine one block" request). The payout is fixed when the
+// loop starts.
+void Server::minerLoop(std::vector<uint8_t> script, AssemblerOptions options, std::vector<std::string> anchored,
+                       bool oneBlock) {
+    std::string state = "stopped", error, lastErr;   // how a one-block search ended
+    json block;
+    int status = 0;
+    while (!minerStop.load()) {
         std::string err;
         Hash256 found{};
-        const uint64_t hashesBefore = node.minerHashes();
-        const auto started = clock::now();
-        const MineResult r = node.mine(script, options, autoMineStop, err, &found, 0);
-
-        const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(clock::now() - started).count();
-        if (seconds > 0) hashesPerSecond.store((node.minerHashes() - hashesBefore) / seconds);
-
+        const MineResult r = node.mine(script, options, minerStop, err, &found, 0, minerThreads);
         if (r == MineResult::FOUND) {
             ++blocksFound;
+            lastErr.clear();
             Bucks::logOut() << "[miner] *** Block found! hash=" << hash256ToHex(found)
                       << " total=" << blocksFound.load() << " ***" << std::endl;
+            if (oneBlock) {
+                for (const std::string& cid : anchored) pinCID(cid);
+                const std::optional<Block> mined = node.blockByHash(found);
+                block = mined ? blockToJSON(*mined) : json{{"hash", hash256ToHex(found)}};
+                state = "found";
+                break;
+            }
         } else if (r == MineResult::FAILED) {
-            // For example "node is syncing": wait and try again.
-            Bucks::logOut() << "[miner] " << err << ", retrying..." << std::endl;
-            for (int i = 0; i < 10 && autoMining.load() && !autoMineStop.load(); ++i)
+            if (oneBlock) {
+                state = "failed";
+                error = err.empty() ? "Mining failed" : err;
+                status = err == "node is syncing" ? 503 : 500;
+                break;
+            }
+            // For example "node is syncing": wait and try again, and say so once, not every second.
+            if (err != lastErr) Bucks::logOut() << "[miner] " << err << ", retrying..." << std::endl;
+            lastErr = err;
+            for (int i = 0; i < 10 && !minerStop.load(); ++i)
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } else {
+            break;   // stopped
         }
     }
-    Bucks::logOut() << "[miner] Auto-mine loop exited." << std::endl;
+    if (oneBlock && state != "found") {
+        std::lock_guard<std::mutex> lock(anchorMutex);
+        pendingCIDs.insert(pendingCIDs.begin(), anchored.begin(), anchored.end());
+    }
+    // Not busy before the job reports its end, so a client that mines again right after the
+    // answer is not refused as "already running".
+    minerBusy = false;
+    if (oneBlock) finishMineJob(state, block, error, status);
 }
 
 // ============================================================================
@@ -1776,6 +2545,7 @@ bool Server::saveWalletsLocked() {
         e["privKeyHex"] = w.getPrivateKeyHex();
         e["pubKeyHex"]  = w.getPublicKeyHex();
         e["address"]    = w.getAddress();
+        if (backupPending_.count(pub)) e["backupConfirmed"] = false;   // created, phrase not confirmed (ONB-08)
         arr.push_back(e);
     }
     for (auto& e : opaque) {

@@ -1,5 +1,5 @@
 // Shared application state and polling. Everything shown comes from the node's
-// REST API. The node rate-limits to 100 requests/minute per client, so polling
+// REST API. The node rate-limits to 300 requests/minute per client, so polling
 // is deliberately slow (10 s), pauses while the tab is hidden, and fetches the
 // block list only when the tip changes.
 import { get, ApiError, onSessionExpired } from "./api.js";
@@ -32,6 +32,11 @@ export const state = {
 const subs = new Set();
 export function subscribe(fn) { subs.add(fn); return () => subs.delete(fn); }
 export function emit() { subs.forEach((fn) => { try { fn(state); } catch (e) { console.error(e); } }); }
+
+// Pages register a check here when they hold something that signing out would lose (an unfinished backup).
+const unsavedChecks = new Set();
+export function onUnsavedCheck(fn) { unsavedChecks.add(fn); }
+export const hasUnsaved = () => [...unsavedChecks].some((fn) => fn());
 
 try { state.selected = sessionStorage.getItem("bucks.selected") || ""; } catch { /* storage unavailable */ }
 export function selectWallet(addr) {

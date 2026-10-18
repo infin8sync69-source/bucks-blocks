@@ -48,8 +48,13 @@ private:
 std::string hexOf(const Hash256& h) { return hexStr(std::vector<uint8_t>(h.begin(), h.end())); }
 
 // A chain of `n` coinbase-only blocks on a fresh database.
+// The block is extended before the tip is read: the operands of == are unsequenced, and GCC
+// reads the right-hand side first, which compared the new block with the old tip.
 void grow(PersistentChain& c, int n) {
-    for (int i = 0; i < n; ++i) ASSERT_TRUE(c.extend().getHash() == c.state().tip()->hash);
+    for (int i = 0; i < n; ++i) {
+        const Block b = c.extend();
+        ASSERT_TRUE(b.getHash() == c.state().tip()->hash);
+    }
 }
 
 } // namespace
@@ -152,6 +157,28 @@ TEST(Startup, ReorgAtomicAndResumedAfterRestart) {
     EXPECT_EQ(c.store().stats().count, 6u);                  // coinbases at heights 1,2 and 3..6 of the new branch
 }
 
+// Audit CON-4: an orderly shutdown after a fatal error writes nothing, so the next start runs the crash checks
+// (and connects the block whose commit failed).
+TEST(Startup, ShutdownAfterAFatalErrorIsNotClean) {
+    PersistentChain c;
+    ASSERT_TRUE(c.open().ok);
+    grow(c, 3);
+    c.store().failNextCommit = true;
+    const Block b = c.build(c.state().tip());
+    EXPECT_EQ(c.submit(b).result, ValidationResult::INTERNAL);
+    EXPECT_EQ(c.state().fatalExitCode(), EXIT_STORAGE_FAILURE);
+
+    c.close(true);   // the orderly path: ChainState::shutdown()
+    {
+        RawDb raw(c.dbPath());
+        EXPECT_EQ(raw.scalar("SELECT value FROM chain_state WHERE name = 'clean_shutdown'"), 0);
+    }
+    LoadResult r = c.open();
+    ASSERT_TRUE(r.ok) << r.error;
+    EXPECT_EQ(c.state().fatalExitCode(), 0);
+    EXPECT_EQ(c.state().tip()->hash, b.getHash());
+}
+
 // ST-1
 TEST(Startup, GenesisMismatch) {
     PersistentChain c;
@@ -170,8 +197,12 @@ TEST(Startup, GenesisMismatch) {
     EXPECT_EQ(r.exitCode, EXIT_PARAMS_MISMATCH);
     EXPECT_NE(r.error.find("genesis"), std::string::npos) << r.error;
 
-    // And a build without a configured genesis (mainnet today) cannot start at all.
-    ChainState mainState(chainParams(NetworkId::MAIN), *store, [] { return int64_t(2'000'000'000); });
+    // And a build without a configured genesis (mainnet before launch) cannot start at all. A copy with the
+    // genesis cleared keeps this tested after the launch commit (audit ML-5).
+    ChainParams unset = chainParams(NetworkId::MAIN);
+    unset.genesisHash = Hash256{};
+    unset.checkpoints = {Checkpoint{0, Hash256{}}};
+    ChainState mainState(unset, *store, [] { return int64_t(2'000'000'000); });
     r = mainState.load();
     EXPECT_FALSE(r.ok);
     EXPECT_EQ(r.exitCode, EXIT_PARAMS_MISMATCH);
@@ -286,6 +317,25 @@ TEST(Startup, MissingBodyIsCaughtBySelfCheck) {
     EXPECT_FALSE(r.ok);
     EXPECT_EQ(r.exitCode, EXIT_DATABASE_CORRUPT);
     EXPECT_NE(r.error.find("block_data"), std::string::npos) << r.error;
+}
+
+// Audit CON-3: a crash right after the block bytes were stored used to leave them without HAVE_DATA, and the next
+// start refused the database (exit 6) until a --reindex. The flag now commits with the bytes.
+TEST(Startup, CrashRightAfterStoringABlockRecovers) {
+    PersistentChain c;
+    ASSERT_TRUE(c.open().ok);
+    grow(c, 3);
+    const Block b = c.build(c.state().tip());
+    ASSERT_TRUE(c.state().ProcessNewBlockHeaders({b.header}).valid());
+    ASSERT_TRUE(c.store().putBlock(b.getHash(), b.serialize()));   // the process dies before its own status write
+    {
+        RawDb raw(c.dbPath());
+        EXPECT_EQ(raw.scalar("SELECT status & 6 FROM block_index WHERE height = 4"), 6);   // HAVE_DATA | DATA_CHECKED
+    }
+    c.close(false);
+    LoadResult r = c.open();
+    ASSERT_TRUE(r.ok) << r.error;
+    EXPECT_EQ(c.state().tip()->hash, b.getHash());   // and startup connects it
 }
 
 TEST(Startup, UncleanShutdownRunsHeavierChecks) {

@@ -41,7 +41,6 @@ struct BlockIndex {
     uint32_t    txCount = 0;           // 0 until block data is stored
     bool        haveChainData = false; // this block and all ancestors have data
     uint64_t    sequenceId = 0;        // order in which block data arrived
-    int64_t     firstSeen = 0;         // when this node first stored the header (not persisted)
 
     BlockIndex* getAncestor(uint32_t h);
     const BlockIndex* getAncestor(uint32_t h) const;

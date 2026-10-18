@@ -58,7 +58,9 @@ class ChainStore {
 public:
     virtual ~ChainStore() = default;
 
-    // Block bytes are write-once, keyed by block hash.
+    // Block bytes are write-once, keyed by block hash. Only blocks that passed
+    // stages C and D are stored, so the index row gets HAVE_DATA | DATA_CHECKED in
+    // the same transaction: a crash cannot leave bytes without the flag.
     virtual bool putBlock(const Hash256& hash, const std::vector<uint8_t>& bytes) = 0;
     virtual bool getBlock(const Hash256& hash, std::vector<uint8_t>& bytes) const = 0;
 

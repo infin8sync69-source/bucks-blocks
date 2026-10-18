@@ -1,7 +1,10 @@
 #ifndef BUCKS_MINER_H
 #define BUCKS_MINER_H
 
+#include <openssl/sha.h>
+
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -13,6 +16,7 @@
 #include "chainstate.h"
 #include "mempool.h"
 #include "script.h"
+#include "u256.h"
 
 namespace Bucks {
 
@@ -61,6 +65,26 @@ private:
     Clock clock_;
 };
 
+// SHA256d of an 84-byte block header for the proof-of-work search. The first
+// 64 bytes (version, height, previous hash, merkle root bytes 0..23) are hashed
+// once; each nonce hashes only the 20-byte tail and the second round. The
+// result equals BlockHeader::hash(). It uses OpenSSL's low-level SHA-256: the
+// one-shot EVP calls behind doubleSha256 cost four times as much per header
+// and barely scale across threads (audit ML-2).
+class HeaderHasher {
+public:
+    explicit HeaderHasher(const BlockHeader& header);
+    void setTimestamp(uint32_t timestamp);           // the timestamp is in the tail
+    Hash256 hash(uint32_t nonce) const;
+    // hash(nonce), read big-endian, <= target: Pow::checkProofOfWork with the
+    // target decoded once.
+    bool meetsTarget(uint32_t nonce, const U256& target) const;
+
+private:
+    SHA256_CTX mid_;
+    uint8_t tail_[20];
+};
+
 enum class MineResult : uint8_t {
     FOUND,     // a block was found and accepted by ProcessNewBlock
     STOPPED,   // stop was requested
@@ -74,7 +98,9 @@ public:
     Miner(ChainState& chain, BlockAssembler& assembler, Clock clock = {});
 
     // Section 10.2. Returns after one block is found (and submitted with
-    // ProcessNewBlock, requested = true) or on stop/failure.
+    // ProcessNewBlock, requested = true) or on stop/failure. With several
+    // threads each one searches its own coinbase extra nonce (thread index in
+    // the top 16 bits), so no two threads ever hash the same header.
     MineResult mineOne(const Script& minerScript, const AssemblerOptions& options,
                        const std::atomic<bool>& stop, std::string& err);
 
@@ -83,7 +109,12 @@ public:
     void setChainLock(std::mutex* lock) { lock_ = lock; }
     // Gives up (STOPPED) after this many seconds of hashing; 0 = no limit.
     void setTimeLimitSeconds(int64_t s) { timeLimit_ = s; }
+    // Hashing threads for the next mineOne; the calling thread is one of them.
+    void setThreads(unsigned n) { threads_ = n ? n : 1; }
     uint64_t hashes() const { return hashes_.load(); }
+    // Hashes per second over the last two seconds or more of hashing, all
+    // threads together; 0 until the first sample of a run (audit ML-3).
+    uint64_t hashRate() const { return rate_.load(); }
 
     // How often (in nonces) the loop looks at the tip and the clock; default 65,536.
     void setCheckInterval(uint64_t nonces) { checkInterval_ = nonces ? nonces : 1; }
@@ -98,6 +129,11 @@ public:
     const Hash256& lastBlockHash() const { return lastHash_; }
 
 private:
+    struct Round;
+    void search(BlockTemplate& t, unsigned index, const U256& target, int64_t began, int64_t started,
+                const std::atomic<bool>& stop, Round& round);
+    void sampleRate(bool restart);
+
     ChainState& chain_;
     BlockAssembler& assembler_;
     Clock clock_;
@@ -105,10 +141,15 @@ private:
     int64_t refreshSeconds_ = 60;
     uint64_t nonceSpace_ = 0x100000000ull;
     std::function<void()> batchHook_;
-    uint64_t rollovers_ = 0, templates_ = 0, staleRestarts_ = 0;
+    std::atomic<uint64_t> rollovers_{0}, templates_{0}, staleRestarts_{0};
     std::mutex* lock_ = nullptr;
     int64_t timeLimit_ = 0;
+    unsigned threads_ = 1;
     std::atomic<uint64_t> hashes_{0};
+    std::atomic<uint64_t> rate_{0};
+    // Rate window; written only by thread 0 of the running mineOne.
+    std::chrono::steady_clock::time_point rateAt_{};
+    uint64_t rateHashes_ = 0;
     Hash256 lastHash_{};
 };
 

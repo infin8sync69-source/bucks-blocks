@@ -17,7 +17,8 @@ using PrivateKey = std::array<uint8_t, 32>;
 using PublicKey = std::vector<uint8_t>; // compressed (33 bytes)
 
 // ---------------- Hashing ----------------
-// Throw std::runtime_error if OpenSSL fails (never return an unset hash).
+// sha256 and doubleSha256 throw std::runtime_error if OpenSSL fails (never
+// return an unset hash). ripemd160 is in-tree and cannot fail.
 
 Hash256 sha256(const std::vector<uint8_t>& data);
 Hash256 doubleSha256(const std::vector<uint8_t>& data);
@@ -130,6 +131,14 @@ bool verifyECDSA(
 // ---------------- Utilities ----------------
 
 bool hashLessThan(const Hash256& a, const Hash256& b);
+
+/**
+ * Startup self-test of the consensus primitives: SHA-256, RIPEMD-160 and
+ * hash160 against published vectors, one secp256k1 key derivation and a
+ * sign/verify round trip. False (err names the check) means this build or
+ * the OpenSSL it runs on cannot be trusted with the chain.
+ */
+bool cryptoSelfTest(std::string& err);
 
 } // namespace Bucks
 

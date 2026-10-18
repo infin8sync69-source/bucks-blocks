@@ -92,12 +92,12 @@ Wallet Wallet::createNew(std::string* mnemonicOut, const std::string& lang, size
     return w;
 }
 
-Wallet Wallet::fromMnemonic(const std::string& phrase, const std::string& passphrase) {
+Wallet Wallet::fromMnemonic(const std::string& phrase, const std::string& passphrase, const std::string& wantLang) {
     // CRY-11 / API-11: words and checksum are validated before anything is
     // derived, and the phrase itself is never part of an error message.
     std::vector<uint8_t> entropy;
     std::string lang;
-    MnemonicError err = mnemonicToEntropy(phrase, entropy, &lang);
+    MnemonicError err = mnemonicToEntropy(phrase, entropy, &lang, wantLang);
     if (err != MnemonicError::OK)
         throw std::runtime_error(std::string("Invalid mnemonic: ") + mnemonicErrorString(err));
 

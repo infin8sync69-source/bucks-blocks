@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Draft for owner review. Every decision below is final unless it is listed in §23 (Open questions). |
+| Status | Draft for owner review. Every decision below is final unless it is listed in §23 (Open questions). **Not implemented and not part of the first launch** (`docs/MAINNET_INPUTS.md`): BUCKS are not backed by or redeemable for gold. |
 | Date | 2026-10-08 |
 | Applies to | The relaunched chain (new genesis). No compatibility with the old `GOLD`/`REDM` markers, the old `chain_state` row `gold_reserve` or the old governance log. |
 | Related specs | `docs/design/consensus-validation.md` ("consensus spec"); `docs/design/storage-concurrency.md` ("storage spec", not yet written when this spec was finished: assumptions in §22); Phase 1 crypto (`src/crypto.cpp`, fail-closed, strict DER, low-S). |
@@ -16,7 +16,7 @@ All `file:line` references point to the current tree (2026-10-08). The gold code
 
 - The conventions of the consensus spec §0 apply: integers are little-endian (LE); `Hash256` is printed as hex in stored byte order; `TaggedHash(tag, x) = SHA256(SHA256(tag) ‖ SHA256(tag) ‖ x)`; `‖` is concatenation; MUST is a hard rule.
 - **mg** = milligram of gold. Every reserve amount is a `uint64` number of mg. 1 g = 1,000 mg. **1 mithqal = 4.25 g = 4,250 mg.**
-- **Committee** = the five vault keyholders. **Index** = key slot 0…4. `GOLD_STANDARD.md` numbers the keyholders 1…5; index = number − 1.
+- **Committee** = the five vault keyholders. **Index** = key slot 0…4. `GOLD_STANDARD.md` numbers the keyholders 1…5; index = number − 1. That file is now `docs/design/GOLD_STANDARD.md`, a proposal; `GOLD_STANDARD.md:line` references in this spec are to its 2026-10-08 copy in the repository root.
 - **Reject codes** are short ASCII strings used in logs, the API and tests.
 
 ---

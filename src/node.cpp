@@ -10,6 +10,7 @@
 #include "log.h"
 #include "mempool_file.h"
 #include "script.h"
+#include "validation_rules.h"
 
 namespace Bucks {
 
@@ -89,8 +90,15 @@ void Node::shutdown() {
     std::lock_guard<std::mutex> lock(mu_);
     if (shutDown_ || !state_) return;
     shutDown_ = true;
+    if (state_->fatalExitCode()) return;   // write nothing after a fatal error
     saveMempoolFile();
     state_->shutdown();
+}
+
+int Node::fatalError(std::string& why) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    why = state_->fatalError();
+    return state_->fatalExitCode();
 }
 
 // ---------------------------------------------------------------- chain reads
@@ -169,6 +177,13 @@ bool Node::knowsHeader(const Hash256& hash) const {
     return state_->find(hash) != nullptr;
 }
 
+std::optional<U256> Node::chainWorkOf(const Hash256& hash) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    const BlockIndex* e = state_->find(hash);
+    if (!e) return std::nullopt;
+    return e->chainWork;
+}
+
 std::vector<Hash256> Node::locator() const {
     std::lock_guard<std::mutex> lock(mu_);
     return state_->locator();
@@ -180,9 +195,14 @@ std::vector<BlockHeader> Node::headersAfter(const std::vector<Hash256>& loc, con
     return state_->headersAfter(loc, stop, max);
 }
 
-std::vector<Hash256> Node::missingBlocksOnBestHeaderChain(size_t max) const {
+std::vector<Hash256> Node::missingBlocksTowards(const Hash256& peerBest, size_t max) const {
     std::lock_guard<std::mutex> lock(mu_);
-    return state_->missingBlocks(max);
+    return state_->missingBlocks(peerBest, max);
+}
+
+void Node::noteBlockAvailable(const Hash256& hash, Hash256& peerBest) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (state_->hasMoreWork(hash, peerBest)) peerBest = hash;
 }
 
 uint64_t Node::circulatingSupply() const {
@@ -339,9 +359,17 @@ std::optional<Transaction> Node::mempoolTransaction(const Hash256& txid) const {
 
 // ---------------------------------------------------------------- mining
 
+Node::MiningInfo Node::miningInfo() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    MiningInfo info;
+    info.blockedReason = state_->miningBlockedReason();
+    info.bits = Rules::GetNextWorkRequired(state_->tip(), params_);
+    return info;
+}
+
 MineResult Node::mine(const Script& minerScript, const AssemblerOptions& options,
                       const std::atomic<bool>& stop, std::string& err, Hash256* found,
-                      int64_t timeLimitSeconds) {
+                      int64_t timeLimitSeconds, unsigned threads) {
     // The API's "mine one block" and the auto-miner share one Miner; serialize them, and give up if asked to stop
     // while waiting (audit CON-5).
     std::unique_lock<std::mutex> mineLock(mineMu_, std::defer_lock);
@@ -355,6 +383,7 @@ MineResult Node::mine(const Script& minerScript, const AssemblerOptions& options
         before = state_->tipSequence();
     }
     miner_->setTimeLimitSeconds(timeLimitSeconds);
+    miner_->setThreads(threads);
     const MineResult r = miner_->mineOne(minerScript, options, stop, err);
     if (r == MineResult::FOUND && found) *found = miner_->lastBlockHash();
     notifyTip(before);

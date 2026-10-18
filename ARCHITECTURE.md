@@ -1,7 +1,7 @@
 # Bucks Blockchain Architecture
 
 ## Overview
-Bucks is a production-grade blockchain implementation in C++ featuring core blockchain functionality: blocks, transactions, proof-of-work mining, cryptographic security, and a multi-threaded web server for network access.
+Bucks is a blockchain implementation in C++ featuring core blockchain functionality: blocks, transactions, proof-of-work mining, cryptographic security, and a multi-threaded web server for network access. It has not had an external audit and mainnet has not launched (see [docs/MAINNET_INPUTS.md](docs/MAINNET_INPUTS.md)).
 
 ## Core Components
 

@@ -1,0 +1,96 @@
+# /etc/systemd/system/bucks.service
+#
+# One Bucks node per host. The role (seed, miner or console) is chosen only by the flags in
+# /etc/bucks/bucks.env (see deploy/roles/*.env). Layout made by deploy/bootstrap-ubuntu.sh:
+#   /opt/bucks/releases/<commit>/   `cmake --install` prefix: bin/bucks, share/bucks/{web,wordlists}
+#   /opt/bucks/current              symlink to the running release (the previous one stays for rollback)
+#   /var/lib/bucks                  datadir (0700 bucks:bucks): <network>/chain.sqlite, <network>/wallets.json
+#   /etc/bucks/bucks.env            BUCKS_NETWORK, BUCKS_ARGS, BUCKS_PEERS
+#   /etc/bucks/api-token            0600 bucks:bucks; the node refuses a token file others can read
+#
+# Exit codes of bucks: 1 API, miner or word lists could not start, 2 bad option, 3 network or genesis
+# mismatch (also: mainnet genesis not configured in this build), 4 storage failure, 5 P2P port in use,
+# 6 database corrupt, 7 unsupported schema. 2, 3, 6 and 7 need a person, so they do not restart.
+
+[Unit]
+Description=Bucks full node
+After=network-online.target time-sync.target
+Wants=network-online.target
+# Give up after 5 failed starts in 10 minutes (then: journalctl -u bucks).
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=bucks
+Group=bucks
+EnvironmentFile=/etc/bucks/bucks.env
+# HOME points at the datadir so nothing can fall back to another ~/.bucks; --datadir is explicit anyway.
+Environment=HOME=/var/lib/bucks
+# --web-root and --wordlist-dir are explicit: the build tree under /usr/local/src would otherwise win
+# over the installed copy, and an upgrade that rebuilds there would change files under a running node.
+# $BUCKS_ARGS and $BUCKS_PEERS are split into words; ${BUCKS_NETWORK} stays one word.
+ExecStart=/opt/bucks/current/bin/bucks --network=${BUCKS_NETWORK} --datadir /var/lib/bucks \
+    --web-root /opt/bucks/current/share/bucks/web --wordlist-dir /opt/bucks/current/share/bucks/wordlists \
+    $BUCKS_ARGS $BUCKS_PEERS
+WorkingDirectory=/var/lib/bucks
+
+# SIGTERM stops miner, API, P2P and chain cleanly (about 2 s while mining on regtest).
+KillSignal=SIGTERM
+TimeoutStopSec=120
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2 3 6 7
+
+# The node creates 0700 directories and 0600 files itself; the umask covers anything else.
+UMask=0077
+StateDirectory=bucks
+StateDirectoryMode=0700
+
+# Resources: 32 API workers, up to 125 peers, the miner threads and SQLite.
+LimitNOFILE=8192
+# wallets.json and the process memory hold private keys: never write core dumps.
+LimitCORE=0
+TasksMax=1024
+MemoryMax=2G
+
+# Logs go to the journal, which adds timestamps and rotation; the node logs every P2P message,
+# so a misbehaving peer is rate limited here instead of filling the disk.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bucks
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=20000
+
+# Sandboxing
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/bucks
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+DevicePolicy=closed
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+# A call outside the filter fails with EPERM instead of killing the node.
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

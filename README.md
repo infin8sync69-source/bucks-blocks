@@ -1,271 +1,174 @@
-# Bucks Blockchain
+# Bucks
 
-A production-ready blockchain implementation in C++ with advanced security features.
+Bucks is a proof-of-work cryptocurrency node written in C++17: SHA256d proof of work on an 84-byte
+block header with a per-block difficulty adjustment (aserti3-2d, 2-day half-life), a SQLite chain store, a mempool, a CPU miner, encrypted peer-to-peer networking
+(ECDH + AES-256-GCM), HD wallets restored from 13- or 25-word phrases on 2048-word Arabic and English
+lists, a token-authenticated REST API and a web console that the node serves itself.
 
-## Features
+**Status**
 
-### Core Blockchain
-- ✅ Block structure with headers and transactions
-- ✅ SHA-256 cryptographic hashing
-- ✅ Proof of Work mining algorithm
-- ✅ Merkle tree for transaction verification
-- ✅ Transaction signing and verification (ECDSA secp256k1)
-- ✅ UTXO (Unspent Transaction Output) model
-- ✅ Comprehensive blockchain validation
-- ✅ Persistent block and UTXO storage (SQLite)
+- **Mainnet has not launched.** `bucks --network=main` refuses to start (exit code 3, "main genesis is
+  not configured in this build") until a release carries the mainnet genesis. Use the test network
+  (`--network=test`) or a private regtest chain until then. What is still open before launch is in
+  [docs/MAINNET_INPUTS.md](docs/MAINNET_INPUTS.md); the launch procedure is [docs/LAUNCH.md](docs/LAUNCH.md).
+- **No external audit yet.** The word lists are drafts until their review is finished; phrases made
+  now may not restore with the final lists.
+- **No gold backing.** BUCKS are not backed by or redeemable for gold. The gold-reserve module is a
+  design proposal ([docs/design/GOLD_STANDARD.md](docs/design/GOLD_STANDARD.md)) and is not part of
+  the first launch.
 
-### Security & Privacy
-- ✅ **BIP-8192 HD Wallets** - Hierarchical Deterministic wallet support
-- ✅ **P2P Encryption** - End-to-end encrypted peer communication (ECDH + AES-256-CBC)
-- ✅ DoS protection with misbehavior scoring
-- ✅ IP banning and connection throttling
-- ✅ Mempool safety limits (50K tx, 300MB max)
-- ✅ Consensus validation (coinbase maturity, block size limits)
+## Security model: run your own node
 
-### Network & API
-- ✅ **Web-based UI** for interactive blockchain management
-- ✅ HTTP REST API for programmatic access
-- ✅ Multi-threaded server architecture
-- ✅ P2P networking with encrypted handshake
-- ✅ Rate limiting and CORS support
+The web console is a **single-operator** tool. The node's one API token controls **every wallet on
+that node**, and `wallets.json` holds their private keys unencrypted. So:
 
-## Building
+- Each user runs their own node on their own computer and keeps their own recovery phrase.
+  Do not create wallets for other people on your node, and never give anyone your API token.
+- The recovery phrase is shown once, when the wallet is created. Write it down offline; the node
+  does not store it.
+- The API listens on 127.0.0.1. To use the console of a remote node, use an SSH tunnel
+  (`ssh -L 8080:127.0.0.1:8080 you@server`) or the TLS reverse proxy in [deploy/](deploy/README.md).
+  Never bind the API to a public address without TLS in front of it.
+- A mining server does not need a wallet: `--mine-address` pays the rewards to an address whose key
+  stays on your own computer.
 
-### Prerequisites
-- C++17 compatible compiler (GCC 7+, Clang 5+, MSVC 2017+)
-- CMake 3.10 or higher
-- OpenSSL 3.x development libraries
-- SQLite3
+## Build on Linux
 
-### Windows Build Instructions
-
-1. Ensure dependencies are available:
-   - MinGW-w64 (included in `tools/mingw64/`)
-   - OpenSSL (install to `C:\Program Files\OpenSSL-Win64`)
-   - CMake
-
-2. Build the project:
-   ```powershell
-   cmake -S . -B build -G "MinGW Makefiles"
-   cmake --build build
-   ```
-
-3. Run the node:
-   ```powershell
-   .\build\bucks.exe --server
-   ```
-
-### Linux/macOS Build Instructions
-
-1. Install dependencies:
-   ```bash
-   # Ubuntu/Debian
-   sudo apt-get install cmake libssl-dev build-essential sqlite3
-
-   # macOS
-   brew install cmake openssl sqlite
-   ```
-
-2. Build:
-   ```bash
-   mkdir build && cd build
-   cmake ..
-   make
-   ```
-
-3. Run:
-   ```bash
-   ./bucks --server
-   ```
-
-## Usage
-
-### Starting the Server
-
-Start the web server to access the full blockchain platform:
+Ubuntu 22.04 or 24.04 (other distributions need the same packages):
 
 ```bash
-./bucks --server
+sudo apt-get install -y build-essential cmake git libssl-dev ca-certificates python3
+git clone https://github.com/infin8sync69-source/bucks-blocks.git
+cd bucks-blocks
+git checkout <release tag>
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build -j"$(nproc)"
+ctest --test-dir build --output-on-failure
 ```
 
-Or specify a custom port:
+- Requirements: CMake 3.20 or newer (the build itself needs 3.14, but `ctest --test-dir` below needs 3.20 and
+  `cmake --install --prefix` 3.15; Ubuntu 22.04 and 24.04 ship 3.22 and 3.28), a C++17 compiler (GCC or Clang), OpenSSL 3.0 or newer.
+  SQLite is compiled in from `src/sqlite3.c`; the `sqlite3` package is not needed to build.
+  Python 3 runs the independent genesis check in `ctest`.
+- There is no release tag before launch, and GitHub's default branch does not hold the code yet
+  (an open item in [docs/MAINNET_INPUTS.md](docs/MAINNET_INPUTS.md)): check out the branch or tag the
+  project names.
+- Compiling `src/server.cpp` takes about 1.2 GB of memory. On a small server use `-j1`.
+- Configuring downloads googletest v1.14.0 from github.com for the tests. Without that access, build
+  only the node with `-DBUCKS_BUILD_TESTS=OFF`, or point
+  `-DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=<googletest checkout>` at a local copy.
+- Install: `sudo cmake --install build --prefix /opt/bucks` gives `/opt/bucks/bin/bucks`,
+  `/opt/bucks/bin/bucks-mine-genesis` and `/opt/bucks/share/bucks/{web,wordlists}`. An installed
+  binary finds the web UI and word lists there once its source tree is gone; `--web-root` and
+  `--wordlist-dir` always take precedence.
+- A binary is tied to the Ubuntu release it was built on (a 24.04 build does not run on 22.04).
+
+macOS: `brew install cmake openssl@3`, then the same `cmake` commands (CI builds and tests macOS).
+Windows builds with MinGW are not covered by CI; see the note on legacy scripts below.
+
+## Run a node
+
+| Network | Flag | P2P port | API / console | Addresses | Use |
+|---|---|---|---|---|---|
+| main | `--network=main` (the default) | 8733 | 8080 | `B...` | Refuses to start until the release with the mainnet genesis |
+| test | `--network=test` | 18733 | 18080 | `T...` | Public test network: coins have no value and the chain may be reset |
+| regtest | `--network=regtest` | 18744 | 18090 | `t...` | A private chain on your machine; blocks are found instantly |
+
+Start a test node with the web console:
 
 ```bash
-./bucks --server --port 8080
+build/bucks --network=test --server --seed <host>:18733
 ```
 
-Then open your browser and navigate to:
-```
-http://localhost:8080
-```
+Then open <http://127.0.0.1:18080> and sign in with the API token. At start the node prints where it
+wrote the token: `<datadir>/.cookie` on main, `<datadir>/<network>/.cookie` on the test networks
+(`cat ~/.bucks/test/.cookie`). A new token is written at every start unless you pass
+`--api-token-file <file>` (mode 0600).
 
-### Web UI Features
+- No seed nodes are compiled in yet (an open launch item). Pass `--seed host:port` or
+  `--connect host:port` for nodes you know. Other people reach your node on its P2P port: open
+  TCP 8733 (main) or 18733 (test) in your firewall. Never open the API port.
+- Data lives in `~/.bucks` unless you pass `--datadir`: `<datadir>/<network>/chain.sqlite` (the
+  chain) and `<datadir>/<network>/wallets.json` (private keys: keep it private and backed up). Delete
+  a chain only by removing `chain.sqlite*`, never the whole folder.
+- Mining: the Mining page of the console, or start with
+  `--auto-mine --mine-address <your address> --mine-threads <n>`. Mined coins can be spent after
+  100 more blocks.
+- After launch, a mainnet node is `build/bucks --server` (main is the default network).
+- Stop the node with Ctrl-C or SIGTERM; it shuts down cleanly. To run it as a service on a server,
+  with a firewall, TLS for the console, backups and health checks, use [deploy/](deploy/README.md).
 
-The web interface provides:
+### Options
 
-- **Dashboard**: View blockchain statistics, chain height, difficulty, and recent blocks
-- **Wallets**: Create HD wallets with BIP-8192 mnemonic phrases, view balances
-- **Transactions**: Create transactions between wallets, view transaction history
-- **Block Explorer**: Search and explore blocks by height or hash
-- **Mining**: Mine new blocks and earn block rewards
-- **Network**: View connected peers and P2P encryption status
+`bucks --help` is the reference. The main options:
 
-### Command Line Options
+| Option | Meaning |
+|---|---|
+| `--network <main\|test\|regtest>` | Network: magic bytes, ports, genesis, address prefix |
+| `--server` | Serve the REST API and the web console |
+| `--port <n>`, `--p2p-port <n>` | API and P2P ports (defaults in the table above) |
+| `--seed <host:port>`, `--connect <host:port>` | Peers to dial (repeatable); `--connect` keeps the connection |
+| `--datadir <dir>` | Data directory (default `~/.bucks`) |
+| `--web-root <dir>`, `--wordlist-dir <dir>` | Web console files and word lists, if not the bundled ones |
+| `--api-bind <addr>` | API address (default 127.0.0.1) |
+| `--api-token-file <file>` | Read the API token from a file (mode 0600); `$BUCKS_API_TOKEN` also works |
+| `--api-allowed-host <h>`, `--trust-proxy`, `--api-secure-cookie` | Behind a TLS reverse proxy on the same host ([deploy/](deploy/README.md)) |
+| `--auto-mine`, `--mine-address <addr>`, `--mine-threads <n>` | Mine from the start, pay to this address, use n threads |
+| `--checkblocks <n>`, `--checkdb[=full]`, `--reindex-chainstate`, `--reindex` | Start-up checks and repairs |
+
+Exit codes: 0 stopped cleanly, 1 API, miner or word lists could not start, 2 bad option, 3 wrong network
+or genesis for this build or data directory, 4 storage failure, 5 P2P port in use, 6 database corrupt,
+7 unsupported database version.
+
+### REST API
+
+Requests and responses are JSON. Read-only routes need no token: `GET /api/status`,
+`/api/auth/status`, `/api/blockchain/info`, `/api/blocks/recent`, `/api/blocks/height/<n>`,
+`/api/blocks/hash/<hash>`, `/api/economy/status`, `/api/mining/status`. Everything else needs the token in an `X-API-Token` (or
+`Authorization: Bearer`) header, for example `GET /api/wallets`, `POST /api/wallets/create`,
+`POST /api/wallets/restore`, `POST /api/transactions/send`, `POST /api/mining/start` and
+`/api/mining/stop`, `POST /api/node/approve-reorg`. `src/server.cpp` is the reference.
+
+## Tests
 
 ```bash
-./bucks [options]
-
-Options:
-  --server, -s     Start web server mode
-  --port, -p PORT  Set server port (default: 8080)
-  --help, -h       Show help message
+ctest --test-dir build --output-on-failure     # unit, integration, system, perf/security, word lists,
+                                               # build hygiene, install layout, deployment kit
+node --test web/test/*.mjs                     # web console
+tools/ci.sh build|asan|tsan|fuzz|soak          # the CI jobs, runnable locally
 ```
 
-## Project Structure
+`tools/soak.sh` runs three regtest nodes with mining, `kill -9` and restarts, and requires them to
+converge (`BASE_API`/`BASE_P2P` choose the ports).
 
-```
-Blockchain/
-├── src/              # Source code
-│   ├── crypto.cpp    # Cryptographic primitives
-│   ├── block.cpp     # Block structure
-│   ├── blockchain.cpp # Blockchain management
-│   ├── wallet.cpp    # Wallet functionality
-│   ├── hd_8192.cpp   # HD wallet implementation
-│   ├── network.cpp   # P2P networking
-│   ├── protocol_enc.cpp # P2P encryption
-│   └── server.cpp    # HTTP server
-├── include/          # Header files
-├── web/              # Web UI files
-├── tests/            # Test suites
-├── wordlists/        # BIP-8192 wordlist
-└── CMakeLists.txt    # Build configuration
-```
+## Repository layout
 
-## Key Components
+| Path | Contents |
+|---|---|
+| `src/`, `include/` | The node (`src/main.cpp`), consensus, chain store, P2P, wallet, API |
+| `web/` | The web console |
+| `wordlists/` | Mnemonic word lists and their manifest (with SHA-256 pins) |
+| `tests/` | gtest suites, fuzz targets, build and deployment checks |
+| `tools/` | Genesis miner and verifier, word-list tools, CI and soak scripts |
+| `deploy/` | systemd unit, server roles, nginx, backup and health check, bootstrap script |
+| `docs/` | Launch inputs and runbook, audit scope, design specifications |
 
-### Block
-- Contains transactions with Merkle root
-- Links to previous block via hash
-- Includes proof-of-work (nonce)
-- Validated for consensus rules
+### Legacy scripts in the repository root
 
-### Transaction
-- Inputs reference previous UTXOs
-- Outputs specify amounts and recipients
-- Cryptographically signed with ECDSA
-- Validated before inclusion in blocks
+These are kept for reference and are not part of the supported build or deployment:
 
-### Mining
-- Proof of Work consensus algorithm
-- Dynamic difficulty adjustment (every 2016 blocks)
-- Block reward system (50 BUCKS, halving every 210K blocks)
-- Transaction fee support
-
-### HD Wallets (BIP-8192)
-- 64-byte seed generation from mnemonic phrases
-- Master extended key derivation
-- Child key derivation (CKDpriv) using HMAC-SHA512
-- Path-based derivation (e.g., `m/0/1/2`)
-- Hardened and non-hardened derivation support
-
-### P2P Network
-- Encrypted peer-to-peer communication
-- ECDH key exchange for session keys
-- AES-256-CBC payload encryption
-- `ENCINIT` handshake protocol
-- Block and transaction propagation
-- DoS protection with misbehavior scoring
-
-## Security Features
-
-### Cryptographic Security
-- ECDSA cryptographic signatures (secp256k1)
-- SHA-256 hashing for blocks and transactions
-- RIPEMD-160 for address generation
-- Base58Check encoding
-
-### Network Security
-- P2P message encryption (ECDH + AES-256-CBC)
-- Misbehavior scoring and IP banning
-- Connection limits (125 max peers, 8 per IP)
-- Rate limiting on API endpoints
-
-### Consensus Security
-- UTXO double-spend prevention
-- Coinbase maturity (100 blocks)
-- Maximum block size (1MB)
-- SigOp limit tracking
-- Difficulty retargeting
-
-### Mempool Safety
-- Transaction count cap (50,000)
-- Aggregate byte-size cap (300MB)
-- Conflict detection (first-seen rule)
-- Transaction standardness checks
-
-## API Documentation
-
-The blockchain exposes a REST API:
-
-- `GET /api/blockchain/info` - Get blockchain information
-- `GET /api/blocks/recent` - Get recent blocks
-- `GET /api/blocks/height/:height` - Get block by height
-- `POST /api/wallets/create` - Create new HD wallet
-- `POST /api/transactions/create` - Create transaction
-- `POST /api/mining/mine` - Mine new block
-- `GET /api/network/peers` - Get connected peers
-
-## Testing
-
-The project includes a comprehensive 4-phase test suite:
-
-1.  **Unit Tests**: Verify individual components (Crypto, Block, Transaction, HD-8192, etc.).
-2.  **Integration Tests**: Verify interactions (Wallet persistence, Server network startup).
-3.  **System Tests**: verification of full node startup and mining simulation.
-4.  **Performance & Security**: Benchmarks (SHA-256) and Fuzzing (Protocol decoding).
-
-### Running Tests
-
-Ensure you have CMake installed and are using the MinGW environment.
-
-**Run All Tests:**
-```powershell
-powershell -ExecutionPolicy Bypass -File ./run_tests.ps1
-```
-
-**Run Performance Benchmarks:**
-```powershell
-powershell -ExecutionPolicy Bypass -File ./run_perf.ps1
-```
-
-**Run System Tests:**
-```powershell
-powershell -ExecutionPolicy Bypass -File ./run_system.ps1
-```
-
-## Performance
-
-- Multi-threaded server architecture
-- Efficient UTXO database (SQLite with indexing)
-- Optimized cryptographic operations (OpenSSL)
-- Configurable worker threads
-- Block and UTXO caching
-
-## Production Hardening
-
-Bucks has undergone extensive security testing:
-
-- ✅ DoS attack resistance (message limits, connection throttling)
-- ✅ Mempool bloat protection
-- ✅ Sybil attack mitigation
-- ✅ Consensus theft prevention
-- ✅ Reorg handling (UTXO rollback)
-- ✅ P2P encryption verification
+- `run_pilot.sh`: an old three-node local pilot. It kills **every** process whose command line
+  contains `build/bucks`, so never run it on a server that runs a real node.
+- `mining_node.ps1`, `setup_mining_node.ps1`, `run.ps1`, `run_tests.ps1`, `run_perf.ps1`,
+  `run_system.ps1`: Windows only (PowerShell; they expect a MinGW toolchain at a hard-coded path
+  on the original author's machine, and `tools/mingw64` holds only three runtime DLLs); they start the default
+  network and read a `wallets.json` from the repository root.
+- `fix_app.js`, `concat_app.js`, `update_main.js`, `check-frontend.js`, `test-prop.js`,
+  `test_ws.cpp`: one-off development scripts for the earlier `frontend/` UI; the node serves `web/`.
+- `build.sh` builds without CMake; CMake is the supported build (ctest checks that the two agree).
 
 ## License
 
-Copyright © 2026 Bucks Blockchain. All rights reserved.
-
-## Support
-
-For issues, questions, or contributions, please contact the development team.
+Copyright © 2026 Bucks Blockchain. All rights reserved. Which licence the released code carries is
+an open decision ([docs/MAINNET_INPUTS.md](docs/MAINNET_INPUTS.md)). Third-party components and their
+licences: [THIRD_PARTY.md](THIRD_PARTY.md).

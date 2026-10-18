@@ -1,30 +1,36 @@
-import { h, icon, card, copyButton, pageHead, skeletonRows, errorState, emptyState, notice } from "../ui.js";
+import { h, icon, card, copyButton, pageHead, skeletonRows, errorState, emptyState, notice, field } from "../ui.js";
 import { get, ApiError } from "../api.js";
-import { fmtBucks, fmtInt, timeAgo, fmtDate, shortHash, COINBASE_MATURITY } from "../util.js";
-import { state } from "../store.js";
+import { fmtBucks, fmtInt, timeAgo, fmtDate, shortHash, shortAddr, describeActivity } from "../util.js";
+import { state, selectWallet, selectedWallet } from "../store.js";
 
 export function mount(root) {
+  const pick = h("div");
   const mineBody = h("div");
   const netBody = h("div");
   const refreshBtn = h("button", { type: "button", class: "btn", onclick: () => load(true) }, icon("refresh", { size: 16 }), "Refresh");
   root.append(h("div", { class: "stack" },
-    pageHead("History", "Coins your wallet received and recent activity on the chain.", refreshBtn),
-    card("Received coins", mineBody),
+    pageHead("History", "Payments your wallet sent and received, and recent activity on the chain.", refreshBtn),
+    pick,
+    card("Your activity", mineBody),
     card("Recent network transactions", netBody)));
 
   let mine = { loading: true }; // { loading, error, data, address }
   let net = { loading: true };
-  let lastTip = null;
+  let seen = ""; // tip, mempool size and wallet the lists were loaded for
   let gone = false;
   let seq = 0;
 
   async function load(manual) {
     const my = ++seq;
+    const w = selectedWallet();
     if (manual) { mine = { ...mine, loading: true }; net = { ...net, loading: true }; paint(); }
-    const [a, b] = await Promise.allSettled([get("/api/wallets/primary"), get("/api/transactions?limit=25")]);
+    const [a, b] = await Promise.allSettled([
+      w ? get(`/api/wallets/${encodeURIComponent(w.address)}/history?limit=100`) : Promise.resolve(null),
+      get("/api/transactions?limit=25"),
+    ]);
     if (gone || my !== seq) return;
-    if (a.status === "fulfilled") mine = { data: a.value };
-    else mine = { error: a.reason, none: a.reason instanceof ApiError && a.reason.status === 404 };
+    if (a.status === "fulfilled") mine = { data: a.value, none: !w };
+    else mine = { error: a.reason };
     if (b.status === "fulfilled") net = { data: (b.value.transactions || []).slice().reverse() };
     else net = { error: b.reason };
     paint();
@@ -35,30 +41,47 @@ export function mount(root) {
     paintNet();
   }
 
+  // History follows the wallet selected on the Wallet page; with several wallets it can be switched here.
+  let pickSig = "";
+  function paintPick() {
+    const list = state.wallets || [];
+    const cur = selectedWallet();
+    const sig = JSON.stringify([list.map((w) => [w.address, w.balance]), cur && cur.address]);
+    if (sig === pickSig) return;
+    pickSig = sig;
+    if (list.length < 2) return void pick.replaceChildren();
+    const sel = h("select", { id: "h-wallet", onchange: (e) => selectWallet(e.target.value) },
+      list.map((w) => h("option", { value: w.address, selected: cur && cur.address === w.address }, `${shortAddr(w.address)}  ·  ${fmtBucks(w.balance, { trim: true })} BUCKS`)));
+    pick.replaceChildren(h("div", { class: "card" }, field({ id: "h-wallet", label: "Wallet", input: sel })));
+  }
+
   function paintMine() {
     if (mine.loading && !mine.data) return void mineBody.replaceChildren(skeletonRows(3));
-    if (mine.none) return void mineBody.replaceChildren(emptyState("No wallet yet", "Create or restore a wallet to see the coins it has received.", h("a", { class: "btn primary", href: "#/wallet" }, "Open wallet")));
-    if (mine.error) return void mineBody.replaceChildren(errorState(errMsg(mine.error), () => load(true), "Could not load your coins"));
+    if (mine.none || (state.wallets && !state.wallets.length)) return void mineBody.replaceChildren(emptyState("No wallet yet", "Create or restore a wallet to see what it sends and receives.", h("a", { class: "btn primary", href: "#/wallet" }, "Open wallet")));
+    if (mine.error) return void mineBody.replaceChildren(errorState(errMsg(mine.error), () => load(true), "Could not load your activity"));
     const d = mine.data;
-    const tip = state.info ? state.info.height : null;
-    const txs = (d.transactions || []).slice().sort((a, b) => b.blockHeight - a.blockHeight);
+    const rows = (d.activity || []).map((t) => describeActivity(t));
     mineBody.replaceChildren(h("div", { class: "stack" },
-      h("div", { class: "sub" }, "Wallet ", h("span", { class: "mono wrap" }, d.address), (state.wallets && state.wallets.length > 1) ? " (the primary wallet; other wallets are not listed)" : ""),
-      txs.length
-        ? h("div", { class: "list" }, txs.map((t) => {
-            const conf = tip !== null && t.blockHeight != null ? tip - t.blockHeight + 1 : null;
-            const reward = t.type === "mining_reward";
-            const maturing = reward && conf !== null && conf < COINBASE_MATURITY;
+      h("div", { class: "sub" }, "Wallet ", h("span", { class: "mono wrap" }, d.address), ` · spendable now ${fmtBucks(d.spendable, { trim: true })} BUCKS`),
+      rows.length
+        ? h("div", { class: "list" }, rows.map((r, i) => {
+            const t = d.activity[i];
             return h("div", { class: "list-row tx-row" },
               h("div", { style: "min-width:0" },
-                h("div", null, h("strong", null, reward ? "Mining reward" : "Received"), " ", h("span", { class: `pill ${maturing ? "warn" : "ok"}` }, maturing ? `Matures in ${COINBASE_MATURITY - conf} blocks` : conf === null ? "" : "Spendable")),
-                h("div", { class: "sub" }, h("span", { class: "mono", title: t.hash }, shortHash(t.hash, 12, 8)), " · block ", h("a", { href: `#/blocks/${t.blockHeight}` }, `#${fmtInt(t.blockHeight)}`), conf !== null ? ` · ${fmtInt(conf)} confirmations` : "")),
-              h("div", { class: "num" }, h("strong", null, `+${fmtBucks(t.amount, { trim: true })}`), h("div", { class: "sub" }, "BUCKS")),
-              copyButton(t.hash, "Copy", { what: "transaction id", compact: true }));
+                h("div", null, h("strong", null, r.label), " ", h("span", { class: `pill ${r.tone}` }, r.status)),
+                h("div", { class: "sub" },
+                  h("span", { class: "mono", title: t.txid }, shortHash(t.txid, 12, 8)),
+                  t.height != null && [" · block ", h("a", { href: `#/blocks/${t.height}` }, `#${fmtInt(t.height)}`)],
+                  t.time ? [" · ", h("span", { title: fmtDate(t.time) }, timeAgo(t.time))] : null),
+                t.to && h("div", { class: "sub" }, "To ", h("span", { class: "mono wrap" }, t.to)),
+                t.fee != null && h("div", { class: "sub" }, `Network fee ${fmtBucks(t.fee, { trim: true })} BUCKS`)),
+              h("div", { class: "num" }, h("strong", null, `${r.sign}${fmtBucks(t.amount, { trim: true })}`), h("div", { class: "sub" }, "BUCKS")),
+              copyButton(t.txid, "Copy", { what: "transaction id", compact: true }));
           }))
-        : emptyState("Nothing received yet", "Coins sent to this wallet, and mining rewards, will appear here."),
-      notice("info", `This list shows ${txs.length < Number(d.utxoCount) ? `${txs.length} of the ${fmtInt(d.utxoCount)} coins` : "the coins"} your wallet currently holds, as returned by the node. Payments you sent, and coins you have already spent, are not listed because the node does not offer a per-wallet transaction history yet.`),
-      state.info && state.info.mempoolSize > 0 && h("div", { class: "sub" }, `${fmtInt(state.info.mempoolSize)} transaction${state.info.mempoolSize === 1 ? "" : "s"} waiting in the node's mempool (not wallet-specific).`)));
+        : emptyState("Nothing yet", "Payments to and from this wallet, and its mining rewards, will appear here."),
+      notice("info", d.complete
+        ? "This is all of this wallet's activity since the first block."
+        : `Shown: activity in the newest ${fmtInt(d.scannedBlocks)} blocks (#${fmtInt(d.scannedFrom)} to #${fmtInt(d.tipHeight)})${rows.length >= 100 ? ", newest 100 entries" : ""}. The node keeps no address index yet, so older activity is not listed; the balance counts all of it.`)));
   }
 
   function paintNet() {
@@ -75,13 +98,13 @@ export function mount(root) {
 
   const errMsg = (e) => (e instanceof ApiError && e.offline ? "Cannot reach the node." : e.message);
 
-  load(false);
   return {
     update(s) {
-      const tip = s.info && s.info.tipHash;
-      if (lastTip !== null && tip && tip !== lastTip) load(false);
-      else if (lastTip === null || !mine.data) paintMine();
-      lastTip = tip || lastTip;
+      // Reload when a block arrives, the mempool changes or another wallet is selected.
+      const w = selectedWallet();
+      const key = JSON.stringify([s.info && s.info.tipHash, s.info && s.info.mempoolSize, w && w.address, !!s.wallets]);
+      if (key !== seen && s.wallets) { seen = key; load(false); }
+      paintPick();
     },
     destroy() { gone = true; },
   };

@@ -10,6 +10,7 @@
 #include "wallet.h"
 #include "crypto.h"
 #include "bip_8192.h"
+#include "version.h"
 #include "httplib.h"
 #include <nlohmann/json.hpp>
 #include <filesystem>
@@ -21,6 +22,10 @@
 #include <chrono>
 
 #ifndef _WIN32
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -358,7 +363,7 @@ TEST_F(ServerAuthTest, CookieFileIsWrittenWhenNoTokenConfigured) {
     Bucks::Server server(*chain, nullptr, cfg);
     ASSERT_TRUE(server.start());
     ASSERT_FALSE(server.cookieFile().empty());
-    EXPECT_EQ(server.cookieFile(), cfg.dataDir + "/.cookie");
+    EXPECT_EQ(server.cookieFile(), cfg.dataDir + "/regtest/.cookie");   // per network (audit NEW-5)
     ASSERT_TRUE(fs::exists(server.cookieFile()));
 #ifndef _WIN32
     EXPECT_EQ(fileMode(server.cookieFile()), 0600u);
@@ -915,5 +920,503 @@ TEST_F(ServerAuthTest, ApproveReorgRefusesAnUnknownTip) {
     auto r = cli.Post("/api/node/approve-reorg", tokenHeader, "{\"tipHash\":\"" + std::string(64, 'a') + "\"}", "application/json");
     ASSERT_TRUE(r);
     EXPECT_EQ(r->status, 409) << r->body;
+    server.stop();
+}
+
+// ---------------------------------------------------------------------------
+// Word lists on the wallet routes (WAL-3, WAL-13, gate WORDLIST-1 and WORDLIST-2)
+// ---------------------------------------------------------------------------
+
+// The advertised default is what create uses, and every new wallet records the list and its hash.
+TEST_F(ServerAuthTest, CreateRecordsTheWordlistAndDefaultMatchesLanguages) {
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+
+    auto r = cli.Get("/api/wallets/languages", tokenHeader);
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    json langs = json::parse(r->body);
+    const std::string def = langs["default"];
+    std::string defSha;
+    for (const auto& l : langs["languages"])
+        if (l["lang"] == def) defSha = l["sha256"];
+    ASSERT_EQ(defSha.size(), 64u) << r->body;
+
+    json made = createWallet(cli);
+    EXPECT_EQ(made["language"], def);
+    EXPECT_EQ(made["wordlistSha256"], defSha);
+    EXPECT_FALSE(made["wordlistStatus"].get<std::string>().empty());
+    if (made["wordlistStatus"] != "release") EXPECT_TRUE(made.contains("wordlistWarning"));
+
+    json doc = json::parse(readFile(server.walletFile()));
+    ASSERT_EQ(doc["wallets"].size(), 1u);
+    EXPECT_EQ(doc["wallets"][0]["wordlist"], def);
+    EXPECT_EQ(doc["wallets"][0]["wordlistSha256"], defSha);
+    EXPECT_EQ(doc["wallets"][0]["address"], made["wallet"]["address"]);
+
+    // Unknown or malformed languages are the caller's error, not the node's.
+    r = cli.Post("/api/wallets/create", tokenHeader, R"({"language":"zz"})", "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400) << r->body;
+    r = cli.Post("/api/wallets/create", tokenHeader, R"({"language":5})", "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400) << r->body;
+
+    // Restore takes an optional language: the right one restores, another list refuses the words.
+    const std::string phrase = made["mnemonic"];
+    r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", phrase}, {"language", def}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    EXPECT_TRUE(json::parse(r->body)["existing"].get<bool>());
+    r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", phrase}, {"language", "en-draft"}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400) << r->body;
+    r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", phrase}, {"language", "zz"}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400) << r->body;
+
+    // A restored wallet records the list its phrase was read with.
+    std::string english;
+    Bucks::Wallet::createNew(&english, "en-draft");
+    r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", english}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    EXPECT_EQ(json::parse(r->body)["detectedLanguage"], "en-draft");
+    doc = json::parse(readFile(server.walletFile()));
+    ASSERT_EQ(doc["wallets"].size(), 2u);
+    EXPECT_EQ(doc["wallets"][1]["wordlist"], "en-draft");
+    EXPECT_EQ(doc["wallets"][1]["wordlistSha256"], Bucks::findWordlist("en-draft")->sha256);
+    server.stop();
+}
+
+// WAL-3: the main network never offers or accepts the development placeholder list.
+TEST_F(ServerAuthTest, MainNetworkNeverOffersPlaceholderLists) {
+    Bucks::ChainParams mainLike = Bucks::chainParams(Bucks::NetworkId::REGTEST);
+    mainLike.id = Bucks::NetworkId::MAIN;   // the wallet routes only look at the network id
+    mainLike.name = "main";
+    std::string chainError;
+    int chainCode = 0;
+    auto mainChain = Bucks::Node::open(dir + "/mainchain", mainLike, {}, chainError, chainCode);
+    ASSERT_TRUE(mainChain) << chainError;
+    cfg.dataDir = dir + "/maindata";
+    Bucks::Server server(*mainChain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+
+    auto r = cli.Get("/api/wallets/languages", tokenHeader);
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    json langs = json::parse(r->body);
+    ASSERT_FALSE(langs["languages"].empty());
+    for (const auto& l : langs["languages"]) {
+        EXPECT_NE(l["status"], "dev") << l.dump();
+        EXPECT_NE(l["status"], "test") << l.dump();
+    }
+    EXPECT_NE(langs["default"], "ar-dev");
+
+    json made = createWallet(cli);
+    EXPECT_EQ(made["language"], langs["default"]);
+    r = cli.Post("/api/wallets/create", tokenHeader, R"({"language":"ar-dev"})", "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400) << r->body;
+
+    std::string devPhrase;
+    Bucks::Wallet::createNew(&devPhrase, "ar-dev");
+    r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", devPhrase}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400) << r->body;
+    r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", devPhrase}, {"language", "ar-dev"}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400) << r->body;
+    EXPECT_EQ(server.getWallets().size(), 1u);
+    server.stop();
+
+    // Off the main network the placeholder still restores (pilot users have such phrases).
+    Bucks::Server test(*chain, nullptr, cfg);
+    ASSERT_TRUE(test.start(0));
+    httplib::Client tcli("127.0.0.1", test.port());
+    r = tcli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", devPhrase}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 200) << r->body;
+    test.stop();
+}
+
+// WAL-13: a passphrase that gives an empty wallet is reported before anything is saved.
+TEST_F(ServerAuthTest, RestoreWithPassphraseOfAnUnusedWalletAsksFirst) {
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+    cli.set_read_timeout(120, 0);
+
+    const std::string phrase = createWallet(cli)["mnemonic"];
+    auto restore = [&](const json& body) {
+        return cli.Post("/api/wallets/restore", tokenHeader, body.dump(), "application/json");
+    };
+
+    auto r = restore({{"mnemonic", phrase}, {"passphrase", "x"}});
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 409) << r->body;
+    json ask = json::parse(r->body);
+    EXPECT_TRUE(ask["confirmRequired"].get<bool>());
+    EXPECT_EQ(ask["reason"], "unusedWithPassphrase");
+    const std::string otherAddress = ask["wallet"]["address"];
+    EXPECT_FALSE(otherAddress.empty());
+    EXPECT_EQ(server.getWallets().size(), 1u) << "saved without the user's confirmation";
+
+    r = restore({{"mnemonic", phrase}, {"passphrase", "x"}, {"confirmUnused", "yes"}});
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 400);
+    r = restore({{"mnemonic", phrase}, {"passphrase", "x"}, {"confirmUnused", true}});
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    EXPECT_EQ(json::parse(r->body)["wallet"]["address"], otherAddress);
+    ASSERT_EQ(server.getWallets().size(), 2u);
+
+    // Once that wallet holds coins, the same restore elsewhere needs no confirmation.
+    r = cli.Post("/api/mining/mine", tokenHeader, R"({"minerWalletIndex":1})", "application/json");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    server.stop();
+
+    cfg.dataDir = dir + "/data2";
+    Bucks::Server second(*chain, nullptr, cfg);
+    ASSERT_TRUE(second.start(0));
+    httplib::Client cli2("127.0.0.1", second.port());
+    r = cli2.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", phrase}, {"passphrase", "x"}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    EXPECT_EQ(json::parse(r->body)["wallet"]["address"], otherAddress);
+    second.stop();
+}
+
+// ---------------------------------------------------------------------------
+// TLS behind a proxy, CSRF origins, forwarded headers (WAL-12, NEW-3, OPS-09, OPS-10)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::string loginCookie(httplib::Client& cli, const std::string& token, const httplib::Headers& extra = {}) {
+    auto r = cli.Post("/api/auth/login", extra, json{{"token", token}}.dump(), "application/json");
+    EXPECT_TRUE(r && r->status == 200);
+    return r ? r->get_header_value("Set-Cookie") : std::string();
+}
+
+bool isSecureCookie(const std::string& setCookie) {
+    return setCookie.find("; Secure") != std::string::npos;
+}
+
+#ifndef _WIN32
+// An IPv4 address of this machine that is not loopback, "" if there is none.
+std::string nonLoopbackIpv4() {
+    ifaddrs* list = nullptr;
+    if (::getifaddrs(&list) != 0) return "";
+    std::string found;
+    for (ifaddrs* i = list; i && found.empty(); i = i->ifa_next) {
+        if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET || (i->ifa_flags & IFF_LOOPBACK) || !(i->ifa_flags & IFF_UP))
+            continue;
+        char buf[INET_ADDRSTRLEN] = {};
+        if (::inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in*>(i->ifa_addr)->sin_addr, buf, sizeof(buf))) found = buf;
+    }
+    ::freeifaddrs(list);
+    return found;
+}
+#endif
+
+} // namespace
+
+TEST_F(ServerAuthTest, SessionCookieIsSecureWhenTheBrowserUsesTls) {
+    {
+        Bucks::Server server(*chain, nullptr, cfg);
+        ASSERT_TRUE(server.start(0));
+        httplib::Client cli("127.0.0.1", server.port());
+        const std::string plain = loginCookie(cli, token);
+        EXPECT_FALSE(isSecureCookie(plain)) << plain;   // http://localhost keeps working
+        EXPECT_NE(plain.find("HttpOnly"), std::string::npos);
+        EXPECT_NE(plain.find("SameSite=Strict"), std::string::npos);
+        // Without --trust-proxy a forwarded scheme is not believed ...
+        EXPECT_FALSE(isSecureCookie(loginCookie(cli, token, {{"X-Forwarded-Proto", "https"}})));
+        // ... but a login page served over https is reason enough.
+        EXPECT_TRUE(isSecureCookie(loginCookie(cli, token, {{"Origin", "https://127.0.0.1"}})));
+        server.stop();
+    }
+    {
+        cfg.trustProxy = true;
+        Bucks::Server server(*chain, nullptr, cfg);
+        ASSERT_TRUE(server.start(0));
+        httplib::Client cli("127.0.0.1", server.port());
+        const std::string viaTls = loginCookie(cli, token, {{"X-Forwarded-Proto", "https"}});
+        EXPECT_TRUE(isSecureCookie(viaTls)) << viaTls;
+        EXPECT_NE(viaTls.find("HttpOnly"), std::string::npos);
+        EXPECT_NE(viaTls.find("SameSite=Strict"), std::string::npos);
+        EXPECT_FALSE(isSecureCookie(loginCookie(cli, token, {{"X-Forwarded-Proto", "http"}})));
+        auto r = cli.Post("/api/auth/logout", {{"X-API-Token", token}, {"X-Forwarded-Proto", "https"}}, "", "application/json");
+        ASSERT_TRUE(r);
+        EXPECT_TRUE(isSecureCookie(r->get_header_value("Set-Cookie")));
+        server.stop();
+    }
+    {
+        cfg.trustProxy = false;
+        cfg.secureCookie = true;   // --api-secure-cookie
+        Bucks::Server server(*chain, nullptr, cfg);
+        ASSERT_TRUE(server.start(0));
+        httplib::Client cli("127.0.0.1", server.port());
+        EXPECT_TRUE(isSecureCookie(loginCookie(cli, token)));
+        server.stop();
+    }
+}
+
+TEST_F(ServerAuthTest, CsrfOriginMustBeTheRequestsOwnOrigin) {
+    cfg.allowedHosts = {"bucks.example.com"};
+    cfg.corsOrigins = {"https://bucks.example.com:8443"};
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+    const std::string cookie = cookiePair(loginCookie(cli, token));
+    auto post = [&](const std::string& host, const std::string& origin) {
+        auto r = cli.Post("/api/mining/stop", {{"Cookie", cookie}, {"X-Bucks-CSRF", "1"}, {"Host", host}, {"Origin", origin}},
+                          "", "application/json");
+        return r ? r->status : 0;
+    };
+    const std::string local = "127.0.0.1:" + std::to_string(server.port());
+    EXPECT_EQ(post("bucks.example.com", "https://bucks.example.com"), 200);
+    EXPECT_EQ(post("bucks.example.com", "https://bucks.example.com:443"), 200);      // the default port
+    EXPECT_EQ(post("bucks.example.com:4444", "https://bucks.example.com:4444"), 200); // a proxy that keeps the port
+    EXPECT_EQ(post(local, "http://" + local), 200);
+    EXPECT_EQ(post("bucks.example.com", "https://bucks.example.com:4444"), 403);     // another port is another origin
+    EXPECT_EQ(post(local, "http://localhost:" + std::to_string(server.port())), 403);
+    EXPECT_EQ(post("bucks.example.com", "https://evil.example.com"), 403);
+    EXPECT_EQ(post("bucks.example.com", "https://bucks.example.com:8443"), 200);     // listed with --api-cors-origin
+    // Nothing says the browser uses TLS here, so a plain http page of the same host still passes ...
+    EXPECT_EQ(post("bucks.example.com", "http://bucks.example.com"), 200);
+    server.stop();
+
+    // ... but once the node knows the console is served over TLS, only https origins do.
+    cfg.secureCookie = true;
+    Bucks::Server tls(*chain, nullptr, cfg);
+    ASSERT_TRUE(tls.start(0));
+    httplib::Client tcli("127.0.0.1", tls.port());
+    const std::string tlsCookie = cookiePair(loginCookie(tcli, token));
+    auto tpost = [&](const std::string& origin) {
+        auto r = tcli.Post("/api/mining/stop",
+                           {{"Cookie", tlsCookie}, {"X-Bucks-CSRF", "1"}, {"Host", "bucks.example.com"}, {"Origin", origin}},
+                           "", "application/json");
+        return r ? r->status : 0;
+    };
+    EXPECT_EQ(tpost("http://bucks.example.com"), 403);
+    EXPECT_EQ(tpost("https://bucks.example.com"), 200);
+    tls.stop();
+}
+
+TEST_F(ServerAuthTest, ForwardedForIsBelievedFromALoopbackProxy) {
+    cfg.trustProxy = true;
+    cfg.rateLimitRequests = 2;
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+    auto get = [&](const std::string& xff) {
+        auto r = cli.Get("/api/status", {{"X-Forwarded-For", xff}});
+        return r ? r->status : 0;
+    };
+    EXPECT_EQ(get("10.0.0.1"), 200);
+    EXPECT_EQ(get("10.0.0.1"), 200);
+    EXPECT_EQ(get("10.0.0.1"), 429);
+    EXPECT_EQ(get("10.0.0.2"), 200);   // the proxy's clients get their own buckets
+    server.stop();
+}
+
+#ifndef _WIN32
+// OPS-09: with --trust-proxy, a client that reaches the port directly can neither rotate its rate-limit key
+// nor claim TLS.
+TEST_F(ServerAuthTest, ForwardedHeadersFromOtherHostsAreIgnored) {
+    const std::string ip = nonLoopbackIpv4();
+    if (ip.empty()) GTEST_SKIP() << "no non-loopback IPv4 address on this machine";
+    cfg.bindAddress = ip;
+    cfg.trustProxy = true;
+    cfg.rateLimitRequests = 3;
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli(ip, server.port());
+    auto r = cli.Post("/api/auth/login", {{"X-Forwarded-Proto", "https"}, {"X-Forwarded-For", "10.0.0.1"}},
+                      json{{"token", token}}.dump(), "application/json");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200) << r->body;
+    EXPECT_FALSE(isSecureCookie(r->get_header_value("Set-Cookie")));
+    for (int i = 2; i <= 3; ++i) {
+        r = cli.Get("/api/status", {{"X-Forwarded-For", "10.0.0." + std::to_string(i)}});
+        ASSERT_TRUE(r);
+        EXPECT_EQ(r->status, 200);
+    }
+    r = cli.Get("/api/status", {{"X-Forwarded-For", "10.0.0.99"}});
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 429);   // keyed on the peer, not on the header it sent
+    server.stop();
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// Tokens, data directory and what anonymous callers see (WAL-7, WAL-8, WAL-9, NEW-5)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::unique_ptr<Bucks::Node> openMainLikeChain(const std::string& dir, std::string& err) {
+    Bucks::ChainParams mainLike = Bucks::chainParams(Bucks::NetworkId::REGTEST);
+    mainLike.id = Bucks::NetworkId::MAIN;
+    mainLike.name = "main";
+    int code = 0;
+    return Bucks::Node::open(dir, mainLike, {}, err, code);
+}
+
+} // namespace
+
+// NEW-5: two networks in one datadir each keep their own token file, and a node removes only its own.
+TEST_F(ServerAuthTest, CookiesOfTwoNetworksInOneDatadirAreSeparate) {
+    cfg.apiToken.clear();
+    std::string err;
+    auto mainChain = openMainLikeChain(dir + "/mainchain", err);
+    ASSERT_TRUE(mainChain) << err;
+
+    Bucks::Server test(*chain, nullptr, cfg);
+    ASSERT_TRUE(test.start(0));
+    Bucks::Server main(*mainChain, nullptr, cfg);
+    ASSERT_TRUE(main.start(0));
+    EXPECT_EQ(main.cookieFile(), cfg.dataDir + "/.cookie");   // where it always was
+    EXPECT_EQ(test.cookieFile(), cfg.dataDir + "/regtest/.cookie");
+    const std::string mainToken = readFile(main.cookieFile()).substr(0, 64);
+    const std::string testToken = readFile(test.cookieFile()).substr(0, 64);
+    EXPECT_NE(mainToken, testToken);
+
+    // Stopping the test node leaves the main node's token on disk, and it still works.
+    test.stop();
+    ASSERT_TRUE(fs::exists(cfg.dataDir + "/.cookie"));
+    EXPECT_FALSE(fs::exists(cfg.dataDir + "/regtest/.cookie"));
+    httplib::Client cli("127.0.0.1", main.port());
+    auto r = cli.Get("/api/wallets", {{"X-API-Token", readFile(cfg.dataDir + "/.cookie").substr(0, 64)}});
+    ASSERT_TRUE(r);
+    EXPECT_EQ(r->status, 200);
+
+    // A token file another node has taken over is not deleted on stop.
+    const std::string path = main.cookieFile();
+    writeFile(path, std::string(64, 'b') + "\n");
+    main.stop();
+    EXPECT_TRUE(fs::exists(path));
+}
+
+// WAL-9: the token minimum applies to $BUCKS_API_TOKEN too, and a token file others can read is refused.
+TEST_F(ServerAuthTest, WeakOrExposedTokensAreRefused) {
+#ifndef _WIN32
+    cfg.apiToken.clear();
+    ::setenv("BUCKS_API_TOKEN", "a", 1);
+    {
+        Bucks::Server server(*chain, nullptr, cfg);
+        EXPECT_FALSE(server.start(0));
+    }
+    ::setenv("BUCKS_API_TOKEN", token.c_str(), 1);
+    {
+        Bucks::Server server(*chain, nullptr, cfg);
+        ASSERT_TRUE(server.start(0));
+        httplib::Client cli("127.0.0.1", server.port());
+        auto r = cli.Get("/api/wallets", tokenHeader);
+        ASSERT_TRUE(r);
+        EXPECT_EQ(r->status, 200);
+        server.stop();
+    }
+    ::unsetenv("BUCKS_API_TOKEN");
+
+    const std::string tokenFile = dir + "/token";
+    writeFile(tokenFile, token + "\n");
+    ::chmod(tokenFile.c_str(), 0644);
+    cfg.apiTokenFile = tokenFile;
+    {
+        testing::internal::CaptureStderr();
+        Bucks::Server server(*chain, nullptr, cfg);
+        const std::string said = testing::internal::GetCapturedStderr();
+        EXPECT_FALSE(server.start(0));
+        EXPECT_NE(said.find("chmod 600 " + tokenFile), std::string::npos) << said;
+    }
+    ::chmod(tokenFile.c_str(), 0600);
+    {
+        Bucks::Server server(*chain, nullptr, cfg);
+        EXPECT_TRUE(server.start(0));
+        server.stop();
+    }
+#endif
+}
+
+// WAL-8: an existing datadir keeps its mode; the node warns instead of silently chmodding it.
+TEST_F(ServerAuthTest, ExistingDataDirIsNotChmodded) {
+#ifndef _WIN32
+    fs::create_directories(cfg.dataDir);
+    ::chmod(cfg.dataDir.c_str(), 0755);
+    cfg.enableLogging = true;
+    testing::internal::CaptureStderr();
+    {
+        Bucks::Server server(*chain, nullptr, cfg);
+        EXPECT_TRUE(server.walletsEnabled());
+    }
+    const std::string said = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(fileMode(cfg.dataDir), 0755u);
+    EXPECT_NE(said.find("chmod 700 " + cfg.dataDir), std::string::npos) << said;
+    EXPECT_EQ(fileMode(cfg.dataDir + "/regtest"), 0700u);   // what the node creates is private
+#endif
+}
+
+// WAL-7: anonymous callers learn neither file paths nor the payout address.
+TEST_F(ServerAuthTest, AnonymousCallersSeeNoPathsOrPayoutAddress) {
+    writeFile(cfg.dataDir + "/regtest/wallets.json", "{ not json");
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_FALSE(server.walletsEnabled());
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+
+    auto r = cli.Get("/api/auth/status");
+    ASSERT_TRUE(r);
+    json anon = json::parse(r->body);
+    EXPECT_FALSE(anon["walletsEnabled"].get<bool>());
+    EXPECT_FALSE(anon["walletError"].get<std::string>().empty());
+    EXPECT_EQ(r->body.find(cfg.dataDir), std::string::npos) << r->body;
+    r = cli.Get("/api/auth/status", tokenHeader);
+    ASSERT_TRUE(r);
+    EXPECT_NE(json::parse(r->body)["walletError"].get<std::string>().find("wallets.json"), std::string::npos);
+
+    r = cli.Get("/api/mining/status");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200);
+    EXPECT_FALSE(json::parse(r->body).contains("minerAddress")) << r->body;
+    r = cli.Get("/api/mining/status", tokenHeader);
+    ASSERT_TRUE(r);
+    EXPECT_TRUE(json::parse(r->body).contains("minerAddress")) << r->body;
+    server.stop();
+}
+
+// HYG-9: while the gold module is inactive the economy status names no reserve source.
+TEST_F(ServerAuthTest, EconomyStatusClaimsNoGoldReserve) {
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+    auto r = cli.Get("/api/economy/status");
+    ASSERT_TRUE(r);
+    ASSERT_EQ(r->status, 200);
+    json e = json::parse(r->body);
+    EXPECT_FALSE(e["gold_module_active"].get<bool>());
+    EXPECT_EQ(e["gold_reserve"], 0);
+    EXPECT_EQ(e["reserve_source"].get<std::string>().rfind("none", 0), 0u) << r->body;
+    EXPECT_EQ(r->body.find("vault"), std::string::npos) << r->body;
+    EXPECT_EQ(r->body.find("OP_RETURN"), std::string::npos) << r->body;
+    server.stop();
+}
+
+// ML-11 / OPS-14: the version names the network the node runs, not a fixed "testnet".
+TEST_F(ServerAuthTest, StatusReportsTheVersionOfThisNetwork) {
+    Bucks::Server server(*chain, nullptr, cfg);
+    ASSERT_TRUE(server.start(0));
+    httplib::Client cli("127.0.0.1", server.port());
+    auto r = cli.Get("/api/status");
+    ASSERT_TRUE(r);
+    json status = json::parse(r->body);
+    EXPECT_EQ(status["network"], "regtest");
+    EXPECT_EQ(status["version"], std::string(Bucks::BUCKS_VERSION) + "-regtest");
+    EXPECT_EQ(Bucks::nodeVersionString("main"), std::string(Bucks::BUCKS_VERSION) + "-main");
     server.stop();
 }

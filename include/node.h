@@ -60,12 +60,17 @@ public:
     std::optional<Block> blockByHash(const Hash256& hash) const;
     bool haveBlockData(const Hash256& hash) const;     // block bytes stored
     bool knowsHeader(const Hash256& hash) const;
+    // Cumulative work of the chain that ends at a known header; empty if it is unknown.
+    std::optional<U256> chainWorkOf(const Hash256& hash) const;
     std::vector<Hash256> locator() const;
     std::vector<BlockHeader> headersAfter(const std::vector<Hash256>& locator, const Hash256& stop,
                                           size_t max) const;
-    // Blocks of the best known header chain whose data we still lack (at most max),
-    // used to decide what to download.
-    std::vector<Hash256> missingBlocksOnBestHeaderChain(size_t max) const;
+    // Blocks whose data we still lack on the way to `peerBest`, the most-work block a peer
+    // announced (at most max): what to download from that peer.
+    std::vector<Hash256> missingBlocksTowards(const Hash256& peerBest, size_t max) const;
+    // A peer announced or sent `hash`: it becomes the peer's best block if it is known and
+    // has more work than `peerBest`.
+    void noteBlockAvailable(const Hash256& hash, Hash256& peerBest) const;
     uint64_t circulatingSupply() const;
     uint64_t goldReserve() const { return 0; }        // the gold module is a later phase
 
@@ -87,12 +92,20 @@ public:
     std::optional<Transaction> mempoolTransaction(const Hash256& txid) const;
 
     // ---- Mining ----
-    // Builds a template and hashes on the calling thread; returns when a block was found
-    // and accepted, on stop/timeout, or on failure. The hash of the block is stored in *found.
+    // Builds a template and hashes on the calling thread plus threads - 1 helpers; returns
+    // when a block was found and accepted, on stop/timeout, or on failure. The hash of the
+    // block is stored in *found.
     MineResult mine(const Script& minerScript, const AssemblerOptions& options,
                     const std::atomic<bool>& stop, std::string& err, Hash256* found = nullptr,
-                    int64_t timeLimitSeconds = 0);
+                    int64_t timeLimitSeconds = 0, unsigned threads = 1);
     uint64_t minerHashes() const { return miner_->hashes(); }
+    uint64_t minerHashRate() const { return miner_->hashRate(); }   // all threads, recent seconds
+
+    struct MiningInfo {
+        std::string blockedReason;   // why no block template can be built now ("" = it can)
+        uint32_t bits = 0;           // proof of work required of the next block
+    };
+    MiningInfo miningInfo() const;
 
     // ---- Notifications (called without the chain lock held) ----
     using TipListener = std::function<void(const Hash256& hash, uint32_t height)>;
@@ -104,7 +117,12 @@ public:
     void removeTxListener(size_t id);
 
     // Orderly shutdown: marks the store clean. Called by the destructor too.
+    // After a fatal chain-state error nothing more is written.
     void shutdown();
+
+    // 0 while the chain state is healthy; otherwise the exit code the process must
+    // stop with (4 storage failure, 6 corrupt) and `why`. The caller stops the node.
+    int fatalError(std::string& why) const;
 
 private:
     Node() = default;

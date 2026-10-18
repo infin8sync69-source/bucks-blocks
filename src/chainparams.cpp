@@ -32,6 +32,11 @@ ChainParams makeMain() {
     p.genesisHash = Hash256{};
     p.powLimitBits = 0x1d00ffff;
     p.powNoRetargeting = false;
+    // aserti3-2d with Bitcoin Cash's 2-day half-life: a block's target follows how far its parent is
+    // ahead of or behind the schedule genesis.time + 600 s * height, so a miner who leaves stalls the
+    // chain for one slow block instead of a 2016-block period (audit NEW-2). Anchor: section 6.5.
+    p.powAlgorithm = PowAlgorithm::ASERT;
+    p.asertHalfLife = 2 * 24 * 60 * 60;
     p.halvingInterval = 210000;
     p.minimumChainWork = U256();
     p.maxAutoReorgDepth = 100;
@@ -42,13 +47,15 @@ ChainParams makeTest() {
     ChainParams p = makeMain();
     p.id = NetworkId::TEST;
     p.name = "test";
-    p.netMagic = {0xB7, 0xC5, 0xE3, 0x7F};   // changed with the 2026-10-14 genesis so old-testnet peers cannot connect
+    // Changed with the 2026-10-14 genesis (was 0x7F) and again with ASERT (the old testnet's blocks
+    // break the new difficulty rule), so peers of an older testnet cannot connect.
+    p.netMagic = {0xB7, 0xC5, 0xE3, 0x6B};
     p.defaultP2PPort = 18733;
     p.defaultApiPort = 18080;
     p.p2pkhAddressVersion = 0x41;
     // Testnet starts at a much lower difficulty than mainnet: 0x1e00ffff is about 2^24 hashes per block,
-    // so one laptop finds a block in seconds and coins mature within hours. The 4x-per-period retarget
-    // limit still applies, so the difficulty follows whatever hashrate shows up.
+    // so one laptop finds a block in seconds and coins mature within hours. ASERT with mainnet's half-life
+    // then follows whatever hashrate shows up, so the soak runs mainnet's difficulty rule.
     p.powLimitBits = 0x1e00ffff;
     // Mined with: bucks-mine-genesis --network=test --time=1791958761 (about ten seconds on a laptop)
     p.genesisTime = 1791958761;
@@ -78,6 +85,9 @@ ChainParams makeRegtest() {
         hexHash("3491115920c29000d16f7d776bbab4a3399e5065abeeaf73fa23a273406bf520");
     p.powLimitBits = 0x207fffff;
     p.powNoRetargeting = true;
+    // Bits never change, but the algorithm also picks the time rules: same as mainnet.
+    p.powAlgorithm = PowAlgorithm::ASERT;
+    p.asertHalfLife = 2 * 24 * 60 * 60;
     p.halvingInterval = 150;
     p.minimumChainWork = U256();
     p.maxAutoReorgDepth = 100;
@@ -123,10 +133,24 @@ bool checkChainParams(const ChainParams& p, std::string& err) {
         err = "powLimit does not match a valid powLimitBits";
         return false;
     }
-    if (!p.powNoRetargeting) {
+    if (p.powAlgorithm != PowAlgorithm::BITCOIN && p.powAlgorithm != PowAlgorithm::ASERT) {
+        err = "unknown difficulty algorithm";
+        return false;
+    }
+    if (!p.powNoRetargeting && p.powAlgorithm == PowAlgorithm::BITCOIN) {
         unsigned bitsT4 = U256(uint64_t(4 * Consensus::TARGET_TIMESPAN)).bits();
         if (p.powLimit.bits() + bitsT4 > 256) {
             err = "powLimit * 4T overflows 256 bits";
+            return false;
+        }
+    }
+    if (!p.powNoRetargeting && p.powAlgorithm == PowAlgorithm::ASERT) {
+        if (p.powLimit.bits() + Pow::ASERT_FACTOR_BITS > 256) {
+            err = "powLimit * 2^17 overflows 256 bits (ASERT)";
+            return false;
+        }
+        if (p.asertHalfLife <= 0) {
+            err = "ASERT half-life must be positive";
             return false;
         }
     }
@@ -144,6 +168,13 @@ bool checkChainParams(const ChainParams& p, std::string& err) {
     if (p.genesisInscription.size() > 96) {
         err = "genesis inscription longer than 96 bytes";
         return false;
+    }
+    // Printable ASCII only, so every tool and explorer shows the same text (spec 3.5).
+    for (unsigned char ch : p.genesisInscription) {
+        if (ch < 0x20 || ch > 0x7e) {
+            err = "genesis inscription must be printable ASCII";
+            return false;
+        }
     }
     return true;
 }

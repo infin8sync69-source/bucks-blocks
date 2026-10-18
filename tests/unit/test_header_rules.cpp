@@ -9,11 +9,18 @@
 using namespace Bucks;
 using namespace Bucks::Rules;
 
-// Spec: docs/design/consensus-validation.md sections 6.5, 6.6, 7.3 (HDR-1 ... HDR-9).
+// Spec: docs/design/consensus-validation.md sections 6.5, 6.6, 7.3 (HDR-1 ... HDR-10).
 
 namespace {
 
 const ChainParams& regtest() { return chainParams(NetworkId::REGTEST); }
+
+// Mainnet parameters with the Bitcoin retarget, the only rule with period time rules.
+ChainParams bitcoinRetarget() {
+    ChainParams p = chainParams(NetworkId::MAIN);
+    p.powAlgorithm = PowAlgorithm::BITCOIN;
+    return p;
+}
 
 BlockHeader childOf(const BlockIndex* parent, uint32_t time, uint32_t bits) {
     BlockHeader h;
@@ -145,9 +152,9 @@ TEST(HeaderRules, FutureNotCached) {
 }
 
 // HDR-6: the first block of a retarget period may not be more than 600 s
-// earlier than its parent. Mainnet parameters, synthetic 2016 headers.
+// earlier than its parent. Bitcoin retarget, synthetic 2016 headers.
 TEST(HeaderRules, TimewarpFirstBlock) {
-    const ChainParams& main = chainParams(NetworkId::MAIN);
+    const ChainParams main = bitcoinRetarget();
     BlockIndexMap map;
     Block g = Genesis::build(main);
     BlockIndex* tip = map.insert(g.header, nullptr);
@@ -169,9 +176,9 @@ TEST(HeaderRules, TimewarpFirstBlock) {
 }
 
 // HDR-7: the last block of a period may not be earlier than the first block,
-// even when it is above the median time past.
+// even when it is above the median time past. Bitcoin retarget.
 TEST(HeaderRules, PeriodNotNegative) {
-    const ChainParams& main = chainParams(NetworkId::MAIN);
+    const ChainParams main = bitcoinRetarget();
     BlockIndexMap map;
     Block g = Genesis::build(main);
     const uint32_t base = 1'300'000'000u;
@@ -199,6 +206,45 @@ TEST(HeaderRules, PeriodNotNegative) {
     BlockHeader fine = childOf(tip, base + 5000, main.powLimitBits);     // equal to block 0
     ValidationState ok;
     EXPECT_TRUE(ContextualCheckBlockHeader(fine, tip, now, main, ok)) << ok.code;
+}
+
+// HDR-10: ASERT (main and test) has no retarget period, so the HDR-6 and HDR-7
+// headers are valid there; H-MTP and H-FUTURE still bound every timestamp.
+TEST(HeaderRules, AsertHasOnlyMtpAndFutureRules) {
+    const ChainParams& main = chainParams(NetworkId::MAIN);
+    ASSERT_EQ(main.powAlgorithm, PowAlgorithm::ASERT);
+    const uint32_t base = 1'300'000'000u;
+    {
+        // HDR-6 layout: block 2016 is 601 s earlier than its parent.
+        BlockIndexMap map;
+        BlockIndex* tip = map.insert(Genesis::build(main).header, nullptr);
+        tip = extend(map, tip, 2015, base + 1, 600);
+        const uint32_t now = tip->header.timestamp + 10'000;
+        BlockHeader early = childOf(tip, tip->header.timestamp - 601, GetNextWorkRequired(tip, main));
+        ValidationState ok;
+        EXPECT_TRUE(ContextualCheckBlockHeader(early, tip, now, main, ok)) << ok.code;
+
+        BlockHeader atMtp = childOf(tip, uint32_t(tip->medianTimePast()), GetNextWorkRequired(tip, main));
+        ValidationState old;
+        EXPECT_FALSE(ContextualCheckBlockHeader(atMtp, tip, now, main, old));
+        EXPECT_EQ(old.code, "time-too-old");
+        BlockHeader future = childOf(tip, now + 7201, GetNextWorkRequired(tip, main));
+        ValidationState late;
+        EXPECT_FALSE(ContextualCheckBlockHeader(future, tip, now, main, late));
+        EXPECT_EQ(late.code, "time-too-new");
+    }
+    {
+        // HDR-7 layout: block 2015 is earlier than block 0 but above the MTP.
+        BlockIndexMap map;
+        Block g = Genesis::build(main);
+        g.header.timestamp = base + 5000;
+        BlockIndex* tip = map.insert(g.header, nullptr);
+        for (int i = 1; i <= 2014; ++i) tip = map.insert(childOf(tip, base, main.powLimitBits), tip);
+        ASSERT_EQ(tip->height, 2014u);
+        BlockHeader negative = childOf(tip, base + 2000, GetNextWorkRequired(tip, main));
+        ValidationState ok;
+        EXPECT_TRUE(ContextualCheckBlockHeader(negative, tip, base + 100'000, main, ok)) << ok.code;
+    }
 }
 
 // HDR-8: a checkpoint pins its hash, and forks below a checkpoint are refused.

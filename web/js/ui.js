@@ -192,15 +192,20 @@ export function pageHead(title, subtitle, ...actions) {
     actions.length ? h("div", { class: "row" }, actions) : null);
 }
 
-/** Replace children of `el` only when `sig` changed (keeps text selection while polling). */
+/**
+ * Replace children of `el` only when `sig` changed (keeps text selection while polling).
+ * Call draw.reset() after writing into `el` some other way, so the next draw rebuilds.
+ */
 export function keyedRender(el) {
   let last = null;
-  return (sig, build) => {
+  const draw = (sig, build) => {
     const s = JSON.stringify(sig);
     if (s === last) return;
     last = s;
     el.replaceChildren(build());
   };
+  draw.reset = () => { last = null; };
+  return draw;
 }
 
 export function busy(btn, on, label) {

@@ -86,6 +86,8 @@ struct Wordlist {
     std::string lang;         // manifest tag, e.g. "ar-dev"
     std::string normalizer;   // "exact" | "arabic" | "latin"
     std::string status;       // "dev" | "release" | anything else = not a default
+    std::string sha256;       // lower-case hex SHA-256 of the file bytes
+    bool pinned = false;      // the manifest pins sha256 (checked when the list loads)
     std::vector<std::string> entries;                 // display forms, index order
     std::unordered_map<std::string, uint16_t> index;  // normalized form -> index
 };
@@ -123,13 +125,14 @@ bool loadWordlistFile(const std::string& path,
 
 /**
  * Where lists are looked up (first hit wins):
- *   1. setWordlistDir()            (explicit; no fallback if it is wrong)
+ *   1. setWordlistDir()            (--wordlist-dir; no fallback if it is wrong)
  *   2. $BUCKS_WORDLIST_DIR         (explicit; no fallback if it is wrong)
- *   3. <executable dir>/../wordlists
- *   4. <executable dir>/wordlists
- *   5. BUCKS_SOURCE_DIR/wordlists  (compile-time, if defined)
- *   6. ./wordlists
- * Candidates 3-6 qualify only if they contain manifest.json.
+ *   3. BUCKS_SOURCE_DIR/wordlists  (compile-time, if defined)
+ *   4. <executable dir>/../share/bucks/wordlists  (install layout)
+ *   5. <executable dir>/../wordlists
+ *   6. <executable dir>/wordlists
+ * Candidates 3-6 qualify only if they contain manifest.json. The working
+ * directory is never searched.
  * An empty string clears the override. Changing the directory drops the cache.
  */
 void setWordlistDir(const std::string& dir);
@@ -176,14 +179,25 @@ std::string mnemonicFromEntropy(const std::vector<uint8_t>& entropy,
 
 /**
  * phrase -> entropy. Words are split on ASCII whitespace and matched through
- * each list's normalizer. With lang == "" the language is auto-detected:
- * exactly one loaded list must accept every word AND pass the checksum.
- * On success entropyOut holds the raw entropy and *langOut the list used.
+ * each list's normalizer. With lang == "" the language is auto-detected: the
+ * loaded lists that accept every word AND pass the checksum must all give the
+ * same entropy (AMBIGUOUS_LANGUAGE otherwise); *langOut is the first of them
+ * in manifest order. On success entropyOut holds the raw entropy.
  */
 MnemonicError mnemonicToEntropy(const std::string& phrase,
                                 std::vector<uint8_t>& entropyOut,
                                 std::string* langOut = nullptr,
                                 const std::string& lang = "");
+
+/**
+ * Auto-detection as above, but only the lists tagged in `langs` are candidates
+ * (tags that are not loaded are ignored). Used to keep placeholder lists away
+ * from the main network.
+ */
+MnemonicError mnemonicToEntropyAmong(const std::string& phrase,
+                                     const std::vector<std::string>& langs,
+                                     std::vector<uint8_t>& entropyOut,
+                                     std::string* langOut = nullptr);
 
 MnemonicError validateMnemonic(const std::string& phrase,
                                std::string* langOut = nullptr,

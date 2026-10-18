@@ -6,6 +6,7 @@
 #include <string>
 
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "chaindb.h"
 #include "chainstate.h"

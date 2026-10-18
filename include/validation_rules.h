@@ -58,9 +58,14 @@ bool ContextualCheckBlockHeader(const BlockHeader& header, const BlockIndex* par
                                 const BlockIndexMap* index = nullptr);
 
 // ---- Difficulty (H-DIFF) ----
-// bits the child of `parent` must carry. The window ancestor is found through
-// the block index of parent's own branch.
+// bits the child of `parent` must carry, by params.powAlgorithm. Ancestors
+// (the retarget window, the ASERT anchor) are found through the block index
+// of parent's own branch. Depends only on the parent, never on the child.
 uint32_t GetNextWorkRequired(const BlockIndex* parent, const ChainParams& params);
+
+// aserti3-2d anchored at genesis (section 6.5); GetNextWorkRequired calls it
+// unless the network has retargeting off.
+uint32_t GetNextASERTWorkRequired(const BlockIndex* parent, const ChainParams& params);
 
 // Retarget formula with a signed timespan clamped to [T/4, 4T].
 uint32_t CalculateNextWorkRequired(uint32_t lastBits, int64_t firstTime, int64_t lastTime,

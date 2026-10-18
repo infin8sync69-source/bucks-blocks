@@ -41,11 +41,13 @@ public:
                             size_t entropyBits = DEFAULT_ENTROPY_BITS);
 
     /**
-     * Restore from a phrase (language auto-detected) and optional passphrase.
-     * Words and checksum are validated first; the error message never
-     * contains the phrase. The stored mnemonic is the canonical spelling.
+     * Restore from a phrase and optional passphrase. `lang` names the word
+     * list ("" = auto-detect). Words and checksum are validated first; the
+     * error message never contains the phrase. The stored mnemonic is the
+     * canonical spelling.
      */
-    static Wallet fromMnemonic(const std::string& phrase, const std::string& passphrase = "");
+    static Wallet fromMnemonic(const std::string& phrase, const std::string& passphrase = "",
+                               const std::string& lang = "");
 
     bool hasKeys() const { return initialised; }
 

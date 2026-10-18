@@ -62,14 +62,17 @@ struct ServerConfig {
     std::string bindAddress = "127.0.0.1";
 
     // ---- Data directory (wallet file, API cookie) ----
-    // "" = Server::defaultDataDir() (~/.bucks). Created with mode 0700.
+    // "" = Server::defaultDataDir() (~/.bucks). Created with mode 0700; an
+    // existing directory is left as it is (a warning if others can reach it).
     std::string dataDir;
     // Pre-datadir wallet file. Read once, never written (see loadWallets()).
     std::string legacyWalletFile;           // empty: never read a wallets.json from the working directory (audit WAL-1); --import-legacy-wallets sets it
 
     // ---- Authentication ----
-    // Token precedence: apiToken (argv) > apiTokenFile > $BUCKS_API_TOKEN >
-    // a random token generated at start and written to <dataDir>/.cookie.
+    // Token precedence: apiToken (argv) > apiTokenFile (mode 0600 or stricter) >
+    // $BUCKS_API_TOKEN > a random token generated at start and written to
+    // <dataDir>/.cookie (main) or <dataDir>/<network>/.cookie. Given tokens
+    // must be at least 16 characters.
     std::string apiToken;
     std::string apiTokenFile;
     std::chrono::seconds sessionLifetime{12 * 3600};
@@ -78,8 +81,14 @@ struct ServerConfig {
     std::vector<std::string> corsOrigins;
     // Extra Host header values accepted besides loopback and bindAddress.
     std::vector<std::string> allowedHosts;
-    // Key the rate limiter on X-Forwarded-For (only behind a trusted proxy).
+    // Behind a reverse proxy on this host: believe X-Forwarded-For (rate limit key) and
+    // X-Forwarded-Proto, but only on connections from loopback, where the proxy runs.
     bool trustProxy = false;
+    // --api-secure-cookie: the browser reaches the node over TLS (a proxy in front), so the
+    // session cookie is always Secure and only https origins pass the CSRF check. Without it the
+    // cookie is still Secure for a login from an https page or through a trusted proxy that
+    // sends X-Forwarded-Proto: https.
+    bool secureCookie = false;
     // Sent on every response. The bundled UI in web/ is dependency-free ES
     // modules served by the node itself: no CDN, no inline script or style,
     // no third-party origin.
@@ -95,6 +104,16 @@ struct ServerConfig {
     // IPFS Integration
     bool enableIPFS = false;
     uint16_t ipfsPort = 5001;
+
+    // ---- Mining ----
+    // Hashing threads of the built-in miner; 0 = one per CPU (hardware concurrency).
+    unsigned mineThreads = 0;
+    // Pay every mined block to this address (--mine-address). The node then mines with no
+    // wallet and no key, and API requests cannot redirect the rewards (audit OPS-04, NEW-4).
+    std::string mineAddress;
+    // How long POST /api/mining/mine waits for its block before answering 202 and leaving
+    // the search running in the background (audit ML-4).
+    std::chrono::milliseconds mineOneWait{5000};
 };
 
 /**
@@ -129,7 +148,8 @@ public:
     static std::string defaultDataDir();
     const std::string& dataDir() const { return dataDirPath; }
     const std::string& walletFile() const { return walletFilePath; }
-    // Path of the generated API token, "" when the token came from config/env.
+    // Path of the generated API token, "" when the token came from config/env:
+    // <dataDir>/.cookie on the main network, <dataDir>/<network>/.cookie otherwise.
     const std::string& cookieFile() const { return cookieFilePath; }
 
     // False when wallets.json could not be read; the file is then never
@@ -138,8 +158,10 @@ public:
     std::string walletError() const;
 
     // Optional wallet management. addWallet returns false (and keeps the
-    // wallet in memory only) if the file could not be written.
+    // wallet in memory only) if the file could not be written. `meta` fields
+    // (e.g. the word list a phrase needs) are stored in the wallet's entry.
     bool addWallet(const Wallet& wallet);
+    bool addWallet(const Wallet& wallet, const nlohmann::json& meta);
     std::vector<Wallet> getWallets() const;
 
     // WebSocket Notifications
@@ -181,13 +203,33 @@ private:
     std::unique_ptr<std::thread> serverThread;
     int boundPort = -1;
 
-    // ---- Auto-mining ----
-    std::atomic<bool> autoMining{false};
-    std::atomic<bool> autoMineStop{false};
-    std::thread autoMinerThread;
+    // ---- Mining (audit SAN-2, NEW-5, NEW-6) ----
+    // One mining thread at a time, continuous or one block. minerCtlMutex serializes
+    // start, stop and "mine one block" and is held across the join; the mining thread
+    // never takes it.
+    std::mutex minerCtlMutex;
+    bool minerShutdown = false;              // set by stop(): nothing starts after it
+    std::thread minerThread;
+    std::atomic<bool> minerStop{false};
+    std::atomic<bool> autoMining{false};     // continuous mining is on
+    std::atomic<bool> minerBusy{false};      // the mining thread is hashing
     std::atomic<uint64_t> blocksFound{0};
-    std::atomic<uint64_t> hashesPerSecond{0};
-    std::string minerAddress;
+    unsigned minerThreads = 1;
+    std::vector<uint8_t> fixedPayoutScript;  // config.mineAddress as a script
+    // What /api/mining/status shows. The status route is public, so it reads these
+    // under minerInfoMutex and never waits for minerCtlMutex.
+    mutable std::mutex minerInfoMutex;
+    std::condition_variable minerInfoCv;     // a one-block search ended
+    std::string minerAddress;                // payout of the running (or last) search
+    struct MineJob {                         // the last "mine one block" request
+        uint64_t id = 0;
+        std::string state;                   // running, found, failed, stopped
+        std::string address;
+        std::string error;
+        int status = 0;                      // HTTP status of a failure
+        int64_t startedAt = 0;               // unix seconds
+        nlohmann::json block;                // found: the block
+    } mineJob;
 
     // httplib server instance (pointer to avoid including implementation in header if possible,
     // but httplib is header-only so we can't easily forward declare 'Server' without the header.
@@ -226,18 +268,35 @@ private:
                           const std::string& apiTokenHeader,
                           const std::string& cookieHeader);
     bool hostAllowed(const std::string& hostHeader) const;
-    bool originAllowed(const std::string& origin) const;
+    bool forwardedHeadersTrusted(const std::string& remoteAddr) const;
+    bool browserUsesTls(const std::string& remoteAddr, const std::string& forwardedProto) const;
+    bool originAllowed(const std::string& origin, const std::string& hostHeader, bool tls) const;
+    std::string sessionCookie(const std::string& value, long long maxAge, bool secure) const;
     bool corsOriginAllowed(const std::string& origin) const;
+    void removeOwnCookie();
     std::string createSession();
     bool validateSession(const std::string& id);
     void destroySession(const std::string& id);
 
-    // ---- Auto-mining control ----
+    // ---- Mining control ----
 public:
-    void startAutoMine();
+    // Starts continuous mining, paid to --mine-address or else the first wallet. False with
+    // `err` set when there is nothing to pay to or a one-block search is running.
+    bool startAutoMine(std::string& err);
+    // True when mining has somewhere to pay: --mine-address, or a wallet.
+    bool minerPayoutReady(std::string& err);
+    // Stops continuous mining and any one-block search; returns once the miner has stopped.
     void stopAutoMine();
 private:
-    void autoMineLoop();
+    // 0 on success, else an HTTP status with `err` set.
+    int resolvePayout(const nlohmann::json& request, std::vector<uint8_t>& script, std::string& address,
+                      std::string& err);
+    int startMining(const nlohmann::json& request, std::string& err);
+    void stopMinerLocked();                 // caller holds minerCtlMutex
+    void minerLoop(std::vector<uint8_t> script, AssemblerOptions options, std::vector<std::string> anchored,
+                   bool oneBlock);
+    void finishMineJob(const std::string& state, const nlohmann::json& block, const std::string& error, int status);
+    nlohmann::json mineJobJsonLocked() const;   // caller holds minerInfoMutex
 
     // IPFS Helper
     bool checkIPFSStatus(std::string& peerId);
@@ -251,6 +310,18 @@ private:
     bool saveWalletsLocked();          // caller holds walletMutex
     void loadWallets();
     bool loadWalletDocument(const std::string& path, bool legacy);
+
+    // ---- Wallet views for the console (read-only, except the backup flag) ----
+    nlohmann::json walletSummaryLocked(const Wallet& w) const;   // caller holds walletMutex
+    bool paymentFee(const Wallet& from, const Transaction& tx, uint64_t& fee) const;
+    int estimatePayment(const std::string& body, nlohmann::json& out);
+    int walletHistory(const std::string& address, const std::string& limit, const std::string& depth,
+                      nlohmann::json& out);
+    bool backupPendingLocked(const Wallet& w) const;
+    bool confirmBackupLocked(const Wallet& w);
+    void markBackupPending(const Wallet& w);
+    int confirmWalletBackup(const std::string& body, nlohmann::json& out);
+    std::set<std::string> backupPending_;   // public keys (lower-case hex) of created, unconfirmed wallets
 };
 
 } // namespace Bucks

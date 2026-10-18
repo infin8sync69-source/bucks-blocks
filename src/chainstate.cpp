@@ -18,6 +18,10 @@ constexpr int64_t MAX_UNREQUESTED_AHEAD = 288;
 constexpr size_t MAX_REJECT_STATES = 1000;
 constexpr uint32_t MAX_STEP_CONNECTS = 32;
 
+std::string describeHash(const Hash256& h) {
+    return hexStr(std::vector<uint8_t>(h.begin(), h.end()));
+}
+
 ValidationState internalError(const std::string& code, const std::string& detail) {
     ValidationState st;
     st.result = ValidationResult::INTERNAL;
@@ -75,16 +79,14 @@ std::vector<BlockHeader> ChainState::headersAfter(const std::vector<Hash256>& lo
     return out;
 }
 
-std::vector<Hash256> ChainState::missingBlocks(size_t max) const {
-    // The best header chain: the non-failed entry with the most work that is not under a
-    // fork alert; its ancestors without data, oldest first.
-    const BlockIndex* best = nullptr;
-    index_.forEach([&](const BlockIndex& e) {
-        if (e.failed() || skipped_.count(e.hash)) return;
-        if (!best || e.chainWork > best->chainWork) best = &e;
-    });
+std::vector<Hash256> ChainState::missingBlocks(const Hash256& towards, size_t max) const {
+    // The branch to a block a peer announced, unless it is failed or under a fork alert; its
+    // ancestors without data, oldest first. Asking only the announcing peer means a header whose
+    // block nobody has does not get honest peers dropped as stalling (audit CON-1).
     std::vector<Hash256> out;
-    if (!best || !(best->chainWork > chain_.tip()->chainWork)) return out;
+    const BlockIndex* best = index_.find(towards);
+    if (!best || best->failed() || skipped_.count(best->hash)) return out;
+    if (!(best->chainWork > chain_.tip()->chainWork)) return out;
     std::vector<const BlockIndex*> path;
     for (const BlockIndex* e = best; e && !chain_.contains(e); e = e->prev) path.push_back(e);
     for (auto it = path.rbegin(); it != path.rend() && out.size() < max; ++it) {
@@ -93,32 +95,46 @@ std::vector<Hash256> ChainState::missingBlocks(size_t max) const {
     return out;
 }
 
+bool ChainState::hasMoreWork(const Hash256& a, const Hash256& b) const {
+    const BlockIndex* ea = index_.find(a);
+    if (!ea || ea->failed()) return false;
+    const BlockIndex* eb = index_.find(b);
+    return !eb || eb->failed() || ea->chainWork > eb->chainWork;   // a failed block is nothing to download towards
+}
+
 std::string ChainState::miningBlockedReason() const {
+    if (fatalExitCode_) return "the chain state has halted: " + fatalError_;
     if (params_.id == NetworkId::REGTEST) return {};
     const BlockIndex* tip = chain_.tip();
     if (!tip) return "no chain tip";
     if (tip->chainWork < params_.minimumChainWork) return "node is syncing";
 
+    // Initial block download: the tip is more than a day old and still moving. Only connected blocks move it, so
+    // nothing a peer sends without the blocks below it counts; and a tip that stopped moving never blocks, so the
+    // launch from an old genesis and a restart after a day without blocks can mine (section 8.5).
+    constexpr int64_t kOldTipSeconds = 86'400;
+    constexpr int64_t kSyncProgressSeconds = 600;
+    const int64_t now = clock_();
+    if (int64_t(tip->header.timestamp) < now - kOldTipSeconds && lastTipMove_ != 0 &&
+        now - lastTipMove_ <= kSyncProgressSeconds)
+        return "node is syncing";
+
+    // A block that can connect now (its data and all its ancestors' are stored) is waiting. A header, or a body
+    // whose parent never arrives, does not count: one of each used to stop mining for good (audit CON-1).
     std::vector<const BlockIndex*> parked;
     for (const Hash256& h : skipped_) {
         if (const BlockIndex* e = index_.find(h)) parked.push_back(e);
     }
-    // A header whose block never arrives must not hold mining forever: ten minutes after a header was first
-    // stored without its data it no longer counts (audit CON-1). Honest sync keeps getting bodies and so keeps
-    // the gate closed through the tip moving forward.
-    constexpr int64_t kHeaderOnlyGateSeconds = 600;
-    const int64_t now = clock_();
-    bool better = false;
+    bool waiting = false;
     index_.forEach([&](const BlockIndex& e) {
-        if (better || e.failed() || !(e.chainWork > tip->chainWork)) return;
-        if (!(e.status & HAVE_DATA) && now - e.firstSeen > kHeaderOnlyGateSeconds) return;
+        if (waiting || !e.haveChainData || e.failed() || !(e.chainWork > tip->chainWork)) return;
         for (const BlockIndex* s : parked) {
             const BlockIndex* lca = lastCommonAncestor(&e, s);
             if (lca == &e || lca == s) return;   // on (or beyond) a branch under fork alert
         }
-        better = true;
+        waiting = true;
     });
-    return better ? "node is syncing" : std::string();
+    return waiting ? "node is syncing" : std::string();
 }
 
 // ---------------------------------------------------------------- headers
@@ -142,14 +158,13 @@ BlockIndex* ChainState::acceptHeader(const BlockHeader& header, ValidationState&
 
     BlockIndex* e = index_.insert(header, parent);
     e->status = HEADER_VALID;
-    e->firstSeen = clock_();
     persistStatus(e);
     return e;
 }
 
 ValidationState ChainState::ProcessNewBlockHeaders(const std::vector<BlockHeader>& headers) {
     ValidationState st;
-    if (storeFailed_) return internalError("store-write-failed", "an earlier write to the store failed");
+    if (fatalExitCode_) return internalError("chainstate-halted", fatalError_);
     if (headers.size() > MAX_HEADERS_PER_MESSAGE) {
         st.invalid(ValidationResult::MALFORMED, "too-many-headers");
         return st;
@@ -163,7 +178,7 @@ ValidationState ChainState::ProcessNewBlockHeaders(const std::vector<BlockHeader
     for (const BlockHeader& h : headers) {
         ValidationState hs;
         if (!acceptHeader(h, hs) && hs.result != ValidationResult::DUPLICATE) return hs;
-        if (storeFailed_) return internalError("store-write-failed", "cannot persist a header");
+        if (fatalExitCode_) return internalError("store-write-failed", fatalError_);
     }
     return st;  // VALID
 }
@@ -209,7 +224,10 @@ ValidationState ChainState::acceptBlock(const Block& block, bool requested, Bloc
         return dst;
     }
 
-    if (!store_.putBlock(e->hash, block.serialize())) return internalError("store-block-failed", "");
+    if (!store_.putBlock(e->hash, block.serialize())) {
+        fail(EXIT_STORAGE_FAILURE, "cannot store the data of block " + describeHash(e->hash));
+        return internalError("store-block-failed", fatalError_);
+    }
     e->status |= HAVE_DATA | DATA_CHECKED;
     e->txCount = uint32_t(block.transactions.size());
     e->sequenceId = ++sequence_;
@@ -219,14 +237,17 @@ ValidationState ChainState::acceptBlock(const Block& block, bool requested, Bloc
 }
 
 ValidationState ChainState::ProcessNewBlock(const Block& block, bool requested) {
-    if (storeFailed_) return internalError("store-write-failed", "an earlier write to the store failed");
+    if (fatalExitCode_) return internalError("chainstate-halted", fatalError_);
     BlockIndex* e = nullptr;
     ValidationState st = acceptBlock(block, requested, e);
-    if (storeFailed_) return internalError("store-write-failed", "cannot persist a block or its status");
+    if (fatalExitCode_) return internalError("store-write-failed", fatalError_);
     if (st.result != ValidationResult::VALID) return st;
 
     std::string err;
-    if (!activateBestChain(err)) return internalError("fatal-chainstate", err);
+    if (!activateBestChain(err)) {
+        fail(EXIT_DATABASE_CORRUPT, err);
+        return internalError("fatal-chainstate", fatalError_);
+    }
 
     if (e->failed()) {
         ValidationState reject;
@@ -250,14 +271,64 @@ void ChainState::raiseForkAlert(const ForkAlert& a, uint64_t depth) {
 }
 
 bool ChainState::approveReorg(const Hash256& tipHash, std::string& err) {
+    if (fatalExitCode_) {
+        err = "the chain state has halted: " + fatalError_;
+        return false;
+    }
     // Only a branch the node actually parked behind a fork alert can be approved (audit WAL-10).
     if (!skipped_.count(tipHash) && !(alert_.active && alert_.otherTip == tipHash)) {
         err = "no parked branch with that tip";
         return false;
     }
+    const BlockIndex* approved = index_.find(tipHash);
+    if (!approved) {
+        err = "no parked branch with that tip";
+        return false;
+    }
     approved_.insert(tipHash);
-    skipped_.erase(tipHash);
-    return activateBestChain(err);
+    // Unpark the tip and whatever was parked above it since: they are the same branch.
+    for (auto it = skipped_.begin(); it != skipped_.end();) {
+        const BlockIndex* s = index_.find(*it);
+        if (s && s->height >= approved->height && s->getAncestor(approved->height) == approved)
+            it = skipped_.erase(it);
+        else
+            ++it;
+    }
+    const BlockIndex* tipBefore = chain_.tip();
+    if (!activateBestChain(err)) {
+        fail(EXIT_DATABASE_CORRUPT, err);
+        err = fatalError_;
+        return false;
+    }
+    // The approval is for this activation only. Left armed, a later routine reorg that displaces the approved
+    // block would leave its old branch with a standing approval, free of the depth limit (audit CON-7).
+    approved_.erase(tipHash);
+    // Report what happened, not what was asked (audit CON-7).
+    if (!chain_.contains(approved)) {
+        if (approved->failed()) {
+            if (alert_.active && alert_.otherTip == tipHash) alert_ = ForkAlert{};   // nothing left to decide
+            // A branch that is invalid beyond the point where it overtook us is connected up to that point first:
+            // the node has then left its chain, and must not say it stayed (audit CON-7).
+            err = chain_.tip() != tipBefore
+                ? "the approved branch is invalid; this node moved to its valid part and is now at height " +
+                      std::to_string(chain_.tip()->height)
+                : "the approved branch is invalid; this node stays on its chain";
+        } else {
+            err = "the approved branch did not become the active chain (no more work than the tip?)";
+        }
+        return false;
+    }
+    return true;
+}
+
+// The operator's approval covers the reorg that brings the approved block into the active chain, also after its
+// branch has grown. It lasts for the approveReorg call only; a later deep reorg, on that branch too, needs a new one.
+bool ChainState::approvedReorgTo(const BlockIndex* best) const {
+    for (const Hash256& h : approved_) {
+        const BlockIndex* a = index_.find(h);
+        if (a && !chain_.contains(a) && best->height >= a->height && best->getAncestor(a->height) == a) return true;
+    }
+    return false;
 }
 
 bool ChainState::rejectState(const Hash256& hash, ValidationState& out) const {
@@ -270,7 +341,17 @@ bool ChainState::rejectState(const Hash256& hash, ValidationState& out) const {
 // ---------------------------------------------------------------- status
 
 void ChainState::persistStatus(const BlockIndex* e) {
-    if (!store_.putIndexRow(e->hash, e->header, e->status)) storeFailed_ = true;
+    if (!store_.putIndexRow(e->hash, e->header, e->status))
+        fail(EXIT_STORAGE_FAILURE, "cannot write the index row of block " + describeHash(e->hash));
+}
+
+// Continuing after a failed write or unreadable stored data would serve a chain that can no longer move, or a
+// wrong one (audit CON-4). The first reason wins; the node polls fatalExitCode() and stops.
+void ChainState::fail(int exitCode, const std::string& why) {
+    if (fatalExitCode_) return;
+    fatalExitCode_ = exitCode;
+    fatalError_ = why;
+    logErr() << "FATAL: chain state halted: " << why << "\n";
 }
 
 void ChainState::markFailed(BlockIndex* e, const ValidationState& reason) {
@@ -344,7 +425,8 @@ bool ChainState::activateBestChain(std::string& err) {
         }
 
         const uint64_t depth = uint64_t(tip->height - fork->height);
-        if (depth > params_.maxAutoReorgDepth && !approved_.count(best->hash)) {
+        const bool approved = approvedReorgTo(best);
+        if (depth > params_.maxAutoReorgDepth && !approved) {
             raiseForkAlert(ForkAlert{true, fork->height, tip->hash, best->hash, best->chainWork - tip->chainWork}, depth);
             skipped_.insert(best->hash);
             continue;
@@ -368,7 +450,8 @@ bool ChainState::activateBestChain(std::string& err) {
                 }
             }
             if (!found) stepLast = path.size() - 1;
-            if (stepLast > 2 * params_.maxAutoReorgDepth + 32) {
+            // A long way to overtake the tip is a deep reorg too, unless the operator approved it.
+            if (stepLast > 2 * params_.maxAutoReorgDepth + 32 && !approved) {
                 raiseForkAlert(ForkAlert{true, fork->height, tip->hash, best->hash, best->chainWork - tip->chainWork}, depth);
                 skipped_.insert(best->hash);
                 continue;
@@ -445,6 +528,7 @@ bool ChainState::activateBestChain(std::string& err) {
         }
         if (!store_.commitStep(commit)) {
             err = "commit of an activation step failed";
+            fail(EXIT_STORAGE_FAILURE, err);   // a write, not corrupt data
             return false;
         }
 
@@ -455,6 +539,7 @@ bool ChainState::activateBestChain(std::string& err) {
         for (auto& d : disconnected) d.first->status &= ~uint32_t(IN_MAIN_CHAIN);
         chain_.setTip(stepEnd);
         tipSequence_.fetch_add(1, std::memory_order_release);
+        lastTipMove_ = clock_();
         if (onDisconnect_) {
             for (auto& d : disconnected) onDisconnect_(d.second);
         }
@@ -464,7 +549,10 @@ bool ChainState::activateBestChain(std::string& err) {
             for (auto& d : disconnected) gone.push_back(d.second);
             onStep_(gone, connectedBlocks);
         }
-        if (alert_.active && approved_.count(best->hash)) alert_ = ForkAlert{};
+        if (alert_.active) {   // the branch the alert was about is now ours
+            const BlockIndex* other = index_.find(alert_.otherTip);
+            if (other && chain_.contains(other)) alert_ = ForkAlert{};
+        }
     }
 }
 
@@ -490,6 +578,7 @@ LoadResult failure(int code, const std::string& msg) {
 } // namespace
 
 void ChainState::shutdown() {
+    if (fatalExitCode_) return;   // write nothing more; the next start runs the crash checks
     store_.setCleanShutdown(true);
 }
 
@@ -532,7 +621,6 @@ bool ChainState::loadIndexFromStore(const StoredState& state, int tier, std::str
                 return corrupt(bst.code);
         }
         BlockIndex* e = index_.insert(row.header, parent);
-        e->firstSeen = clock_();
         if (e->chainWork != row.chainWork) return corrupt("stored chain work differs from the recomputed value");
         loaded.emplace_back(e, &row);
     }
@@ -727,10 +815,10 @@ bool ChainState::reindexFromBlocks(std::string& err) {
             persistStatus(e);
             propagateHaveChainData(e);
         } else {
-            Bucks::logErr() << "reindex: dropping unusable block " << hexStr(std::vector<uint8_t>(hash.begin(), hash.end())) << "\n";
+            Bucks::logErr() << "reindex: dropping unusable block " << describeHash(hash) << "\n";
             store_.deleteBlockData(hash);
         }
-        if (storeFailed_) {
+        if (fatalExitCode_) {
             err = "a write to the store failed during the reindex";
             return false;
         }
@@ -798,7 +886,8 @@ LoadResult ChainState::load(const LoadOptions& opt) {
     }
 
     // Blocks that were stored but not connected before shutdown.
-    if (!activateBestChain(err)) return failure(EXIT_DATABASE_CORRUPT, err);
+    if (!activateBestChain(err)) return failure(fatalExitCode_ ? fatalExitCode_ : EXIT_DATABASE_CORRUPT, err);
+    lastTipMove_ = 0;   // connecting stored blocks at startup (also --reindex) is not a download in progress
 
     LoadResult ok;
     ok.ok = true;

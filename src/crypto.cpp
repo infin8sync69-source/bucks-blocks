@@ -2,13 +2,18 @@
 #include "crypto.h"
 #include "consensus.h"
 #include <openssl/sha.h>
-#include <openssl/ripemd.h>
 #include <openssl/bn.h>
 #include <openssl/crypto.h>
 #include <openssl/ec.h>
 #include <openssl/ecdsa.h>
 #include <openssl/obj_mac.h>
 #include <openssl/rand.h>
+#include <openssl/opensslv.h>
+
+// CMakeLists.txt asks for OpenSSL 3 too; this also covers build.sh and hand-made builds.
+#if !defined(OPENSSL_VERSION_MAJOR) || OPENSSL_VERSION_MAJOR < 3
+#error "Bucks needs OpenSSL 3.0 or newer"
+#endif
 
 #include <sstream>
 #include <iomanip>
@@ -112,6 +117,78 @@ bool encodePublicKey(const EC_GROUP* group, const EC_POINT* pt, BN_CTX* ctx, Pub
     return true;
 }
 
+// ---------------- RIPEMD-160 compression ----------------
+
+// Message word order and left-rotation amounts of the 80 steps, left line [0] and right line [1].
+const uint8_t RMD_WORD[2][80] = {
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+     7, 4, 13, 1, 10, 6, 15, 3, 12, 0, 9, 5, 2, 14, 11, 8,
+     3, 10, 14, 4, 9, 15, 8, 1, 2, 7, 0, 6, 13, 11, 5, 12,
+     1, 9, 11, 10, 0, 8, 12, 4, 13, 3, 7, 15, 14, 5, 6, 2,
+     4, 0, 5, 9, 7, 12, 2, 10, 14, 1, 3, 8, 11, 6, 15, 13},
+    {5, 14, 7, 0, 9, 2, 11, 4, 13, 6, 15, 8, 1, 10, 3, 12,
+     6, 11, 3, 7, 0, 13, 5, 10, 14, 15, 8, 12, 4, 9, 1, 2,
+     15, 5, 1, 3, 7, 14, 6, 9, 11, 8, 12, 2, 10, 0, 4, 13,
+     8, 6, 4, 1, 3, 11, 15, 0, 5, 12, 2, 13, 9, 7, 10, 14,
+     12, 15, 10, 4, 1, 5, 8, 7, 6, 2, 13, 14, 0, 3, 9, 11}};
+
+const uint8_t RMD_ROT[2][80] = {
+    {11, 14, 15, 12, 5, 8, 7, 9, 11, 13, 14, 15, 6, 7, 9, 8,
+     7, 6, 8, 13, 11, 9, 7, 15, 7, 12, 15, 9, 11, 7, 13, 12,
+     11, 13, 6, 7, 14, 9, 13, 15, 14, 8, 13, 6, 5, 12, 7, 5,
+     11, 12, 14, 15, 14, 15, 9, 8, 9, 14, 5, 6, 8, 6, 5, 12,
+     9, 15, 5, 11, 6, 8, 13, 12, 5, 12, 13, 14, 11, 8, 5, 6},
+    {8, 9, 9, 11, 13, 15, 15, 5, 7, 7, 8, 11, 14, 14, 12, 6,
+     9, 13, 15, 7, 12, 8, 9, 11, 7, 7, 12, 7, 6, 15, 13, 11,
+     9, 7, 15, 11, 8, 6, 6, 14, 12, 13, 5, 14, 13, 13, 7, 5,
+     15, 5, 8, 11, 14, 14, 6, 14, 6, 9, 12, 9, 12, 5, 15, 8,
+     8, 5, 12, 9, 12, 5, 14, 6, 8, 13, 6, 5, 15, 13, 11, 11}};
+
+// Round constants of the five rounds.
+const uint32_t RMD_K[2][5] = {
+    {0x00000000, 0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xA953FD4E},
+    {0x50A28BE6, 0x5C4DD124, 0x6D703EF3, 0x7A6D76E9, 0x00000000}};
+
+inline uint32_t rotl32(uint32_t x, unsigned n) { return (x << n) | (x >> (32 - n)); }   // n is 5..15
+
+// The five boolean functions. Round i of the left line uses f(i), the right line f(4 - i).
+inline uint32_t rmdF(int i, uint32_t x, uint32_t y, uint32_t z) {
+    switch (i) {
+        case 0:  return x ^ y ^ z;
+        case 1:  return (x & y) | (~x & z);
+        case 2:  return (x | ~y) ^ z;
+        case 3:  return (x & z) | (y & ~z);
+        default: return x ^ (y | ~z);
+    }
+}
+
+// One 64-byte block into the state h0..h4. Words are little endian.
+void ripemd160Compress(uint32_t h[5], const uint8_t* block) {
+    uint32_t x[16];
+    for (int i = 0; i < 16; ++i) {
+        x[i] = uint32_t(block[4 * i]) | (uint32_t(block[4 * i + 1]) << 8) |
+               (uint32_t(block[4 * i + 2]) << 16) | (uint32_t(block[4 * i + 3]) << 24);
+    }
+    // a, b, c, d, e of the left line and of the right line.
+    uint32_t l[5] = {h[0], h[1], h[2], h[3], h[4]};
+    uint32_t r[5] = {h[0], h[1], h[2], h[3], h[4]};
+    for (int j = 0; j < 80; ++j) {
+        const int round = j / 16;
+        uint32_t t = rotl32(l[0] + rmdF(round, l[1], l[2], l[3]) + x[RMD_WORD[0][j]] + RMD_K[0][round],
+                            RMD_ROT[0][j]) + l[4];
+        l[0] = l[4]; l[4] = l[3]; l[3] = rotl32(l[2], 10); l[2] = l[1]; l[1] = t;
+        t = rotl32(r[0] + rmdF(4 - round, r[1], r[2], r[3]) + x[RMD_WORD[1][j]] + RMD_K[1][round],
+                   RMD_ROT[1][j]) + r[4];
+        r[0] = r[4]; r[4] = r[3]; r[3] = rotl32(r[2], 10); r[2] = r[1]; r[1] = t;
+    }
+    const uint32_t t = h[1] + l[2] + r[3];
+    h[1] = h[2] + l[3] + r[4];
+    h[2] = h[3] + l[4] + r[0];
+    h[3] = h[4] + l[0] + r[1];
+    h[4] = h[0] + l[1] + r[2];
+    h[0] = t;
+}
+
 } // namespace
 
 // ... (existing hashing functions)
@@ -174,11 +251,30 @@ Hash256 doubleSha256(const std::vector<uint8_t>& data) {
     return sha256(tmp);
 }
 
+// RIPEMD-160 is in-tree: OpenSSL 3 before 3.0.7 has it only in the legacy provider, so a distribution build
+// (Ubuntu 22.04 ships 3.0.2) failed every hash160, and hash160 is consensus (audit NEW-4). The structure follows
+// the algorithm description of Dobbertin, Bosselaers and Preneel; tests/unit/test_crypto.cpp checks it against
+// the published test vectors and against OpenSSL.
 Hash160 ripemd160(const std::vector<uint8_t>& data) {
-    // RIPEMD-160 is only in the default provider from OpenSSL 3.0.7 on.
-    Hash160 out{};
-    if (!RIPEMD160(data.data(), data.size(), out.data()))
-        throw std::runtime_error("RIPEMD-160 failed");
+    uint32_t h[5] = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
+    const size_t n = data.size();
+    size_t off = 0;
+    for (; off + 64 <= n; off += 64) ripemd160Compress(h, data.data() + off);
+
+    // Padding: 0x80, zeros up to 56 mod 64, then the length in bits as 64-bit little endian.
+    uint8_t tail[128] = {};
+    const size_t rest = n - off;
+    if (rest) std::memcpy(tail, data.data() + off, rest);
+    tail[rest] = 0x80;
+    const size_t tailLen = rest < 56 ? 64 : 128;
+    const uint64_t bits = uint64_t(n) << 3;
+    for (int i = 0; i < 8; ++i) tail[tailLen - 8 + i] = uint8_t(bits >> (8 * i));
+    ripemd160Compress(h, tail);
+    if (tailLen == 128) ripemd160Compress(h, tail + 64);
+
+    Hash160 out;
+    for (int i = 0; i < 5; ++i)
+        for (int b = 0; b < 4; ++b) out[4 * i + b] = uint8_t(h[i] >> (8 * b));
     return out;
 }
 
@@ -583,6 +679,54 @@ bool verifyECDSA(
 
 bool hashLessThan(const Hash256& a, const Hash256& b) {
     return std::memcmp(a.data(), b.data(), 32) < 0;
+}
+
+bool cryptoSelfTest(std::string& err) {
+    auto bytes = [](const std::string& s) { return std::vector<uint8_t>(s.begin(), s.end()); };
+    auto hex = [](const auto& h) { return hexStr(std::vector<uint8_t>(h.begin(), h.end())); };
+    const std::string twoBlocks = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";   // padding spills over
+    try {
+        // FIPS 180-2 and the RIPEMD-160 reference vectors.
+        if (hex(sha256(bytes("abc"))) != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" ||
+            hex(sha256(bytes(twoBlocks))) != "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1") {
+            err = "SHA-256 gives wrong results";
+            return false;
+        }
+        if (hex(ripemd160({})) != "9c1185a5c5e9fc54612808977ee8f548b2258d31" ||
+            hex(ripemd160(bytes("abc"))) != "8eb208f7e05d987a9b044a8e98c6b087f15a0bfc" ||
+            hex(ripemd160(bytes(twoBlocks))) != "12a053384a9c0c88e405a06c27dcf49ada62eb2b") {
+            err = "RIPEMD-160 gives wrong results";
+            return false;
+        }
+        // The secret key 1 has the generator as its public key; hash160(G) is the BIP-173 example.
+        PrivateKey one{};
+        one[31] = 1;
+        PublicKey g;
+        if (!derivePublicKey(one, g) ||
+            hexStr(g) != "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798") {
+            err = "secp256k1 key derivation gives wrong results";
+            return false;
+        }
+        if (hex(hash160(g)) != "751e76e8199196d454941c45d1b3a323f1433bd6") {
+            err = "hash160 gives wrong results";
+            return false;
+        }
+        const PrivateKey key = sha256(bytes("bucks self-test key"));
+        const Hash256 msg = sha256(bytes("bucks self-test message"));
+        Hash256 other = msg;
+        other[0] ^= 1;
+        PublicKey pub;
+        std::vector<uint8_t> sig;
+        if (!derivePublicKey(key, pub) || !signECDSA(msg, key, sig) || !verifyECDSA(msg, sig, pub) ||
+            verifyECDSA(other, sig, pub)) {
+            err = "secp256k1 sign/verify round trip failed";
+            return false;
+        }
+    } catch (const std::exception& e) {
+        err = e.what();
+        return false;
+    }
+    return true;
 }
 
 } // namespace Bucks

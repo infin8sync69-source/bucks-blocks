@@ -3,6 +3,7 @@
 export const COIN = 100000000n; // base units per BUCKS
 export const TICKER = "BUCKS";
 export const MIN_FEE_UNITS = 100000n; // node policy: fee = max(0.001 BUCKS, size * 100)
+export const DUST_LIMIT_UNITS = 546n; // node policy: smallest output it relays (also in /api/blockchain/info)
 export const COINBASE_MATURITY = 100; // consensus: blocks before a reward can be spent
 
 // Base58Check address version byte per network (src/chainparams.cpp).
@@ -30,10 +31,26 @@ export function fmtBucks(units, { trim = false } = {}) {
   return `${neg ? "-" : ""}${whole}.${frac}`;
 }
 
-/** "12.5" -> 1250000000n. Returns { ok, units, error }. Strict: digits and at most 8 decimals. */
+// Arabic-Indic (U+0660-0669) and Extended Arabic-Indic (U+06F0-06F9) digits, and the Arabic decimal separator.
+const toAsciiDigits = (s) => s
+  .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+  .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0))
+  .replace(/\u066B/g, ".");
+
+/**
+ * "12.5" -> 1250000000n. Returns { ok, units, error }. Strict: digits and at most 8 decimals.
+ * A single comma is a decimal mark ("12,5"), except where it reads as a thousands separator: "1,000"
+ * could be 1 or 1000, so it is refused rather than guessed (NEW-8, ONB-21).
+ */
 export function parseBucks(text) {
-  const t = String(text ?? "").trim().replace(/,/g, ".");
+  let t = toAsciiDigits(String(text ?? "").trim());
   if (!t) return { ok: false, error: "Enter an amount." };
+  const commas = (t.match(/,/g) || []).length;
+  // U+066C is the Arabic thousands separator; "1,000" is a valid thousands grouping as well as a decimal.
+  if (t.includes("\u066C") || commas > 1 || (commas && t.includes(".")) || /^[1-9]\d{0,2},\d{3}$/.test(t)) {
+    return { ok: false, error: "Do not use thousands separators. Write the amount with a point for decimals, for example 1000 or 1.5." };
+  }
+  t = t.replace(",", ".");
   if (!/^\d*\.?\d*$/.test(t) || t === ".") return { ok: false, error: "Use digits and a decimal point only." };
   const [w, f = ""] = t.split(".");
   if (f.length > 8) return { ok: false, error: "At most 8 decimal places." };
@@ -41,6 +58,53 @@ export function parseBucks(text) {
   if (units <= 0n) return { ok: false, error: "Amount must be greater than zero." };
   if (units > BigInt(Number.MAX_SAFE_INTEGER)) return { ok: false, error: "Amount is too large." };
   return { ok: true, units };
+}
+
+/**
+ * Why a payment of `units` cannot be made from a wallet, or "" when it can. `spendable` is what the node can
+ * spend now (balance minus immature rewards and coins locked by pending payments, ONB-07); `fee` is the
+ * node's estimate when `feeKnown`, else the minimum fee; `dust` is the node's smallest relayed output (NEW-8).
+ */
+export function amountProblem(units, { balance, spendable, fee = MIN_FEE_UNITS, feeKnown = false, dust = DUST_LIMIT_UNITS }) {
+  const u = BigInt(units), bal = BigInt(balance), sp = BigInt(spendable ?? balance), f = BigInt(fee), d = BigInt(dust);
+  const t = (v) => fmtBucks(v, { trim: true });
+  if (u < d) return `The network does not relay payments below ${t(d)} BUCKS.`;
+  if (u > bal) return `That is more than this wallet holds (${t(bal)} BUCKS).`;
+  if (u > sp) return `Only ${t(sp)} BUCKS can be spent now. The rest is mining rewards that are not mature yet, or coins locked in a payment that is still pending.`;
+  if (u + f > sp) return `Not enough left to also pay the network fee (${feeKnown ? "" : "at least "}${t(f)} BUCKS). At most ${t(sp > f ? sp - f : 0n)} BUCKS can be sent.`;
+  return "";
+}
+
+/**
+ * What the console says about the node's place in the network (ONB-04). A node without peers is on a chain of
+ * its own whatever its tip looks like, so it is never called "Synced". `info` is /api/blockchain/info and
+ * `node` /api/status (peerCount, uptimeSeconds); `node` may be missing while it loads. `alone` asks for the
+ * no-peers banner: not on regtest, a private chain, and not in the first minute while seeds are dialled.
+ */
+export function syncStatus(info, node) {
+  if (!info) return null;
+  const peers = node && Number.isFinite(Number(node.peerCount)) ? Number(node.peerCount) : null;
+  const starting = !!node && Number(node.uptimeSeconds) < 60;
+  const noPeers = peers === 0;
+  const alone = noPeers && !starting && info.network !== "regtest";
+  if (info.syncing) return { label: "Syncing", tone: "warn", sub: noPeers ? "Waiting for peers to download from" : "Initial block download in progress", noPeers, alone };
+  if (peers === null) return { label: "Tip", tone: "", sub: "Peer count not known yet", noPeers, alone };
+  if (noPeers) return { label: starting ? "Connecting" : "No peers", tone: "warn", sub: starting ? "Looking for peers" : "Not connected to any other node", noPeers, alone };
+  return { label: "Synced", tone: "ok", sub: `Following the chain tip with ${peers} peer${peers === 1 ? "" : "s"}`, noPeers, alone };
+}
+
+/**
+ * How one entry of GET /api/wallets/<address>/history is shown: label, sign of the amount, status text and
+ * pill tone. A mining reward is spendable once it has `maturity` confirmations.
+ */
+export function describeActivity(t, { maturity = COINBASE_MATURITY } = {}) {
+  const label = { sent: "Sent", received: "Received", mined: "Mining reward", self: "To yourself" }[t.kind] || "Transaction";
+  const sign = t.kind === "sent" ? "-" : t.kind === "self" ? "" : "+";
+  if (t.status === "pending") return { label, sign, status: "Pending", tone: "warn" };
+  const conf = Number(t.confirmations) || 0;
+  const left = maturity - conf;
+  if (t.kind === "mined" && left > 0) return { label, sign, status: `Matures in ${left} block${left === 1 ? "" : "s"}`, tone: "warn" };
+  return { label, sign, status: `${fmtInt(conf)} confirmation${conf === 1 ? "" : "s"}`, tone: "ok" };
 }
 
 export function fmtInt(n) {
@@ -190,3 +254,12 @@ export function validateAddress(addr, network) {
 }
 
 export function isHex64(s) { return /^[0-9a-fA-F]{64}$/.test(s); }
+
+/**
+ * A restore the node saves only after the user confirms (a passphrase that gives a wallet with no coins,
+ * often a typo): the address of that wallet, else "". `err` is the ApiError of the restore call.
+ */
+export function unusedRestoreAddress(err) {
+  const b = err && err.status === 409 ? err.body : null;
+  return b && b.confirmRequired === true && b.wallet && typeof b.wallet.address === "string" ? b.wallet.address : "";
+}

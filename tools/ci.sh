@@ -7,10 +7,13 @@
 #   tools/ci.sh tsan       ThreadSanitizer, all tests (network, miner and server run on threads)
 #   tools/ci.sh fuzz       fuzz targets: replay the seed corpus, then fuzz for BUCKS_FUZZ_SECONDS
 #                          (default 60 per target; the nightly job uses 600). Needs a clang with the
-#                          libFuzzer runtime (Linux clang, Homebrew LLVM); set CC/CXX if it is not
-#                          the default compiler. Without libFuzzer it only replays the corpus.
-#   tools/ci.sh soak       three-node regtest soak (BUCKS_SOAK_SECONDS, default 90): mining, kill -9, restart, convergence
-#   tools/ci.sh all        build, asan, tsan, fuzz
+#                          libFuzzer runtime (Linux clang plus libclang-rt-<version>-dev, Homebrew LLVM);
+#                          set CC/CXX if it is not the default compiler. Without libFuzzer it only
+#                          replays the corpus, except in CI (CI=true) or with BUCKS_REQUIRE_LIBFUZZER=1,
+#                          where that is an error.
+#   tools/ci.sh soak       three-node regtest soak (BUCKS_SOAK_SECONDS, default 90): mining, kill -9, restart,
+#                          convergence. Ports: BASE_API/BASE_P2P (default 18290/18390, three each)
+#   tools/ci.sh all        build, asan, tsan, fuzz, soak
 #
 # Build directories are build-ci-<job> next to the sources (git-ignored).
 
@@ -28,13 +31,13 @@ configure_and_build() {   # <dir> <cmake args...>
 
 job_build() {
     local dir="$ROOT/build-ci-build"
-    configure_and_build "$dir" -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    configure_and_build "$dir" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUCKS_BUILD_TESTS=ON
     (cd "$dir" && ctest --output-on-failure --timeout 900)
 }
 
 job_asan() {
     local dir="$ROOT/build-ci-asan"
-    configure_and_build "$dir" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUCKS_SANITIZE=address,undefined
+    configure_and_build "$dir" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUCKS_BUILD_TESTS=ON -DBUCKS_SANITIZE=address,undefined
     (cd "$dir" && \
         ASAN_OPTIONS="abort_on_error=1:detect_stack_use_after_return=1" \
         UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1" \
@@ -43,7 +46,7 @@ job_asan() {
 
 job_tsan() {
     local dir="$ROOT/build-ci-tsan"
-    configure_and_build "$dir" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUCKS_SANITIZE=thread
+    configure_and_build "$dir" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUCKS_BUILD_TESTS=ON -DBUCKS_SANITIZE=thread
     local opts="halt_on_error=1:history_size=5"
     # The default symbolizer can hang on macOS; resolve addresses with atos instead.
     [[ "$(uname)" == "Darwin" ]] && opts="$opts:symbolize=0"
@@ -51,8 +54,12 @@ job_tsan() {
 }
 
 job_soak() {
+    # Reuse the binary of a build job when there is one; otherwise build only the node.
     local dir="$ROOT/build-ci-build"
-    [ -x "$dir/bucks" ] || configure_and_build "$dir" -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    if [ ! -x "$dir/bucks" ]; then
+        dir="$ROOT/build-ci-soak"
+        configure_and_build "$dir" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUCKS_BUILD_TESTS=OFF
+    fi
     "$ROOT/tools/soak.sh" "$dir/bucks" "${BUCKS_SOAK_SECONDS:-90}"
 }
 
@@ -64,8 +71,17 @@ job_fuzz() {
     if [[ -z "${CXX:-}" && -x /opt/homebrew/opt/llvm/bin/clang++ ]]; then
         extra+=(-DCMAKE_C_COMPILER=/opt/homebrew/opt/llvm/bin/clang -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++)
     fi
-    configure_and_build "$dir" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUCKS_FUZZ=ON "${extra[@]}" \
+    cmake -S "$ROOT" -B "$dir" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUCKS_FUZZ=ON "${extra[@]}" \
         ${CC:+-DCMAKE_C_COMPILER="$CC"} ${CXX:+-DCMAKE_CXX_COMPILER="$CXX"}
+    # A fuzz job that can only replay the corpus would pass without fuzzing anything (audit SAN-5):
+    # in CI that means a broken runner, so stop before the build.
+    if ! grep -q "BUCKS_HAVE_LIBFUZZER:INTERNAL=1" "$dir/CMakeCache.txt" &&
+       [[ "${CI:-}" == true || "${BUCKS_REQUIRE_LIBFUZZER:-0}" == 1 ]]; then
+        echo "No libFuzzer runtime in $(sed -n 's/^CMAKE_CXX_COMPILER:[A-Z]*=//p' "$dir/CMakeCache.txt")."
+        echo "Install it (Ubuntu: libclang-rt-<clang version>-dev) or point CC/CXX at a clang that has it."
+        exit 1
+    fi
+    cmake --build "$dir" -j "$JOBS"
 
     # 1. Every seed and every checked-in reproducer must pass (works with or without libFuzzer).
     (cd "$dir" && ctest -L fuzz --output-on-failure)
@@ -98,5 +114,5 @@ case "$JOB" in
     fuzz)  job_fuzz ;;
     soak)  job_soak ;;
     all)   job_build; job_asan; job_tsan; job_fuzz; job_soak ;;
-    *)     sed -n '2,17p' "${BASH_SOURCE[0]}"; exit 2 ;;
+    *)     sed -n '2,18p' "${BASH_SOURCE[0]}"; exit 2 ;;
 esac
