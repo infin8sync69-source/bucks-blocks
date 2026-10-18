@@ -1183,14 +1183,7 @@ void Server::setupRoutes() {
         if (walletUnavailable(res)) return;
         std::lock_guard<std::mutex> lock(walletMutex);
         json walletArray = json::array();
-        for (const auto& wallet : wallets) {
-            uint64_t balance = 0;
-            try { balance = wallet.getBalance(node); } catch (...) {}
-            walletArray.push_back({
-                {"address", wallet.getAddress()},
-                {"balance", balance}
-            });
-        }
+        for (const auto& wallet : wallets) walletArray.push_back(walletSummaryLocked(wallet));
         res.set_content(json{{"wallets", walletArray}}.dump(), "application/json");
     });
 
@@ -1276,6 +1269,7 @@ void Server::setupRoutes() {
             Wallet w = Wallet::createNew(&mnemonic, lang, entropyBits);
             w.setAddressVersion(node.params().p2pkhAddressVersion);
             w.setMnemonic("");
+            markBackupPending(w);   // until the user confirms the phrase (ONB-08)
             // Which list (and which exact bytes of it) the phrase needs, so support can still tell years later
             // (gate WORDLIST-1).
             bool persisted = addWallet(w, json{{"wordlist", lang}, {"wordlistSha256", list->sha256}});
@@ -1389,6 +1383,8 @@ void Server::setupRoutes() {
                 std::lock_guard<std::mutex> lock(walletMutex);
                 for (const auto& existing : wallets) {
                     if (existing.getAddress() == address) {
+                        // Typing the whole phrase in proves the backup of a wallet whose check was never finished (ONB-08).
+                        if (backupPendingLocked(existing)) confirmBackupLocked(existing);
                         json out = {{"success", true}, {"wallet", walletJson(existing)}, {"existing", true}};
                         out.update(echo);
                         reply(res, 200, out);
@@ -1498,6 +1494,22 @@ void Server::setupRoutes() {
 
         try {
             Transaction tx = sender.createTransaction(toAddress, amount, node);
+            // "maxFee" is the fee the user approved on the review screen; coin selection may have
+            // changed since (a reward matured, another payment locked coins), so never pay more (ONB-03).
+            uint64_t fee = 0;
+            const bool feeKnown = paymentFee(sender, tx, fee);
+            if (j.contains("maxFee")) {
+                if (!j["maxFee"].is_number_unsigned()) {
+                    reply(res, 400, errorJson("maxFee must be an unsigned integer"));
+                    return;
+                }
+                if (!feeKnown || fee > j["maxFee"].get<uint64_t>()) {
+                    json out = errorJson("The network fee is now higher than the fee you approved; review the payment again");
+                    if (feeKnown) out["fee"] = fee;
+                    reply(res, 409, out);
+                    return;
+                }
+            }
             const ValidationState accepted = node.submitTransaction(tx);
             if (accepted.valid()) {
                 // The network layer and WebSocket clients hear about it through the node's listeners.
@@ -1507,6 +1519,7 @@ void Server::setupRoutes() {
                     {"outputCount", tx.outputs.size()},
                     {"totalAmount", amount}
                 };
+                if (feeKnown) txJson["fee"] = fee;
                 res.set_content(json{{"success", true}, {"transaction", txJson}}.dump(), "application/json");
             } else {
                 reply(res, 400, errorJson("Transaction rejected: " + accepted.code));
@@ -1514,6 +1527,23 @@ void Server::setupRoutes() {
         } catch (const std::exception& e) {
             reply(res, 400, errorJson(e.what()));
         }
+    });
+
+    // Wallet views for the console: see the "Wallet views" section below.
+    s->Post("/api/transactions/estimate", [this](const httplib::Request& req, httplib::Response& res) {
+        json out;
+        const int status = estimatePayment(req.body, out);
+        reply(res, status, out);
+    });
+    s->Get(R"(/api/wallets/([1-9A-HJ-NP-Za-km-z]+)/history)", [this](const httplib::Request& req, httplib::Response& res) {
+        json out;
+        const int status = walletHistory(req.matches[1], req.get_param_value("limit"), req.get_param_value("depth"), out);
+        reply(res, status, out);
+    });
+    s->Post("/api/wallets/backup", [this](const httplib::Request& req, httplib::Response& res) {
+        json out;
+        const int status = confirmWalletBackup(req.body, out);
+        reply(res, status, out);
     });
 
     // Mine Block
@@ -1915,6 +1945,309 @@ nlohmann::json Server::txToJSON(const Transaction& tx) const {
     };
 }
 
+// ============================================================================
+// Wallet views for the console (read-only, except the backup flag)
+// ============================================================================
+
+// One entry of GET /api/wallets. "balance" counts every confirmed coin; a payment can only use "spendable":
+// mining rewards younger than the coinbase maturity are "immature" and coins a pending payment spends are
+// "locked" (ONB-07). "incoming" is what unconfirmed transactions pay to the wallet, its own change included.
+json Server::walletSummaryLocked(const Wallet& w) const {
+    uint64_t balance = 0, coinsTotal = 0, immature = 0, spendable = 0, incoming = 0;
+    try {
+        const Hash160 key = hash160(w.getPublicKey());
+        balance = node.balance(key);
+        const uint64_t next = uint64_t(node.height()) + 1;
+        // The same coins (and limit) the wallet selects from when it pays.
+        for (const CoinRow& c : node.coinsByHash160(key, 20000)) {
+            coinsTotal += c.coin.amount;
+            if (c.coin.isCoinbase && next < uint64_t(c.coin.height) + Consensus::COINBASE_MATURITY) immature += c.coin.amount;
+        }
+        for (const CoinRow& c : node.spendableCoins(key, 20000)) spendable += c.coin.amount;
+        const Script own = w.getP2PKHScript();
+        for (const Transaction& tx : node.mempoolTransactions(5000))
+            for (const auto& o : tx.outputs) if (o.scriptPubKey == own) incoming += o.amount;
+    } catch (...) {}
+    const uint64_t usable = std::min(coinsTotal, balance);
+    const uint64_t locked = usable > immature + spendable ? usable - immature - spendable : 0;
+    return json{{"address", w.getAddress()}, {"balance", balance}, {"spendable", spendable},
+                {"immature", immature}, {"locked", locked}, {"incoming", incoming},
+                {"backedUp", !backupPendingLocked(w)}};
+}
+
+// Public key of a wallets.json entry, lower-case ("" when absent or not a string).
+static std::string entryPublicKey(const json& e) {
+    auto it = e.find("pubKeyHex");
+    if (it == e.end()) it = e.find("pubKey");
+    return it != e.end() && it->is_string() ? lowerAscii(it->get<std::string>()) : std::string();
+}
+
+// A created wallet's entry carries "backupConfirmed": false until the user confirms its recovery phrase
+// (ONB-08); the console keeps such a wallet from looking ready. Restored wallets, and entries written before
+// the flag existed, count as backed up. backupPending_ holds the wallets this process created that are not
+// confirmed yet: saveWalletsLocked writes their flag, and they still count if the file could not be written.
+bool Server::backupPendingLocked(const Wallet& w) const {
+    const std::string pub = lowerAscii(w.getPublicKeyHex());
+    if (backupPending_.count(pub)) return true;
+    if (!walletDoc.contains("wallets") || !walletDoc["wallets"].is_array()) return false;
+    for (const auto& e : walletDoc["wallets"]) {
+        if (e.is_object() && entryPublicKey(e) == pub) {
+            auto it = e.find("backupConfirmed");
+            return it != e.end() && it->is_boolean() && !it->get<bool>();
+        }
+    }
+    return false;
+}
+
+bool Server::confirmBackupLocked(const Wallet& w) {
+    const std::string pub = lowerAscii(w.getPublicKeyHex());
+    backupPending_.erase(pub);
+    if (walletDoc.contains("wallets") && walletDoc["wallets"].is_array()) {
+        for (auto& e : walletDoc["wallets"])
+            if (e.is_object() && entryPublicKey(e) == pub) e["backupConfirmed"] = true;
+    }
+    return saveWalletsLocked();
+}
+
+// Called before addWallet, so that the wallet's first entry on disk already carries the flag.
+void Server::markBackupPending(const Wallet& w) {
+    std::lock_guard<std::mutex> lock(walletMutex);
+    backupPending_.insert(lowerAscii(w.getPublicKeyHex()));
+}
+
+// POST /api/wallets/backup {address[, mnemonic, passphrase]}: the user confirmed the recovery phrase. The
+// console sends only the address after its own word check; a user who left the backup half-way proves the
+// phrase by sending it, and the node checks that it gives this wallet (nothing is stored).
+int Server::confirmWalletBackup(const std::string& body, json& out) {
+    if (!walletOk) {
+        out = errorJson("Wallet subsystem disabled: " + walletErr);
+        return 503;
+    }
+    json j;
+    try { j = body.empty() ? json::object() : json::parse(body); } catch (...) { out = errorJson("Invalid JSON body"); return 400; }
+    if (!j.is_object() || !j.contains("address") || !j["address"].is_string() ||
+        (j.contains("mnemonic") && !j["mnemonic"].is_string()) || (j.contains("passphrase") && !j["passphrase"].is_string())) {
+        out = errorJson("address (string) is required; mnemonic and passphrase must be strings");
+        return 400;
+    }
+    const std::string address = j["address"];
+    Wallet w;
+    {
+        std::lock_guard<std::mutex> lock(walletMutex);
+        auto it = std::find_if(wallets.begin(), wallets.end(), [&](const Wallet& x) { return x.getAddress() == address; });
+        if (it == wallets.end()) {
+            out = errorJson("No wallet with that address on this node");
+            return 404;
+        }
+        w = *it;
+    }
+    if (j.contains("mnemonic")) {
+        std::string phrase = j["mnemonic"];
+        std::string derived;
+        try {
+            Wallet check = Wallet::fromMnemonic(phrase, j.value("passphrase", ""));
+            check.setAddressVersion(node.params().p2pkhAddressVersion);
+            derived = check.getAddress();
+        } catch (const std::exception& e) {
+            OPENSSL_cleanse(&phrase[0], phrase.size());
+            out = errorJson(e.what());   // never contains the phrase (see Wallet::fromMnemonic)
+            return 400;
+        }
+        OPENSSL_cleanse(&phrase[0], phrase.size());
+        if (derived != address) {
+            out = errorJson("That phrase belongs to a different wallet");
+            return 400;
+        }
+    }
+    std::lock_guard<std::mutex> lock(walletMutex);
+    const bool persisted = confirmBackupLocked(w);
+    out = json{{"success", true}, {"address", address}, {"backedUp", true}, {"persisted", persisted}};
+    return 200;
+}
+
+// Fee of a payment this node's wallet just built: every input is one of the wallet's confirmed coins, so the fee
+// is their sum minus the outputs (dust change that went to the miner included).
+bool Server::paymentFee(const Wallet& from, const Transaction& tx, uint64_t& fee) const {
+    std::map<std::pair<Hash256, uint32_t>, uint64_t> coins;
+    for (const CoinRow& c : node.coinsByHash160(hash160(from.getPublicKey()), 20000))
+        coins[{c.op.txid, c.op.index}] = c.coin.amount;
+    uint64_t in = 0;
+    for (const auto& input : tx.inputs) {
+        auto it = coins.find({input.prevTxid, input.prevIndex});
+        if (it == coins.end()) return false;
+        in += it->second;
+    }
+    const uint64_t out = tx.totalOutput();
+    if (in < out) return false;
+    fee = in - out;
+    return true;
+}
+
+// POST /api/transactions/estimate {from, to, amount}: builds the payment exactly as /api/transactions/send
+// would and returns its fee without sending it, so the review screen can show the real fee (ONB-03).
+int Server::estimatePayment(const std::string& body, json& out) {
+    if (!walletOk) {
+        out = errorJson("Wallet subsystem disabled: " + walletErr);
+        return 503;
+    }
+    json j;
+    try { j = body.empty() ? json::object() : json::parse(body); } catch (...) { out = errorJson("Invalid JSON body"); return 400; }
+    if (!j.is_object() || !j.contains("from") || !j["from"].is_string() || !j.contains("to") || !j["to"].is_string() ||
+        !j.contains("amount") || !j["amount"].is_number_unsigned()) {
+        out = errorJson("from, to (strings) and amount (unsigned integer) are required");
+        return 400;
+    }
+    const uint64_t amount = j["amount"];
+    if (amount < Policy::DUST_LIMIT) {
+        out = errorJson("amount is below the dust limit of " + std::to_string(Policy::DUST_LIMIT) + " awraq");
+        return 400;
+    }
+    Wallet sender;
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lock(walletMutex);
+        for (const auto& w : wallets) {
+            if (w.getAddress() == j["from"].get<std::string>()) { sender = w; found = true; break; }
+        }
+    }
+    if (!found) {
+        out = errorJson("Sender wallet not found");
+        return 404;
+    }
+    try {
+        const Transaction tx = sender.createTransaction(j["to"].get<std::string>(), amount, node);
+        uint64_t fee = 0;
+        if (!paymentFee(sender, tx, fee)) {
+            out = errorJson("Could not work out the fee; try again");
+            return 503;
+        }
+        out = json{{"success", true}, {"amount", amount}, {"fee", fee}, {"total", amount + fee},
+                   {"change", tx.totalOutput() - amount}, {"inputCount", tx.inputs.size()},
+                   {"outputCount", tx.outputs.size()}, {"size", tx.serialize().size()}};
+        return 200;
+    } catch (const std::exception& e) {
+        out = errorJson(e.what());
+        return 400;
+    }
+}
+
+// GET /api/wallets/<address>/history[?limit=50&depth=1000]: what one wallet sent and received, newest first:
+// its transactions in the mempool ("pending"), then those in the newest `depth` blocks ("confirmed"). The node
+// has no address index yet (docs/design/storage-concurrency.md Q2), so the blocks are scanned and the reply
+// says how far back ("scannedFrom", "complete"). A payment from the wallet is recognised by its unlock
+// script, which carries the wallet's public key (ONB-05, NEW-7).
+int Server::walletHistory(const std::string& address, const std::string& limitText, const std::string& depthText,
+                          json& out) {
+    if (!walletOk) {
+        out = errorJson("Wallet subsystem disabled: " + walletErr);
+        return 503;
+    }
+    auto number = [](const std::string& text, size_t fallback, size_t max, size_t& value) {
+        if (text.empty()) { value = fallback; return true; }
+        if (text.size() > 6 || text.find_first_not_of("0123456789") != std::string::npos) return false;
+        value = std::stoul(text);
+        return value >= 1 && value <= max;
+    };
+    size_t limit = 0, depth = 0;
+    if (!number(limitText, 50, 500, limit) || !number(depthText, 1000, 100000, depth)) {
+        out = errorJson("limit must be 1-500 and depth 1-100000");
+        return 400;
+    }
+    Wallet w;
+    json summary;
+    {
+        std::lock_guard<std::mutex> lock(walletMutex);
+        auto it = std::find_if(wallets.begin(), wallets.end(), [&](const Wallet& x) { return x.getAddress() == address; });
+        if (it == wallets.end()) {
+            out = errorJson("No wallet with that address on this node");
+            return 404;
+        }
+        w = *it;
+        summary = walletSummaryLocked(w);
+    }
+    const Script own = w.getP2PKHScript();
+    const PublicKey& pub = w.getPublicKey();
+    const uint8_t version = node.params().p2pkhAddressVersion;
+
+    // One activity entry for `tx`, or false when it neither pays nor spends this wallet.
+    auto describe = [&](const Transaction& tx, json& e) {
+        uint64_t toSelf = 0, toOthers = 0;
+        std::string firstOther;
+        for (const auto& o : tx.outputs) {
+            Hash160 h{};
+            if (o.scriptPubKey == own) toSelf += o.amount;
+            else if (isP2PKH(o.scriptPubKey, &h)) {
+                toOthers += o.amount;
+                if (firstOther.empty()) firstOther = base58CheckEncode(version, std::vector<uint8_t>(h.begin(), h.end()));
+            }
+        }
+        bool fromSelf = false;
+        if (!tx.isCoinbase()) {
+            for (const auto& in : tx.inputs) {
+                std::vector<uint8_t> sig;
+                CompressedPubKey key{};
+                if (parseP2PKHUnlock(in.scriptSig, sig, key) && std::equal(key.begin(), key.end(), pub.begin(), pub.end())) {
+                    fromSelf = true;
+                    break;
+                }
+            }
+        }
+        if (!fromSelf && toSelf == 0) return false;
+        e = json{{"txid", hash256ToHex(tx.txid())}};
+        if (tx.isCoinbase()) { e["kind"] = "mined"; e["amount"] = toSelf; }
+        else if (fromSelf && toOthers) { e["kind"] = "sent"; e["amount"] = toOthers; e["to"] = firstOther; e["change"] = toSelf; }
+        else if (fromSelf) { e["kind"] = "self"; e["amount"] = toSelf; }
+        else { e["kind"] = "received"; e["amount"] = toSelf; }
+        return true;
+    };
+
+    json activity = json::array();
+    try {
+        for (const Transaction& tx : node.mempoolTransactions(5000)) {
+            if (activity.size() >= limit) break;
+            json e;
+            if (!describe(tx, e)) continue;
+            e["status"] = "pending";
+            if (e["kind"] == "sent" || e["kind"] == "self") {
+                uint64_t fee = 0;
+                if (paymentFee(w, tx, fee)) e["fee"] = fee;
+            }
+            activity.push_back(e);
+        }
+        const uint32_t tip = node.height();
+        uint32_t lowest = tip;
+        size_t scanned = 0;
+        bool reachedGenesis = false;
+        for (uint32_t height = tip; scanned < depth && activity.size() < limit; --height) {
+            ++scanned;
+            lowest = height;
+            if (auto block = node.blockByHeight(height)) {
+                for (auto it = block->transactions.rbegin(); it != block->transactions.rend() && activity.size() < limit; ++it) {
+                    json e;
+                    if (!describe(*it, e)) continue;
+                    e["status"] = "confirmed";
+                    e["height"] = height;
+                    e["confirmations"] = tip - height + 1;
+                    e["time"] = block->header.timestamp;
+                    activity.push_back(e);
+                }
+            }
+            if (height == 0) { reachedGenesis = true; break; }
+        }
+        out = summary;
+        out["success"] = true;
+        out["tipHeight"] = tip;
+        out["scannedFrom"] = lowest;
+        out["scannedBlocks"] = scanned;
+        out["complete"] = reachedGenesis && activity.size() < limit;
+        out["activity"] = activity;
+        return 200;
+    } catch (const std::exception& e) {
+        out = errorJson(std::string("Could not read the chain: ") + e.what());
+        return 500;
+    }
+}
+
 bool Server::checkIPFSStatus(std::string& peerId) {
     if (!config.enableIPFS) return true; // Bypass if not enabled (or should we force it?)
     // Plan says: "If IPFS is offline, refuse to mine". So if enabled, we MUST check.
@@ -2212,6 +2545,7 @@ bool Server::saveWalletsLocked() {
         e["privKeyHex"] = w.getPrivateKeyHex();
         e["pubKeyHex"]  = w.getPublicKeyHex();
         e["address"]    = w.getAddress();
+        if (backupPending_.count(pub)) e["backupConfirmed"] = false;   // created, phrase not confirmed (ONB-08)
         arr.push_back(e);
     }
     for (auto& e : opaque) {

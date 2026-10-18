@@ -1,8 +1,9 @@
 import { h, icon, card, append, kv, copyButton, pageHead, keyedRender, skeletonRows, errorState, notice, field, busy, toast } from "../ui.js";
 import { get, post, ApiError } from "../api.js";
-import { state, loadWallets, selectWallet, selectedWallet, emit } from "../store.js";
+import { state, loadWallets, selectWallet, selectedWallet, emit, subscribe, onUnsavedCheck } from "../store.js";
 import { fmtBucks, COINBASE_MATURITY, NETWORKS, unusedRestoreAddress } from "../util.js";
 import { toSvg } from "../qr.js";
+import { wordMatches, pickCheckIndexes } from "../phrase.js";
 
 // The recovery phrase lives only in this module variable while the user writes
 // it down. It is never put in localStorage, sessionStorage, the URL or the DOM
@@ -13,24 +14,30 @@ let pending = null; // { words: string[], direction, address, persisted, saveErr
 window.addEventListener("beforeunload", (e) => {
   if (pending) { e.preventDefault(); e.returnValue = ""; }
 });
+// Sign out asks first while a backup is unfinished; signing out or an expired session then drops the
+// phrase, so the next person to sign in at this browser never sees it (ONB-17).
+onUnsavedCheck(() => !!pending);
+subscribe((s) => { if (s.authChecked && !s.authenticated) { pending = null; restored = null; } });
 
 export function mount(root) {
-  let mode = pending ? "phrase" : "main"; // main | create | restore | phrase | done
+  let mode = pending ? "phrase" : "main"; // main | create | restore | phrase | done | restored | verify
   const holder = h("div", { class: "stack" });
   root.append(holder);
   let langs = null; // cached /api/wallets/languages
   const draw = keyedRender(holder);
 
-  function go(m) { mode = m; lastSig = null; render(state); }
+  // The form views write into holder directly, so the main view's cache is stale after any switch (ONB-06).
+  // The new view's heading takes the focus, so keyboard and screen-reader users keep their place (ONB-18).
+  function go(m) { mode = m; lastSig = null; draw.reset(); render(state); focusHeading(); }
   let lastSig = null;
 
   function render(s) {
-    const sig = [mode, s.walletsEnabled, s.walletsError, s.wallets && s.wallets.map((w) => [w.address, w.balance]), s.selected, s.info && s.info.network];
-    if (mode === "create" || mode === "restore" || mode === "phrase") {
+    const sig = [mode, s.walletsEnabled, s.walletsError, s.wallets, s.selected, s.info && s.info.network];
+    if (mode === "create" || mode === "restore" || mode === "phrase" || mode === "verify") {
       // forms keep their own state; build them once per mode switch
       if (JSON.stringify(sig.slice(0, 1)) === lastSig) return;
       lastSig = JSON.stringify(sig.slice(0, 1));
-      holder.replaceChildren(mode === "create" ? createView() : mode === "restore" ? restoreView() : phraseView());
+      holder.replaceChildren(mode === "create" ? createView() : mode === "restore" ? restoreView() : mode === "verify" ? verifyView() : phraseView());
       focusHeading();
       return;
     }
@@ -59,15 +66,44 @@ export function mount(root) {
         h("div", { class: "stack" },
           card("Balance", h("div", { class: "stack" },
             h("div", { class: "balance", "aria-label": `Balance ${fmtBucks(w.balance)} BUCKS` }, fmtBucks(w.balance), h("small", null, "BUCKS")),
-            h("p", { class: "muted", style: "margin:0;font-size:.88rem" }, `Includes newly mined rewards, which can be spent only after ${COINBASE_MATURITY} further blocks.`),
+            balanceParts(w),
             h("div", { class: "row actions" }, h("a", { class: "btn primary", href: "#/send" }, icon("send", { size: 16 }), "Send"), h("a", { class: "btn", href: "#/history" }, icon("history", { size: 16 }), "History"))), { cls: "accent" }),
           s.wallets.length > 1 && card("Wallets on this node", h("div", { class: "list" }, s.wallets.map((x) =>
             h("button", { type: "button", class: "list-row tx-row btn ghost", style: "text-align:left;justify-content:flex-start;min-height:56px", "aria-pressed": x.address === w.address, onclick: () => selectWallet(x.address) },
-              h("span", { class: "mono wrap" }, x.address, x.address === w.address && h("span", { class: "pill ok", style: "margin-left:8px" }, "selected")),
+              h("span", { class: "mono wrap" }, x.address, x.address === w.address && h("span", { class: "pill ok", style: "margin-left:8px" }, "selected"),
+                x.backedUp === false && h("span", { class: "pill warn", style: "margin-left:8px" }, "not backed up")),
               h("span", { class: "num" }, `${fmtBucks(x.balance, { trim: true })}`),
               h("span", { class: "sub hide-sm" }, "BUCKS"))))),
           notice("info", "Your keys are kept by this node. Back up your recovery phrase; the node cannot show it again.")),
-        card("Receive", receive(w.address, net))));
+        w.backedUp === false ? backupFirst(w) : card("Receive", receive(w.address, net))));
+  }
+
+  // A created wallet whose phrase was not confirmed is not ready: its address stays hidden until the backup
+  // is confirmed, here or with the whole phrase if the user left half-way (ONB-08).
+  function backupFirst(w) {
+    const resumable = pending && pending.address === w.address;
+    return card("Back up this wallet first", h("div", { class: "stack" },
+      notice("warn", h("strong", null, "Not backed up. "), resumable
+        ? "You have not finished checking the recovery phrase of this wallet. Its receiving address is shown once you have."
+        : "The recovery phrase of this wallet was never confirmed, and the node cannot show it again. Its receiving address is hidden so that no coins go to a wallet you might not be able to restore."),
+      resumable
+        ? h("div", { class: "row actions" }, h("button", { type: "button", class: "btn primary", onclick: () => go("phrase") }, "Continue the backup"))
+        : [h("p", { style: "margin:0" }, "If you wrote the words down, type them in to confirm the backup. If you did not, do not use this wallet: create a new one and back it up. Coins already in this wallet can still be sent to the new one."),
+          h("div", { class: "row actions" },
+            h("button", { type: "button", class: "btn primary", onclick: () => { verifyFor = w.address; go("verify"); } }, "I have the phrase: check it"),
+            h("button", { type: "button", class: "btn", onclick: () => go("create") }, icon("plus", { size: 16 }), "Create a new wallet"))]), { cls: "accent" });
+  }
+
+  // What of the balance can be spent now (ONB-07). Older nodes send only "balance".
+  function balanceParts(w) {
+    if (w.spendable == null) return h("p", { class: "muted", style: "margin:0;font-size:.88rem" }, `Includes newly mined rewards, which can be spent only after ${COINBASE_MATURITY} further blocks.`);
+    const amount = (v) => `${fmtBucks(v, { trim: true })} BUCKS`;
+    return kv([
+      ["Spendable now", h("strong", null, amount(w.spendable))],
+      BigInt(w.immature || 0) > 0n && ["Maturing rewards", h("span", null, amount(w.immature), h("span", { class: "sub", style: "display:block" }, `Mining rewards can be spent ${COINBASE_MATURITY} blocks after they were mined.`))],
+      BigInt(w.locked || 0) > 0n && ["In pending payments", h("span", null, amount(w.locked), h("span", { class: "sub", style: "display:block" }, "Coins spent by a payment that is not in a block yet. Its change comes back when it is."))],
+      BigInt(w.incoming || 0) > 0n && ["Incoming", h("span", null, amount(w.incoming), h("span", { class: "sub", style: "display:block" }, "Not confirmed yet; not part of the balance until it is in a block."))],
+    ]);
   }
 
   function receive(address, net) {
@@ -182,7 +218,8 @@ export function mount(root) {
     let revealed = false;
     let step = 1; // 1 write down, 2 verify
     const wrap = h("div", { class: "stack" });
-    const idx = pickIndexes(p.words.length);
+    const idx = pickCheckIndexes(p.words.length);
+    const normalizer = p.direction === "rtl" ? "arabic" : "latin";
 
     function paint() {
       wrap.replaceChildren();
@@ -197,8 +234,17 @@ export function mount(root) {
     function step1() {
       const list = h("ol", { class: `words${revealed ? "" : " hidden"}`, dir: p.direction, lang: p.direction === "rtl" ? "ar" : null, "aria-label": "Recovery phrase" },
         p.words.map((w, i) => h("li", null, h("span", { class: "n" }, `${i + 1}.`), h("span", null, w))));
+      // Reveal and Hide only toggle the blur, so the button keeps the focus (ONB-18).
+      const reveal = h("button", { type: "button", class: "btn", "aria-pressed": String(revealed) });
+      const showRevealed = () => {
+        reveal.setAttribute("aria-pressed", String(revealed));
+        reveal.replaceChildren(icon(revealed ? "eyeoff" : "eye", { size: 16 }), revealed ? "Hide words" : "Reveal words");
+        wrap.querySelectorAll("ol.words").forEach((ol) => ol.classList.toggle("hidden", !revealed));
+      };
+      reveal.addEventListener("click", () => { revealed = !revealed; showRevealed(); });
+      showRevealed();
       const ack = h("input", { type: "checkbox", id: "ack" });
-      const next = h("button", { type: "button", class: "btn primary lg", disabled: true, onclick: () => { step = 2; paint(); focusHeading(); } }, "Continue");
+      const next = h("button", { type: "button", class: "btn primary lg", disabled: true, onclick: () => { step = 2; paint(); wrap.querySelector("input").focus(); } }, "Continue");
       ack.addEventListener("change", () => { next.disabled = !ack.checked; });
       return card(null, h("div", { class: "stack" },
         notice("warn", h("strong", null, `Write these ${p.words.length} words on paper, in order. `), "This is the only time they are shown. Do not screenshot them, email them or store them in a notes app."),
@@ -207,26 +253,42 @@ export function mount(root) {
           h("p", { class: "muted", style: "margin:0" }, "The same phrase in the base Arabic list. Either version restores this wallet; you only need to keep one."),
           h("ol", { class: `words${revealed ? "" : " hidden"}`, dir: "rtl", lang: "ar", "aria-label": "Recovery phrase in the base Arabic list" },
             p.canonical.map((w, i) => h("li", null, h("span", { class: "n" }, `${i + 1}.`), h("span", null, w))))),
-        h("div", { class: "row" },
-          h("button", { type: "button", class: "btn", "aria-pressed": revealed, onclick: () => { revealed = !revealed; paint(); } }, icon(revealed ? "eyeoff" : "eye", { size: 16 }), revealed ? "Hide words" : "Reveal words")),
+        h("div", { class: "row" }, reveal),
         h("label", { class: "check", for: "ack" }, ack, h("span", null, "I have written down all the words in order and stored the paper somewhere safe.")),
         h("div", { class: "row actions" }, next)));
     }
     function step2() {
-      const inputs = idx.map((i, k) => h("input", { id: `chk-${k}`, type: "text", autocomplete: "off", autocapitalize: "off", spellcheck: "false", dir: p.direction }));
+      const inputs = idx.map((i, k) => h("input", { id: `chk-${k}`, type: "text", autocomplete: "off", autocapitalize: "off", spellcheck: "false", dir: p.canonical ? "auto" : p.direction }));
       const err = h("div", { role: "alert" });
+      const finish = h("button", { type: "submit", class: "btn primary lg" }, "Confirm and finish");
       const form = h("form", { novalidate: true, class: "stack" },
-        h("p", { style: "margin:0" }, "Type the words below from your paper to prove you wrote them down correctly."),
+        h("p", { style: "margin:0" }, `Type these ${idx.length} words from your paper to prove you wrote them down correctly.`,
+          normalizer === "arabic" || p.canonical ? " Short vowels (harakat) and the way hamza is written do not matter." : ""),
         idx.map((i, k) => field({ id: `chk-${k}`, label: `Word number ${i + 1}`, input: inputs[k] })),
         err,
         h("div", { class: "row actions" },
-          h("button", { type: "submit", class: "btn primary lg" }, "Confirm and finish"),
-          h("button", { type: "button", class: "btn ghost", onclick: () => { step = 1; paint(); } }, "Back to the words")));
-      form.addEventListener("submit", (e) => {
+          finish,
+          h("button", { type: "button", class: "btn ghost", onclick: () => { step = 1; paint(); wrap.querySelector("button[aria-pressed]").focus(); } }, "Back to the words")));
+      form.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const ok = idx.every((i, k) => inputs[k].value.trim().normalize("NFC").toLowerCase() === p.words[i].normalize("NFC").toLowerCase());
+        if (finish.disabled) return;
+        // Compared as the node compares words when it restores; either written form of the phrase counts (ONB-16).
+        const ok = idx.every((i, k) => wordMatches(inputs[k].value, p.words[i], normalizer) ||
+          (p.canonical && wordMatches(inputs[k].value, p.canonical[i], "arabic")));
         if (!ok) { err.replaceChildren(notice("error", "Those words do not match. Look at your paper (or go back to the words) and try again.")); return; }
+        // The node records the backup before the phrase is dropped: if that fails the user can try again (ONB-08).
+        err.replaceChildren();
+        busy(finish, true, "Saving…");
+        try {
+          await post("/api/wallets/backup", { address: p.address });
+        } catch (ex) {
+          finish.disabled = false;
+          finish.replaceChildren("Confirm and finish");
+          err.replaceChildren(notice("error", `The node did not record the backup: ${ex instanceof ApiError && ex.offline ? "it cannot be reached" : ex.message}. Your words are still here; try again.`));
+          return;
+        }
         pending = null; // drop the phrase from memory
+        await loadWallets(false);
         go("done");
       });
       return card("Check your backup", form);
@@ -235,13 +297,39 @@ export function mount(root) {
     return h("div", { class: "stack" }, pageHead("Your recovery phrase", p.address ? `For wallet ${p.address}` : undefined), wrap);
   }
 
-  function pickIndexes(n) {
-    const a = new Set();
-    const buf = new Uint32Array(8);
-    crypto.getRandomValues(buf);
-    for (const v of buf) { if (a.size < 2) a.add(v % n); }
-    while (a.size < 2) a.add((a.size + 1) % n);
-    return [...a].sort((x, y) => x - y);
+  // ---------- verify: confirm the backup of a wallet whose check was never finished ----------
+  let verifyFor = "";
+  function verifyView() {
+    const address = verifyFor || (selectedWallet() || {}).address;
+    if (!address) { setTimeout(() => go("main"), 0); return h("div"); }
+    const ta = h("textarea", { id: "v-phrase", rows: 4, autocomplete: "off", autocapitalize: "off", autocorrect: "off", spellcheck: "false" });
+    const pass = h("input", { id: "v-pass", type: "password", autocomplete: "off" });
+    const err = h("div");
+    const submit = h("button", { type: "submit", class: "btn primary lg" }, "Check the phrase");
+    const form = h("form", { class: "card", novalidate: true },
+      h("div", { class: "stack" },
+        field({ id: "v-phrase", label: "Recovery phrase", hint: "All the words, in order, separated by spaces. The node checks that they give this wallet and does not store them.", input: ta }),
+        h("details", null, h("summary", { style: "cursor:pointer;margin-bottom:10px" }, "Advanced: passphrase"), field({ id: "v-pass", label: "Passphrase (optional)", input: pass })),
+        err,
+        h("div", { class: "row actions" }, submit, h("button", { type: "button", class: "btn ghost", onclick: () => go("main") }, "Cancel"))));
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      err.replaceChildren();
+      const phrase = ta.value.trim().replace(/\s+/g, " ");
+      if (!phrase) { err.replaceChildren(notice("error", "Enter the recovery phrase.")); ta.focus(); return; }
+      busy(submit, true, "Checking…");
+      try {
+        await post("/api/wallets/backup", { address, mnemonic: phrase, passphrase: pass.value });
+        ta.value = ""; pass.value = "";
+        await loadWallets(false);
+        toast("Backup confirmed. The wallet is ready.", "ok");
+        go("main");
+      } catch (ex) {
+        submit.disabled = false; submit.textContent = "Check the phrase";
+        err.replaceChildren(notice("error", ex instanceof ApiError && ex.offline ? "Cannot reach the node." : ex.message));
+      }
+    });
+    return h("div", { class: "stack" }, pageHead("Confirm your backup", `Wallet ${address}`), form);
   }
 
   function restoredView() {
@@ -258,7 +346,7 @@ export function mount(root) {
   function doneView() {
     return h("div", { class: "stack" }, pageHead("Wallet ready"),
       card(null, h("div", { class: "stack" },
-        notice("ok", "Your wallet was created and your backup is confirmed. The phrase has been cleared from this page."),
+        notice("ok", "Your wallet was created and your backup is confirmed. The phrase has been cleared from this page, and the wallet's receiving address is now on the Wallet page."),
         h("div", { class: "row actions" }, h("button", { class: "btn primary", type: "button", onclick: () => go("main") }, "Go to my wallet")))));
   }
 

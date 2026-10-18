@@ -33,6 +33,11 @@ const subs = new Set();
 export function subscribe(fn) { subs.add(fn); return () => subs.delete(fn); }
 export function emit() { subs.forEach((fn) => { try { fn(state); } catch (e) { console.error(e); } }); }
 
+// Pages register a check here when they hold something that signing out would lose (an unfinished backup).
+const unsavedChecks = new Set();
+export function onUnsavedCheck(fn) { unsavedChecks.add(fn); }
+export const hasUnsaved = () => [...unsavedChecks].some((fn) => fn());
+
 try { state.selected = sessionStorage.getItem("bucks.selected") || ""; } catch { /* storage unavailable */ }
 export function selectWallet(addr) {
   state.selected = addr;
