@@ -50,6 +50,16 @@ DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 log() { printf '[bootstrap] %s\n' "$*"; }
 die() { printf '[bootstrap] ERROR: %s\n' "$*" >&2; exit 1; }
 as_builder() { runuser -u "$BUILD_USER" -- "$@"; }
+# The ports sshd answers on: the socket unit when Ubuntu starts sshd on demand (24.04), else sshd_config.
+sshd_ports() {
+    local p=""
+    if [ "$(systemctl is-active ssh.socket 2>/dev/null || true)" = active ]; then
+        p=$(systemctl show ssh.socket -p Listen --value 2>/dev/null | sed -n 's/.*:\([0-9][0-9]*\) (Stream)$/\1/p' || true)
+    elif command -v sshd >/dev/null 2>&1; then
+        p=$(sshd -T 2>/dev/null | awk '$1 == "port" { print $2 }' || true)
+    fi
+    printf '%s\n' "$p" | sort -u
+}
 
 # ---------------------------------------------------------------- 0. checks
 [ "$(id -u)" -eq 0 ] || die "run as root"
@@ -57,6 +67,12 @@ as_builder() { runuser -u "$BUILD_USER" -- "$@"; }
 . /etc/os-release
 case "${VERSION_ID:-}" in 22.04|24.04) ;; *) die "only Ubuntu 22.04/24.04 are covered (found ${PRETTY_NAME:-unknown})" ;; esac
 case "$BUCKS_ROLE" in seed|miner|console) ;; *) die "BUCKS_ROLE must be seed, miner or console" ;; esac
+case "$SSH_PORT" in ''|*[!0-9]*) die "SSH_PORT must be a port number" ;; esac
+# ufw is enabled below with only SSH_PORT open for SSH; stop here rather than lock the operator out.
+ssh_listen=$(sshd_ports)
+if [ -n "$ssh_listen" ] && ! grep -qx "$SSH_PORT" <<<"$ssh_listen"; then
+    die "sshd listens on port ${ssh_listen//$'\n'/ } but SSH_PORT is $SSH_PORT, the only SSH port the firewall would allow: set SSH_PORT=<that port>"
+fi
 case "$BUCKS_NETWORK" in
     main) P2P_PORT=8733; API_PORT=8080 ;;
     test) P2P_PORT=18733; API_PORT=18080 ;;
@@ -238,7 +254,7 @@ if [ "$BUCKS_ROLE" = console ]; then
 
     if [ ! -s "$htpasswd" ]; then
         pass=$(openssl rand -base64 18)
-        printf 'operator:%s\n' "$(openssl passwd -apr1 "$pass")" > "$htpasswd"
+        printf 'operator:%s\n' "$(printf '%s' "$pass" | openssl passwd -apr1 -stdin)" > "$htpasswd"
         chown root:www-data "$htpasswd"
         chmod 0640 "$htpasswd"
         (umask 077; printf 'console basic-auth user: operator\npassword: %s\n' "$pass" > /root/bucks-console-credentials)

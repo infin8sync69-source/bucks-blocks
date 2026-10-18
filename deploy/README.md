@@ -59,7 +59,8 @@ BUCKS_ADMIN_CIDR=<your IP>/32 ACME_EMAIL=<you>`; the basic-auth password is writ
 `/root/bucks-console-credentials` and the login token is `sudo cat /etc/bucks/api-token`.
 More peers: `BUCKS_SEEDS="seed1.example.org:8733 seed2.example.org:8733"`. A testnet node:
 `BUCKS_NETWORK=test`. Without github.com access during the build: `BUCKS_RUN_TESTS=0` (no googletest
-download) or `GTEST_SRC=<googletest v1.14.0 checkout>`.
+download) or `GTEST_SRC=<googletest v1.14.0 checkout>`. The firewall allows SSH on `SSH_PORT` (default 22)
+only; if sshd listens elsewhere the bootstrap stops before enabling it, so set `SSH_PORT=<port>`.
 
 The build needs about 1.2 GB of RAM per compile job (the script picks the job count from free memory)
 and builds for the Ubuntu release it runs on; a binary built on 24.04 does not run on 22.04.

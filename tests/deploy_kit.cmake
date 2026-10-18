@@ -123,6 +123,13 @@ foreach(timer bucks-backup.timer bucks-healthcheck.timer)
         list(APPEND errors "bootstrap-ubuntu.sh does not start ${timer} ('systemctl enable --now ${timer}')")
     endif()
 endforeach()
+# A password on a command line shows in `ps`; openssl reads it from stdin instead.
+string(REGEX MATCHALL "openssl passwd[^\n]*" passwd_lines "${bootstrap}")
+foreach(line IN LISTS passwd_lines)
+    if(NOT line MATCHES "-stdin")
+        list(APPEND errors "bootstrap-ubuntu.sh: '${line}' passes the password on the command line (use -stdin)")
+    endif()
+endforeach()
 # A monotonic OnBootSec has long passed when the bootstrap starts the timer: the first check would run at once.
 file(READ "${D}/bucks-healthcheck.timer" hc_timer)
 if(hc_timer MATCHES "(^|\n)OnBootSec=")
