@@ -707,6 +707,31 @@ TEST(Network, SimultaneousDialsLeaveOneConnection) {
     EXPECT_EQ(t.netB->peerCount(), 1u);
 }
 
+// Two users behind one NAT address both listen on the default port, so a peer sees the same address and
+// listen port from both. They are different nodes (different nonces): the seed keeps both, and neither is
+// closed as a "second connection" to the other.
+TEST(Network, TwoNodesBehindOneAddressWithTheSamePortAreNotDuplicates) {
+    NodeHarness a, b, c;
+    ASSERT_TRUE(a.node && b.node && c.node);
+    Network netA(*a.node), netB(*b.node), netC(*c.node);
+    const uint16_t portA = freePort(), portB = freePort(), portC = freePort();
+    netA.start(portA);
+    netB.start(portB);
+    netC.start(portC);
+    netC.listenPort = portB;   // C says in its VERSION what B says
+    ASSERT_TRUE(netB.connectToPeer("127.0.0.1", portA));
+    ASSERT_TRUE(netC.connectToPeer("127.0.0.1", portA));
+    ASSERT_TRUE(waitFor([&] { return netA.peerCount() == 2 && netB.peerCount() == 1 && netC.peerCount() == 1; }))
+        << netA.peerCount() << " " << netB.peerCount() << " " << netC.peerCount();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));   // a duplicate is closed at VERSION
+    EXPECT_EQ(netA.peerCount(), 2u);
+    EXPECT_EQ(netB.peerCount(), 1u);
+    EXPECT_EQ(netC.peerCount(), 1u);
+    netC.stop();
+    netB.stop();
+    netA.stop();
+}
+
 // NET-NEW-4: a peer cannot fill the table; what is beyond its allowance is dropped unread.
 TEST(P2pAudit, AddressFloodIsRateLimited) {
     TwoNodes t;

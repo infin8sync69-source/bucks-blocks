@@ -375,7 +375,8 @@ public:
     // Random per process; a VERSION carrying it means we dialled ourselves.
     uint64_t localNonce() const { return localNonce_; }
     void markSelf(const std::string& hostPort);
-    // A second connection to the node `p` just identified is closed (true if that is `p`).
+    // A second connection to the node `p` just identified (same nonce, same address) is closed
+    // (true if that is `p`).
     bool dropDuplicate(Peer& p);
     // Keeps the address table in this file across restarts: read now, written every 15 minutes
     // and at stop(). Call before start().

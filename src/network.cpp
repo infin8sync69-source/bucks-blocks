@@ -1872,19 +1872,20 @@ void Network::relayAddress(const NetAddress& a, int exceptFd) {
 // each other at the same moment (both learned the other's address together), each has two
 // connections to the other. Both ends keep the one dialled by the node with the larger nonce, so
 // they drop the same connection. True if `p` itself was dropped.
+// A node is told apart by its nonce, not by the port it says it listens on: two users behind one
+// NAT address both run the default port. The address must match as well, so a peer that has seen
+// someone else's nonce cannot get that node's connection to us closed by quoting it from elsewhere.
 bool Network::dropDuplicate(Peer& p) {
-    const std::optional<NetAddress> addr = p.listenAddress();
-    if (!addr) return false;
     for (auto& [fd, other] : peers) {
         if (other.get() == &p || !other->versionSeen() || other->getState() == PeerState::DISCONNECTED) continue;
-        if (other->listenAddress() != addr) continue;
+        if (other->remoteNonce() != p.remoteNonce() || other->getIP() != p.getIP()) continue;
         Peer* drop = &p;   // the same direction twice: the newer one goes
         if (p.outbound() != other->outbound()) {
             Peer* out = p.outbound() ? &p : other.get();
             Peer* in = p.outbound() ? other.get() : &p;
             drop = localNonce_ > p.remoteNonce() ? in : out;
         }
-        Bucks::logOut() << "DEBUG: Second connection to " << addr->toString() << "; closing "
+        Bucks::logOut() << "DEBUG: Second connection to " << p.getIP() << "; closing "
                         << (drop->outbound() ? "ours" : "theirs") << std::endl;
         drop->disconnect();
         return drop == &p;
