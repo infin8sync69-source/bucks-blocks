@@ -369,6 +369,33 @@ TEST(ChainState, ApprovingAnInvalidBranchFails) {
     EXPECT_EQ(err, "no parked branch with that tip");
 }
 
+// The approved branch is valid up to a point past the one where it overtakes us and invalid after it: the node
+// follows it as far as it is valid, and approveReorg says so instead of claiming it stayed on its chain.
+TEST(ChainState, ApprovingABranchInvalidAfterTheOvertakeReportsTheMove) {
+    TestChain t(regtestWithDepth(5));
+    branch(t, t.state().tip(), 10, 0);
+    const BlockIndex* parent = t.state().activeChain()[4];
+    std::vector<Block> side;
+    for (int i = 0; i < 9; ++i) {                       // heights 5..13; ours ends at 10, so 11 overtakes
+        // Height 12 claims one unit too much: only ConnectBlock can see it.
+        const uint64_t amount = i == 7 ? Rules::Subsidy(parent->height + 1, t.params()) + 1 : 0;
+        Block b = t.build(parent, {}, 1, 600, amount);
+        ASSERT_TRUE(t.submit(b).valid()) << i;
+        side.push_back(b);
+        parent = t.state().find(b.getHash());
+    }
+    ASSERT_TRUE(t.state().forkAlert().active);
+
+    std::string err;
+    EXPECT_FALSE(t.state().approveReorg(side.back().getHash(), err));
+    EXPECT_EQ(t.state().tip()->hash, side[6].getHash());          // height 11: the valid part of the branch
+    EXPECT_NE(err.find("moved"), std::string::npos) << err;
+    EXPECT_EQ(err.find("stays on its chain"), std::string::npos) << err;
+    EXPECT_NE(err.find("height 11"), std::string::npos) << err;
+    EXPECT_TRUE(t.state().find(side[7].getHash())->failed());
+    EXPECT_FALSE(t.state().forkAlert().active);
+}
+
 // A peer's best known block that turned out invalid stops counting: it must not hold the peer's download
 // accounting (the most work it announced) while valid announcements with less work are ignored.
 TEST(ChainState, AFailedBlockIsNotMoreWork) {

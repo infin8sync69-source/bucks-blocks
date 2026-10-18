@@ -294,6 +294,7 @@ bool ChainState::approveReorg(const Hash256& tipHash, std::string& err) {
         else
             ++it;
     }
+    const BlockIndex* tipBefore = chain_.tip();
     if (!activateBestChain(err)) {
         fail(EXIT_DATABASE_CORRUPT, err);
         err = fatalError_;
@@ -306,7 +307,12 @@ bool ChainState::approveReorg(const Hash256& tipHash, std::string& err) {
     if (!chain_.contains(approved)) {
         if (approved->failed()) {
             if (alert_.active && alert_.otherTip == tipHash) alert_ = ForkAlert{};   // nothing left to decide
-            err = "the approved branch is invalid; this node stays on its chain";
+            // A branch that is invalid beyond the point where it overtook us is connected up to that point first:
+            // the node has then left its chain, and must not say it stayed (audit CON-7).
+            err = chain_.tip() != tipBefore
+                ? "the approved branch is invalid; this node moved to its valid part and is now at height " +
+                      std::to_string(chain_.tip()->height)
+                : "the approved branch is invalid; this node stays on its chain";
         } else {
             err = "the approved branch did not become the active chain (no more work than the tip?)";
         }
