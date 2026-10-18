@@ -101,13 +101,70 @@ def verify(name, time, nonce, bits, inscription, merkle=None, block_hash=None, o
 FIELDS = ("genesisTime", "genesisNonce", "genesisInscription", "genesisMerkleRoot", "genesisHash", "powLimitBits")
 
 
+ESCAPES = {'"': '"', "\\": "\\", "'": "'", "?": "?"}
+
+
+def cpp_string(text):
+    """The value of one or more adjacent C++ string literals; only the escapes an inscription can need
+    (\\" and \\\\), because checkChainParams allows nothing but printable ASCII."""
+    text = text.strip()
+    out, i = [], 0
+    while i < len(text):
+        if text[i] != '"':
+            raise ValueError("not a string literal: %s" % text)
+        i += 1
+        while True:
+            if i >= len(text):
+                raise ValueError("unterminated string literal: %s" % text)
+            c = text[i]
+            if c == '"':
+                i += 1
+                break
+            if c == "\\":
+                if i + 1 >= len(text) or text[i + 1] not in ESCAPES:
+                    raise ValueError("unsupported escape in: %s" % text)
+                out.append(ESCAPES[text[i + 1]])
+                i += 2
+            else:
+                out.append(c)
+                i += 1
+        while i < len(text) and text[i].isspace():
+            i += 1
+    return "".join(out)
+
+
+def scan(body):
+    """Splits C++ source into statements at ';' outside string literals, dropping // and /* */ comments
+    that are outside them too. Whitespace outside literals is kept as is."""
+    statements, cur, i, n = [], [], 0, len(body)
+    while i < n:
+        c = body[i]
+        if c == '"':
+            j = i + 1
+            while j < n and body[j] != '"':
+                j += 2 if body[j] == "\\" else 1
+            cur.append(body[i:j + 1])
+            i = j + 1
+        elif body.startswith("//", i):
+            j = body.find("\n", i)
+            i = n if j < 0 else j
+        elif body.startswith("/*", i):
+            j = body.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+        elif c == ";":
+            statements.append("".join(cur))
+            cur = []
+            i += 1
+        else:
+            cur.append(c)
+            i += 1
+    return statements
+
+
 def parse_value(field, text):
-    text = " ".join(text.split())
     if field == "genesisInscription":
-        m = re.fullmatch(r'"([^"\\]*)"', text)
-        if not m:
-            raise ValueError("cannot read %s = %s" % (field, text))
-        return m.group(1)
+        return cpp_string(text)
+    text = " ".join(text.split())
     if field in ("genesisMerkleRoot", "genesisHash"):
         if text == "Hash256{}":
             return "00" * 32
@@ -130,11 +187,12 @@ def read_chainparams(path):
         m = re.search(r"ChainParams %s\(\)\s*\{(.*?)\n\}" % fn, src, re.S)
         if not m:
             raise ValueError("%s() not found in %s" % (fn, path))
-        body = re.sub(r"//[^\n]*", "", m.group(1))
-        values = dict(networks["main"]) if re.search(r"ChainParams p = makeMain\(\);", body) else {}
-        for field, value in re.findall(r"\bp\.(\w+)\s*=\s*(.*?);", body, re.S):
-            if field in FIELDS:
-                values[field] = parse_value(field, value)
+        statements = scan(m.group(1))
+        values = dict(networks["main"]) if any(re.search(r"ChainParams p = makeMain\(\)", t) for t in statements) else {}
+        for t in statements:
+            a = re.match(r"\s*p\.(\w+)\s*=(.*)", t, re.S)
+            if a and a.group(1) in FIELDS:
+                values[a.group(1)] = parse_value(a.group(1), a.group(2))
         missing = [f for f in FIELDS if f not in values]
         if missing:
             raise ValueError("%s() does not set %s" % (fn, ", ".join(missing)))
@@ -142,10 +200,41 @@ def read_chainparams(path):
     return networks
 
 
+def self_test():
+    """The parser reads what checkChainParams accepts: an inscription may contain ; // /* " and \\."""
+    inscription = 'Fed; cut // "rates" \\ /* 100% */ done'
+    literal = '"' + inscription.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    src = (
+        "ChainParams makeMain() {\n"
+        "    ChainParams p;\n"
+        "    p.genesisTime = 0;  // a comment with ; and \"quotes\"\n"
+        "    p.genesisInscription = " + literal + ";\n"
+        "    p.genesisNonce = 7u; /* block; comment */\n"
+        "    p.genesisMerkleRoot = Hash256{};\n"
+        "    p.genesisHash = Hash256{};\n"
+        "    p.powLimitBits = 0x1d00ffff;\n"
+        "    return p;\n"
+        "}\n")
+    m = re.search(r"ChainParams makeMain\(\)\s*\{(.*?)\n\}", src, re.S)
+    values = {}
+    for t in scan(m.group(1)):
+        a = re.match(r"\s*p\.(\w+)\s*=(.*)", t, re.S)
+        if a and a.group(1) in FIELDS:
+            values[a.group(1)] = parse_value(a.group(1), a.group(2))
+    expect = {"genesisTime": 0, "genesisInscription": inscription, "genesisNonce": 7,
+              "genesisMerkleRoot": "00" * 32, "genesisHash": "00" * 32, "powLimitBits": 0x1d00ffff}
+    if values != expect:
+        print("FAIL: parser self-test: %r != %r" % (values, expect))
+        return 1
+    print("ok: parser self-test")
+    return 0
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--chainparams", help="check every configured network in this chainparams.cpp")
     ap.add_argument("--require-main", action="store_true", help="fail if the mainnet genesis is not set")
+    ap.add_argument("--self-test", action="store_true", help="check the chainparams.cpp parser on awkward inscriptions")
     ap.add_argument("--time", type=int)
     ap.add_argument("--nonce", type=int)
     ap.add_argument("--bits", type=lambda s: int(s, 16), help="hex, e.g. 1d00ffff")
@@ -154,6 +243,8 @@ def main(argv):
     ap.add_argument("--hash", dest="block_hash", help="expected block hash (hex, raw byte order)")
     a = ap.parse_args(argv)
 
+    if a.self_test:
+        return self_test()
     if a.chainparams:
         try:
             networks = read_chainparams(a.chainparams)

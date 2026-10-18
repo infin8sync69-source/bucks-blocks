@@ -38,6 +38,8 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME genesis_independent
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/verify_genesis.py
                 --chainparams ${CMAKE_SOURCE_DIR}/src/chainparams.cpp)
+    add_test(NAME genesis_parser_selftest
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/verify_genesis.py --self-test)
     add_test(NAME genesis_independent_catches_a_wrong_nonce
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/verify_genesis.py
                 --time 1767225600 --nonce 1 --bits 207fffff "--inscription=Bucks regtest genesis"
