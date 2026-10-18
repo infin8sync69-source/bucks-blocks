@@ -60,7 +60,7 @@ export function mount(root) {
     if (mine.none || (state.wallets && !state.wallets.length)) return void mineBody.replaceChildren(emptyState("No wallet yet", "Create or restore a wallet to see what it sends and receives.", h("a", { class: "btn primary", href: "#/wallet" }, "Open wallet")));
     if (mine.error) return void mineBody.replaceChildren(errorState(errMsg(mine.error), () => load(true), "Could not load your activity"));
     const d = mine.data;
-    const rows = (d.activity || []).map(describeActivity);
+    const rows = (d.activity || []).map((t) => describeActivity(t));
     mineBody.replaceChildren(h("div", { class: "stack" },
       h("div", { class: "sub" }, "Wallet ", h("span", { class: "mono wrap" }, d.address), ` · spendable now ${fmtBucks(d.spendable, { trim: true })} BUCKS`),
       rows.length

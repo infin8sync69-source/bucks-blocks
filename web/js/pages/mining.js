@@ -20,6 +20,12 @@ export function fmtDuration(seconds) {
   return `${(s / (365.25 * 86400)).toFixed(1)} years`;
 }
 
+/** "about 5 min", but "under a second" and "—" stand alone. */
+export function fmtAbout(seconds) {
+  const d = fmtDuration(seconds);
+  return /^(\d|\d+\.)/.test(d) ? `about ${d}` : d;
+}
+
 /**
  * Average time to a block for this node: from the live hash rate while it mines, else from
  * the last rate measured in this browser session. { seconds, basis } or null.
@@ -86,7 +92,13 @@ export function mount(root) {
   const rewardSelect = h("select", { id: "m-reward" });
   rewardSelect.addEventListener("change", () => selectWallet(rewardSelect.value));
   const rewardField = field({ id: "m-reward", label: "Rewards go to", input: rewardSelect });
-  const payoutAddress = () => (rewardSelect.value || (selectedWallet() || {}).address || "");
+  // Mined coins go only to a wallet whose recovery phrase was confirmed: a wallet that is not backed up can be lost.
+  const backedUp = (s) => (s.wallets || []).filter((w) => w.backedUp !== false);
+  const payoutAddress = () => {
+    if (rewardSelect.value) return rewardSelect.value;
+    const w = selectedWallet();
+    return w && w.backedUp !== false ? w.address : "";
+  };
 
   function syncPolling(m) {
     const want = !!(m && (m.busy || (watchedJob && m.job && m.job.id === watchedJob && m.job.state === "running")));
@@ -154,25 +166,26 @@ export function mount(root) {
 
   function buildTop(s, m, eta) {
     const noWallet = s.wallets && s.wallets.length === 0;
+    const unbackedOnly = s.wallets && s.wallets.length > 0 && !backedUp(s).length;
     const searching = m.busy && !m.mining;
     return h("div", { class: "stack" },
       m.blockedReason && notice("warn", blockedText(m.blockedReason)),
       noWallet && !m.fixedPayoutAddress && notice("warn", h("span", null, "Mining needs a wallet to pay the rewards to. ", h("a", { href: "#/wallet" }, "Create or restore one first."))),
+      unbackedOnly && !m.fixedPayoutAddress && notice("warn", h("span", null, "Mining rewards can only go to a wallet whose recovery phrase you have confirmed. ", h("a", { href: "#/wallet" }, "Finish the backup first."))),
       h("div", { class: "grid cols-4" },
         stat("Status", m.mining ? "Mining" : searching ? "Searching" : "Idle", {
           tone: m.busy ? "ok" : undefined,
           sub: m.mining ? "Continuously, every block it can" : searching ? "For one block, until it is found" : "Miner is stopped",
         }),
         stat("Hash rate", m.busy ? (m.hashRate > 0 ? fmtHashRate(m.hashRate) : "Measuring…") : "—", { sub: `${fmtInt(m.threads)} ${m.threads === 1 ? "thread" : "threads"} on this node` }),
-        stat("Time to a block", eta ? `about ${fmtDuration(eta.seconds)}` : "—", {
+        stat("Time to a block", eta ? fmtAbout(eta.seconds) : "—", {
           sub: eta ? (eta.basis === "live" ? "On average, at this hash rate" : "On average, at the last measured rate") : "Start mining to measure",
         }),
         stat("Difficulty", s.info ? fmtDifficulty(s.info.difficulty) : "—", { sub: "Current network target" })));
   }
 
   function buildControls(s, m, eta) {
-    const noWallet = s.wallets && s.wallets.length === 0;
-    const canPay = !!m.fixedPayoutAddress || !noWallet;
+    const canPay = !!m.fixedPayoutAddress || backedUp(s).length > 0;
     const job = m.job;
     const searching = m.busy && !m.mining;
     const toggleBtn = h("button", { type: "button", class: `btn lg ${m.busy ? "danger" : "primary"}`, disabled: pendingAction || (!m.busy && !canPay) },
@@ -184,13 +197,13 @@ export function mount(root) {
     let reward;
     if (m.fixedPayoutAddress) {
       reward = kv([["Rewards go to", h("span", { class: "mono wrap" }, m.fixedPayoutAddress)]]);
-    } else if (s.wallets && s.wallets.length) {
+    } else if (backedUp(s).length) {
       const cur = m.busy && m.minerAddress ? m.minerAddress : payoutAddress();
-      rewardSelect.replaceChildren(...s.wallets.map((w) => h("option", { value: w.address, selected: w.address === cur }, `${shortAddr(w.address)}  ·  ${fmtBucks(w.balance, { trim: true })}`)));
+      rewardSelect.replaceChildren(...backedUp(s).map((w) => h("option", { value: w.address, selected: w.address === cur }, `${shortAddr(w.address)}  ·  ${fmtBucks(w.balance, { trim: true })}`)));
       rewardSelect.disabled = m.busy || pendingAction;   // the payout is fixed while the miner runs
       reward = rewardField;
     }
-    const etaText = eta ? `about ${fmtDuration(eta.seconds)}` : "";
+    const etaText = eta ? fmtAbout(eta.seconds) : "";
     // The last one-block search that found a block, also when it ended while this page was closed.
     const found = mineResult || (job && job.state === "found" && job.block ? { block: job.block, minerAddress: job.minerAddress } : null);
     return h("div", { class: "stack" },

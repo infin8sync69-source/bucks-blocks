@@ -15,7 +15,14 @@ assert.deepEqual(describeActivity({ kind: "mined", status: "confirmed", confirma
   { label: "Mining reward", sign: "+", status: "Matures in 99 blocks", tone: "warn" });
 assert.equal(describeActivity({ kind: "mined", status: "confirmed", confirmations: 99 }).status, "Matures in 1 block");
 assert.equal(describeActivity({ kind: "mined", status: "confirmed", confirmations: 100 }).tone, "ok");
-assert.equal(describeActivity({ kind: "mined", status: "confirmed", confirmations: 5 }, 3).tone, "ok");
+assert.equal(describeActivity({ kind: "mined", status: "confirmed", confirmations: 5 }, { maturity: 3 }).tone, "ok");
 assert.equal(describeActivity({ kind: "other", status: "confirmed", confirmations: 2 }).label, "Transaction");
 
 console.log("history.test.mjs: ok");
+
+// A mining reward matures after COINBASE_MATURITY confirmations. Array.map passes the row index as the second
+// argument; it once became the maturity and every reward showed "1 confirmation" (browser pass of 2026-10-18).
+const rewards = [1, 1, 50, 100].map((confirmations) => ({ kind: "mined", status: "confirmed", confirmations }));
+assert.deepEqual(rewards.map(describeActivity).map((r) => r.status),
+  ["Matures in 99 blocks", "Matures in 99 blocks", "Matures in 50 blocks", "100 confirmations"]);
+assert.equal(describeActivity({ kind: "mined", status: "confirmed", confirmations: 3 }, { maturity: 5 }).status, "Matures in 2 blocks");

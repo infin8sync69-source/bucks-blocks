@@ -2,7 +2,7 @@
 // The mining page's pure helpers: expected time to a block (ONB-11), the payout choice (ONB-12)
 // and why mining is blocked (ONB-14).
 import assert from "node:assert/strict";
-import { fmtDuration, expectedBlockTime, payoutBody, blockedText } from "../js/pages/mining.js";
+import { fmtDuration, fmtAbout, expectedBlockTime, payoutBody, blockedText } from "../js/pages/mining.js";
 
 assert.equal(fmtDuration(null), "—");
 assert.equal(fmtDuration(undefined), "—");
@@ -38,3 +38,7 @@ assert.equal(blockedText(""), "");
 assert.match(blockedText("node is syncing"), /cannot mine yet/);
 assert.equal(blockedText("no chain tip"), "This node cannot mine right now: no chain tip.");
 console.log("mining.test.mjs: ok");
+
+assert.equal(fmtAbout(300), "about 5 min");
+assert.equal(fmtAbout(0.2), "under a second");
+assert.equal(fmtAbout(null), "—");

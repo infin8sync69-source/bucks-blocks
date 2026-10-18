@@ -97,7 +97,7 @@ export function syncStatus(info, node) {
  * How one entry of GET /api/wallets/<address>/history is shown: label, sign of the amount, status text and
  * pill tone. A mining reward is spendable once it has `maturity` confirmations.
  */
-export function describeActivity(t, maturity = COINBASE_MATURITY) {
+export function describeActivity(t, { maturity = COINBASE_MATURITY } = {}) {
   const label = { sent: "Sent", received: "Received", mined: "Mining reward", self: "To yourself" }[t.kind] || "Transaction";
   const sign = t.kind === "sent" ? "-" : t.kind === "self" ? "" : "+";
   if (t.status === "pending") return { label, sign, status: "Pending", tone: "warn" };
