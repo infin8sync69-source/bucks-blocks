@@ -47,7 +47,7 @@ protected:
     std::string dir;
     std::unique_ptr<Bucks::Node> chain;
     Bucks::ServerConfig cfg;
-    const httplib::Headers tokenHeader{{"X-API-Token", "mining-token-0123456789abcdef0123456789abcdef"}};
+    static inline const httplib::Headers tokenHeader{{"X-API-Token", "mining-token-0123456789abcdef0123456789abcdef"}};
 
     void SetUp() override {
 #ifndef _WIN32
@@ -83,8 +83,9 @@ protected:
         return json::parse(r->body);
     }
 
+    // Signed in: the payout addresses are shown to signed-in callers only (audit WAL-7).
     static json status(httplib::Client& cli) {
-        auto r = cli.Get("/api/mining/status");
+        auto r = cli.Get("/api/mining/status", tokenHeader);
         EXPECT_TRUE(r);
         if (!r || r->status != 200) return json::object();
         return json::parse(r->body);
@@ -317,7 +318,8 @@ TEST_F(ServerMiningTest, StatusSaysWhyMiningIsBlocked) {
     fs::remove_all(dir + "/chain");
     fs::remove_all(dir + "/data");
 
-    // A header with more work whose block has not arrived: mining waits for it.
+    // A header with more work whose block has not arrived does not stop mining (audit CON-1); a chain below
+    // minimumChainWork does, and the status says why.
     Bucks::ChainParams p = Bucks::chainParams(Bucks::NetworkId::REGTEST);
     p.id = Bucks::NetworkId::TEST;   // the rule applies to every network but regtest
     openChain(p);
@@ -330,7 +332,18 @@ TEST_F(ServerMiningTest, StatusSaysWhyMiningIsBlocked) {
     h.bits = p.powLimitBits;
     while (!Bucks::Pow::checkProofOfWork(h.hash(), h.bits, p.powLimit)) ++h.nonce;
     ASSERT_TRUE(chain->submitHeaders({h}).valid());
+    {
+        Bucks::Server server(*chain, nullptr, cfg);
+        ASSERT_TRUE(server.start());
+        httplib::Client cli("127.0.0.1", server.port());
+        EXPECT_EQ(status(cli)["blockedReason"], "");
+    }
+    chain.reset();
+    fs::remove_all(dir + "/chain");
+    fs::remove_all(dir + "/data");
 
+    p.minimumChainWork = Bucks::U256(uint64_t(1000));   // far more work than the genesis
+    openChain(p);
     Bucks::Server server(*chain, nullptr, cfg);
     ASSERT_TRUE(server.start());
     httplib::Client cli("127.0.0.1", server.port());
