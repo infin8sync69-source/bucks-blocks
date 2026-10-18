@@ -190,3 +190,12 @@ export function validateAddress(addr, network) {
 }
 
 export function isHex64(s) { return /^[0-9a-fA-F]{64}$/.test(s); }
+
+/**
+ * A restore the node saves only after the user confirms (a passphrase that gives a wallet with no coins,
+ * often a typo): the address of that wallet, else "". `err` is the ApiError of the restore call.
+ */
+export function unusedRestoreAddress(err) {
+  const b = err && err.status === 409 ? err.body : null;
+  return b && b.confirmRequired === true && b.wallet && typeof b.wallet.address === "string" ? b.wallet.address : "";
+}

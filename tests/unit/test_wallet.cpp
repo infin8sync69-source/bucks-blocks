@@ -168,6 +168,11 @@ TEST_F(WalletTest, IdenticalKeysFromBothLanguages) {
     Wallet latinNew = Wallet::createNew(&m, "xx-test");
     EXPECT_EQ(m.substr(0, 1), "w");
     EXPECT_EQ(Wallet::fromMnemonic(convertMnemonic(m, "ar-dev")).getAddress(), latinNew.getAddress());
+
+    // A named list decodes with that list only (restore's optional "language", gate WORDLIST-2).
+    EXPECT_EQ(Wallet::fromMnemonic(kat128().phrase, "", "ar-dev").getPrivateKeyHex(), ar.getPrivateKeyHex());
+    EXPECT_THROW(Wallet::fromMnemonic(kat128().phrase, "", "xx-test"), std::runtime_error);
+    EXPECT_THROW(Wallet::fromMnemonic(kat128().phrase, "", "no-such-list"), std::runtime_error);
 }
 
 TEST_F(WalletTest, EmptyWalletFailsClosed) {

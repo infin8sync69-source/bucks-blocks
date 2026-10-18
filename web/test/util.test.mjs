@@ -1,7 +1,7 @@
 // Run: node web/test/util.test.mjs
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { sha256, fmtBucks, parseBucks, validateAddress, ADDRESS_VERSION } from "../js/util.js";
+import { sha256, fmtBucks, parseBucks, validateAddress, ADDRESS_VERSION, unusedRestoreAddress } from "../js/util.js";
 
 for (const n of [0, 1, 55, 56, 63, 64, 65, 119, 120, 1000]) {
   const buf = crypto.randomBytes(n);
@@ -34,4 +34,12 @@ for (const [net, ver] of Object.entries(ADDRESS_VERSION)) {
 }
 assert.equal(validateAddress("", "test").empty, true);
 assert.equal(validateAddress("0OIl", "test").ok, false);
+
+// Restore with a passphrase that gives an empty wallet: the node answers 409 and the UI asks first (WAL-13).
+const ask = { status: 409, body: { success: false, confirmRequired: true, reason: "unusedWithPassphrase", wallet: { address: "tAbc" } } };
+assert.equal(unusedRestoreAddress(ask), "tAbc");
+assert.equal(unusedRestoreAddress({ status: 400, body: ask.body }), "");
+assert.equal(unusedRestoreAddress({ status: 409, body: { error: "x" } }), "");
+assert.equal(unusedRestoreAddress({ status: 409, body: null }), "");
+assert.equal(unusedRestoreAddress(null), "");
 console.log("util.test.mjs: ok");

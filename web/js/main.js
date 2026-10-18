@@ -139,7 +139,7 @@ function buildLogin() {
   const form = h("form", { class: "card login-card", novalidate: true },
     h("div", { class: "row", style: "margin-bottom:14px" }, h("span", { class: "brand-mark", "aria-hidden": "true" }, "B"), h("strong", { style: "font-size:1.2rem" }, "Bucks node console"), h("span", { id: "login-net" })),
     h("h1", { tabindex: "-1", style: "font-size:1.4rem;margin-bottom:6px" }, "Sign in to your node"),
-    h("p", { class: "muted", id: "token-hint" }, "Paste the node's API token. It is the value in the file passed with --api-token-file, or the .cookie file in the node's data directory. It is exchanged for a session cookie and never stored in this browser."),
+    h("p", { class: "muted", id: "token-hint" }, "Paste the node's API token. It is the value in the file passed with --api-token-file, or in the .cookie file the node names at start (<datadir>/.cookie on mainnet, <datadir>/<network>/.cookie on test networks). It is exchanged for a session cookie and never stored in this browser."),
     status,
     h("div", { class: "field", style: "margin-top:12px" }, h("label", { for: "token" }, "API token"), input),
     errBox,

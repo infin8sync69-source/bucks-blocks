@@ -62,14 +62,17 @@ struct ServerConfig {
     std::string bindAddress = "127.0.0.1";
 
     // ---- Data directory (wallet file, API cookie) ----
-    // "" = Server::defaultDataDir() (~/.bucks). Created with mode 0700.
+    // "" = Server::defaultDataDir() (~/.bucks). Created with mode 0700; an
+    // existing directory is left as it is (a warning if others can reach it).
     std::string dataDir;
     // Pre-datadir wallet file. Read once, never written (see loadWallets()).
     std::string legacyWalletFile;           // empty: never read a wallets.json from the working directory (audit WAL-1); --import-legacy-wallets sets it
 
     // ---- Authentication ----
-    // Token precedence: apiToken (argv) > apiTokenFile > $BUCKS_API_TOKEN >
-    // a random token generated at start and written to <dataDir>/.cookie.
+    // Token precedence: apiToken (argv) > apiTokenFile (mode 0600 or stricter) >
+    // $BUCKS_API_TOKEN > a random token generated at start and written to
+    // <dataDir>/.cookie (main) or <dataDir>/<network>/.cookie. Given tokens
+    // must be at least 16 characters.
     std::string apiToken;
     std::string apiTokenFile;
     std::chrono::seconds sessionLifetime{12 * 3600};
@@ -78,8 +81,14 @@ struct ServerConfig {
     std::vector<std::string> corsOrigins;
     // Extra Host header values accepted besides loopback and bindAddress.
     std::vector<std::string> allowedHosts;
-    // Key the rate limiter on X-Forwarded-For (only behind a trusted proxy).
+    // Behind a reverse proxy on this host: believe X-Forwarded-For (rate limit key) and
+    // X-Forwarded-Proto, but only on connections from loopback, where the proxy runs.
     bool trustProxy = false;
+    // --api-secure-cookie: the browser reaches the node over TLS (a proxy in front), so the
+    // session cookie is always Secure and only https origins pass the CSRF check. Without it the
+    // cookie is still Secure for a login from an https page or through a trusted proxy that
+    // sends X-Forwarded-Proto: https.
+    bool secureCookie = false;
     // Sent on every response. The bundled UI in web/ is dependency-free ES
     // modules served by the node itself: no CDN, no inline script or style,
     // no third-party origin.
@@ -139,7 +148,8 @@ public:
     static std::string defaultDataDir();
     const std::string& dataDir() const { return dataDirPath; }
     const std::string& walletFile() const { return walletFilePath; }
-    // Path of the generated API token, "" when the token came from config/env.
+    // Path of the generated API token, "" when the token came from config/env:
+    // <dataDir>/.cookie on the main network, <dataDir>/<network>/.cookie otherwise.
     const std::string& cookieFile() const { return cookieFilePath; }
 
     // False when wallets.json could not be read; the file is then never
@@ -148,8 +158,10 @@ public:
     std::string walletError() const;
 
     // Optional wallet management. addWallet returns false (and keeps the
-    // wallet in memory only) if the file could not be written.
+    // wallet in memory only) if the file could not be written. `meta` fields
+    // (e.g. the word list a phrase needs) are stored in the wallet's entry.
     bool addWallet(const Wallet& wallet);
+    bool addWallet(const Wallet& wallet, const nlohmann::json& meta);
     std::vector<Wallet> getWallets() const;
 
     // WebSocket Notifications
@@ -256,8 +268,12 @@ private:
                           const std::string& apiTokenHeader,
                           const std::string& cookieHeader);
     bool hostAllowed(const std::string& hostHeader) const;
-    bool originAllowed(const std::string& origin) const;
+    bool forwardedHeadersTrusted(const std::string& remoteAddr) const;
+    bool browserUsesTls(const std::string& remoteAddr, const std::string& forwardedProto) const;
+    bool originAllowed(const std::string& origin, const std::string& hostHeader, bool tls) const;
+    std::string sessionCookie(const std::string& value, long long maxAge, bool secure) const;
     bool corsOriginAllowed(const std::string& origin) const;
+    void removeOwnCookie();
     std::string createSession();
     bool validateSession(const std::string& id);
     void destroySession(const std::string& id);

@@ -2,25 +2,51 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <thread>
 #include <string>
 #include <memory>
 #include <vector>
+#include <filesystem>
 
 #include "crypto.h"
+#include "bip_8192.h"
+#include "fsutil.h"
 #include "node.h"
 #include "log.h"
 #include "chainparams.h"
 #include "genesis.h"
 #include "network.h"
 #include "server.h"
+#include "version.h"
 
 using namespace Bucks;
 
 static std::atomic<bool> running{true};   // lock-free: safe to store from a signal handler
+static std::atomic<bool> hangup{false};
 
 void handleSignal(int) {
     running.store(false);
+}
+
+void handleHangup(int) {
+    hangup.store(true);
+}
+
+// A whole decimal number in [lo, hi]. Signs, spaces, trailing characters and overflow are refused, so a
+// typo cannot abort the process or wrap a port around (audit OPS-13).
+static bool parseNumber(const std::string& text, uint64_t lo, uint64_t hi, uint64_t& out) {
+    if (text.empty() || text.size() > 20) return false;
+    uint64_t v = 0;
+    for (char c : text) {
+        if (c < '0' || c > '9') return false;
+        const uint64_t digit = static_cast<uint64_t>(c - '0');
+        if (v > (UINT64_MAX - digit) / 10) return false;
+        v = v * 10 + digit;
+    }
+    if (v < lo || v > hi) return false;
+    out = v;
+    return true;
 }
 
 static void printUsage() {
@@ -32,7 +58,10 @@ static void printUsage() {
         "  --p2p-port <n>            P2P port (default: per network, 8733 on main)\n"
         "  --connect <host:port>     keep a connection to this peer (repeatable)\n"
         "  --seed <host:port>        seed node, dialled while there are fewer than 3 peers (repeatable)\n"
-        "  --web-root <dir>          static UI directory (default: web/ next to the sources)\n"
+        "  --web-root <dir>          static UI directory (default: the source tree's web/, else\n"
+        "                            <exe dir>/../share/bucks/web)\n"
+        "  --wordlist-dir <dir>      mnemonic word lists (default: $BUCKS_WORDLIST_DIR, the source tree's\n"
+        "                            wordlists/, else <exe dir>/../share/bucks/wordlists)\n"
         "  --import-legacy-wallets <file>  read an old wallets.json once (never written)\n"
         "  --datadir <dir>           wallets, API cookie and <network>/chain.sqlite (default ~/.bucks)\n"
         "  --checkblocks <n>         verify the last n blocks at start (default 24, 0 = all)\n"
@@ -40,21 +69,26 @@ static void printUsage() {
         "  --reindex-chainstate      rebuild coins, undo and statistics from the stored blocks\n"
         "  --reindex                 rebuild the block index from the stored block bytes\n"
         "  --api-bind <addr>         API bind address (default 127.0.0.1)\n"
-        "  --api-token-file <file>   read the API token from a file (0600)\n"
+        "  --api-token-file <file>   read the API token from a file (mode 0600; refused if others can read it)\n"
         "  --api-token <token>       API token on the command line (visible to other users!)\n"
         "  --api-cors-origin <o>     allow this exact origin cross-origin (repeatable)\n"
         "  --api-allowed-host <h>    accept this Host header (repeatable)\n"
-        "  --trust-proxy             rate-limit on X-Forwarded-For (behind a trusted proxy only)\n"
+        "  --trust-proxy             a reverse proxy on this host: believe X-Forwarded-For (rate limit)\n"
+        "                            and X-Forwarded-Proto: https (Secure cookie) from loopback peers\n"
+        "  --api-secure-cookie       the console is served over TLS: Secure session cookie, https origins only\n"
         "  --auto-mine               mine from the start (implies --server); needs --mine-address or a wallet\n"
         "  --mine-address <addr>     pay every mined block to this address: no wallet or key on this node\n"
         "  --mine-threads <n>        hashing threads (default 0 = one per CPU core)\n"
         "  --ipfs-enable, --ipfs-port <n>\n"
+        "Signals: SIGINT and SIGTERM stop the node cleanly. SIGHUP is logged and ignored, so closing\n"
+        "the terminal does not stop it (there is no configuration to reload).\n"
         "Without --api-token/--api-token-file/$BUCKS_API_TOKEN a random token is\n"
-        "written to <datadir>/.cookie at start; the web UI asks for it.\n";
+        "written at start to <datadir>/.cookie (main) or <datadir>/<network>/.cookie;\n"
+        "the web UI asks for it.\n";
 }
 
 int main(int argc, char* argv[]) {
-    Bucks::logOut() << "=== Bucks Node (PATH-B) ===\n";
+    Bucks::logOut() << "=== Bucks Node " << BUCKS_VERSION << " ===\n";
 
     // Handle shutdown signals
 #ifdef SIGPIPE
@@ -62,6 +96,10 @@ int main(int argc, char* argv[]) {
 #endif
     std::signal(SIGINT, handleSignal);
     std::signal(SIGTERM, handleSignal);
+#ifdef SIGHUP
+    // The conventional daemon answer: a hangup (closed SSH session) does not stop the node (audit OPS-12).
+    std::signal(SIGHUP, handleHangup);
+#endif
 
     // Parse command line arguments
     bool startServer = false;
@@ -70,11 +108,8 @@ int main(int argc, char* argv[]) {
     uint16_t p2pPort = 0;
     std::vector<std::string> connectPeers;
     std::vector<std::string> seedPeers;
-#ifdef BUCKS_SOURCE_DIR
-    std::string webRoot = std::string(BUCKS_SOURCE_DIR) + "/web";
-#else
-    std::string webRoot = "web";
-#endif
+    std::string webRoot;        // "" = the bundled UI (see below)
+    std::string wordlistDir;    // "" = $BUCKS_WORDLIST_DIR or the bundled lists
     bool enableIPFS = false;
     uint16_t ipfsPort = 5001;
     bool autoMine = false;
@@ -88,10 +123,21 @@ int main(int argc, char* argv[]) {
     std::vector<std::string> corsOrigins;
     std::vector<std::string> allowedHosts;
     bool trustProxy = false;
+    bool secureCookie = false;
     LoadOptions loadOptions;
+
+    // Reads the value after option `name`; false (after saying why) unless it is a number in [lo, hi].
+    auto numberArg = [&](int& i, const std::string& name, uint64_t lo, uint64_t hi, uint64_t& out) {
+        const std::string text = argv[++i];
+        if (parseNumber(text, lo, hi, out)) return true;
+        Bucks::logErr() << "✗ " << name << " expects a whole number from " << lo << " to " << hi
+                        << ", got '" << text << "'\n";
+        return false;
+    };
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
+        uint64_t number = 0;
         std::string networkName;
         if (arg == "--network" && i + 1 < argc) {
             networkName = argv[++i];
@@ -106,19 +152,24 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--server") {
             startServer = true;
         } else if (arg == "--port" && i + 1 < argc) {
-            port = static_cast<uint16_t>(std::stoi(argv[++i]));
+            if (!numberArg(i, arg, 1, 65535, number)) return 2;
+            port = static_cast<uint16_t>(number);
         } else if (arg == "--p2p-port" && i + 1 < argc) {
-            p2pPort = static_cast<uint16_t>(std::stoi(argv[++i]));
+            if (!numberArg(i, arg, 1, 65535, number)) return 2;
+            p2pPort = static_cast<uint16_t>(number);
         } else if (arg == "--connect" && i + 1 < argc) {
             connectPeers.push_back(argv[++i]);
         } else if (arg == "--seed" && i + 1 < argc) {
             seedPeers.push_back(argv[++i]);
         } else if (arg == "--web-root" && i + 1 < argc) {
              webRoot = argv[++i];
+        } else if (arg == "--wordlist-dir" && i + 1 < argc) {
+             wordlistDir = argv[++i];
         } else if (arg == "--ipfs-enable") {
              enableIPFS = true;
         } else if (arg == "--ipfs-port" && i + 1 < argc) {
-             ipfsPort = static_cast<uint16_t>(std::stoi(argv[++i]));
+             if (!numberArg(i, arg, 1, 65535, number)) return 2;
+             ipfsPort = static_cast<uint16_t>(number);
         } else if (arg == "--auto-mine") {
              autoMine = true;
              startServer = true; // auto-mine implies server mode
@@ -138,7 +189,7 @@ int main(int argc, char* argv[]) {
              apiToken = argv[++i];
              // The token stays visible in `ps` for every local user (API-13).
              Bucks::logErr() << "⚠ --api-token puts the secret on the command line, where other users can read it; "
-                          "prefer --api-token-file or the generated <datadir>/.cookie\n";
+                          "prefer --api-token-file or the generated .cookie file\n";
         } else if (arg == "--api-token-file" && i + 1 < argc) {
              apiTokenFile = argv[++i];
         } else if (arg == "--datadir" && i + 1 < argc) {
@@ -151,8 +202,11 @@ int main(int argc, char* argv[]) {
              allowedHosts.push_back(argv[++i]);
         } else if (arg == "--trust-proxy") {
              trustProxy = true;
+        } else if (arg == "--api-secure-cookie") {
+             secureCookie = true;
         } else if (arg == "--checkblocks" && i + 1 < argc) {
-             loadOptions.checkBlocks = static_cast<uint32_t>(std::stoul(argv[++i]));
+             if (!numberArg(i, arg, 0, UINT32_MAX, number)) return 2;
+             loadOptions.checkBlocks = static_cast<uint32_t>(number);
         } else if (arg == "--checkdb") {
              loadOptions.checkTier = 2;
         } else if (arg == "--checkdb=full") {
@@ -209,6 +263,33 @@ int main(int argc, char* argv[]) {
     if (!startServer && (!mineAddress.empty() || mineThreads))
         Bucks::logErr() << "⚠ --mine-address and --mine-threads only apply with --server or --auto-mine\n";
 
+    // Web UI and word lists: an explicit option wins, then the source tree the binary was built from, then
+    // the install layout <prefix>/share/bucks/ (audit OPS-06). Creating or restoring a wallet needs the lists,
+    // so a server whose lists are missing or do not match their pins stops here, before touching the chain.
+    if (!wordlistDir.empty()) setWordlistDir(wordlistDir);
+    if (startServer) {
+        if (webRoot.empty()) {
+            const std::vector<std::string> candidates = bundledDirCandidates("web");
+            std::error_code ec;
+            for (const std::string& c : candidates) {
+                if (std::filesystem::is_regular_file(std::filesystem::path(c) / "index.html", ec)) { webRoot = c; break; }
+            }
+            if (webRoot.empty()) {
+                std::string tried;
+                for (const std::string& c : candidates) tried += (tried.empty() ? "" : ", ") + c;
+                Bucks::logErr() << "⚠ No web UI found (looked in: " << tried << "); pass --web-root <dir>\n";
+                webRoot = candidates.empty() ? "web" : candidates.back();
+            }
+        }
+        std::string err;
+        if (!loadWordlists(&err)) {
+            Bucks::logErr() << "FATAL: " << err << "\n"
+                            << "       (pass --wordlist-dir <dir>; an installed node has them in <prefix>/share/bucks/wordlists)\n";
+            return 1;
+        }
+        Bucks::logOut() << "✓ Word lists: " << resolveWordlistDir() << "\n";
+    }
+
     // Open the chain: <datadir>/<network>/chain.sqlite. Exit codes (storage spec section 4):
     // 3 parameters/genesis/network mismatch, 4 storage failure, 6 database corrupt, 7 unsupported version.
     if (dataDir.empty()) dataDir = Server::defaultDataDir();
@@ -238,13 +319,9 @@ int main(int argc, char* argv[]) {
     auto splitHostPort = [](const std::string& hp, std::string& host, uint16_t& port) {
         const size_t colon = hp.rfind(':');
         if (colon == std::string::npos || colon == 0) return false;
-        try {
-            const int p = std::stoi(hp.substr(colon + 1));
-            if (p < 1 || p > 65535) return false;
-            port = static_cast<uint16_t>(p);
-        } catch (...) {
-            return false;
-        }
+        uint64_t p = 0;
+        if (!parseNumber(hp.substr(colon + 1), 1, 65535, p)) return false;
+        port = static_cast<uint16_t>(p);
         host = hp.substr(0, colon);
         return true;
     };
@@ -287,6 +364,7 @@ int main(int argc, char* argv[]) {
         serverConfig.trustProxy = trustProxy;
         serverConfig.mineAddress = mineAddress;
         serverConfig.mineThreads = mineThreads;
+        serverConfig.secureCookie = secureCookie;
         server = new Server(node, &network, serverConfig);
         // --auto-mine with nowhere to pay the rewards is a configuration error: refuse to start
         // instead of running a node that silently does not mine (audit OPS-03).
@@ -329,6 +407,8 @@ int main(int argc, char* argv[]) {
     int exitCode = 0;
     while (running.load()) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (hangup.exchange(false))
+            Bucks::logOut() << "SIGHUP received and ignored; stop the node with SIGINT or SIGTERM\n";
         std::string why;
         if ((exitCode = node.fatalError(why)) != 0) {
             Bucks::logErr() << "FATAL: " << why << "; stopping with exit code " << exitCode

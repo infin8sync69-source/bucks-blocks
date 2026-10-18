@@ -2,10 +2,14 @@
 #include "bip_8192.h"
 #include "bip_custom.h"
 #include "crypto.h"
+#include "fsutil.h"
 #include "mnemonic_test_util.h"
+
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <string>
 #include <vector>
@@ -169,6 +173,21 @@ TEST_F(MnemonicDir, DefaultResolutionFindsRepoManifest) {
     EXPECT_EQ(langs[0], "ar-dev");   // the placeholder stays first, so it stays the default
 }
 
+// OPS-06: a copied or installed binary finds <prefix>/share/bucks/<name> next to <prefix>/bin.
+TEST_F(MnemonicDir, BundledDirectoriesFollowTheInstallLayout) {
+    const std::string src = (fs::path("/src") / "bucks").string();
+    const std::string bin = (fs::path("/opt") / "bucks" / "bin").string();
+    const std::vector<std::string> both = bundledDirCandidates("wordlists", src, bin);
+    ASSERT_EQ(both.size(), 2u);
+    EXPECT_EQ(both[0], (fs::path(src) / "wordlists").string());   // the source tree first, while it exists
+    EXPECT_EQ(both[1], (fs::path("/opt") / "bucks" / "share" / "bucks" / "wordlists").string());
+    const std::vector<std::string> installed = bundledDirCandidates("web", "", bin);
+    ASSERT_EQ(installed.size(), 1u);
+    EXPECT_EQ(installed[0], (fs::path("/opt") / "bucks" / "share" / "bucks" / "web").string());
+    // This build: the source tree's lists come first.
+    EXPECT_EQ(bundledDirCandidates("wordlists").front(), (fs::path(BUCKS_SOURCE_DIR) / "wordlists").string());
+}
+
 TEST_F(MnemonicDir, EmptyEnvDirFailsClosed) {
     TempDir empty;
     setWordlistEnv(empty.str());
@@ -227,6 +246,84 @@ TEST_F(MnemonicDir, BrokenManifestsAreRejected) {
     // valid UTF-8), which shows the normalizer check is per list.
     dir.write("manifest.json", "{\"version\":2,\"lists\":[{\"lang\":\"xx\",\"file\":\"xx-test-2048.txt\",\"normalizer\":\"latin\",\"status\":\"dev\"}]}");
     EXPECT_TRUE(loadWordlists(&err)) << err;
+}
+
+namespace {
+
+std::string fileSha256Hex(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const Hash256 d = sha256(std::vector<uint8_t>(bytes.begin(), bytes.end()));
+    return hexStr(std::vector<uint8_t>(d.begin(), d.end()));
+}
+
+} // namespace
+
+// WAL-14 / WORDLIST-1: every shipped list is pinned and the pin is the hash of its bytes. This fails when a
+// list file changes and its manifest hash does not.
+TEST_F(MnemonicDir, ShippedListsMatchTheirManifestPins) {
+    const fs::path dir = fs::path(BUCKS_SOURCE_DIR) / "wordlists";
+    std::ifstream in(dir / "manifest.json", std::ios::binary);
+    ASSERT_TRUE(in);
+    const nlohmann::json m = nlohmann::json::parse(in);
+    ASSERT_TRUE(m.contains("lists") && m["lists"].is_array());
+    for (const auto& e : m["lists"]) {
+        const std::string file = e.value("file", "");
+        ASSERT_TRUE(e.contains("sha256") && e["sha256"].is_string()) << file << " has no \"sha256\" pin in manifest.json";
+        EXPECT_EQ(fileSha256Hex(dir / file), e["sha256"].get<std::string>())
+            << "wordlists/" << file << " changed but manifest.json still pins the old hash. Phrases made with a "
+               "published list need its exact bytes: publish a changed list under a new tag with its own pin.";
+    }
+    // The loader agrees with the independent hash above.
+    std::string err;
+    setWordlistDir(dir.string());
+    ASSERT_TRUE(loadWordlists(&err)) << err;
+    for (const auto& lang : mnemonicLanguages()) {
+        auto wl = findWordlist(lang);
+        ASSERT_TRUE(wl);
+        EXPECT_TRUE(wl->pinned) << lang;
+    }
+}
+
+TEST_F(MnemonicDir, PinnedListMustMatchItsBytes) {
+    TempDir dir;
+    dir.write("xx.txt", syntheticLatinList());
+    const std::string pin = fileSha256Hex(dir.path() / "xx.txt");
+    auto manifest = [](const std::string& status, const std::string& pinField) {
+        return "{\"version\":2,\"lists\":[{\"lang\":\"xx\",\"file\":\"xx.txt\",\"normalizer\":\"latin\","
+               "\"status\":\"" + status + "\"" + pinField + "}]}";
+    };
+    std::string err;
+    setWordlistDir(dir.str());
+
+    dir.write("manifest.json", manifest("release", ",\"sha256\":\"" + pin + "\""));
+    ASSERT_TRUE(loadWordlists(&err)) << err;
+    auto wl = findWordlist("xx");
+    ASSERT_TRUE(wl);
+    EXPECT_EQ(wl->sha256, pin);
+    EXPECT_TRUE(wl->pinned);
+
+    // One word changed in place: refused, and the error says why.
+    std::string edited = syntheticLatinList();
+    edited.replace(edited.find("w0007"), 5, "w9999");
+    dir.write("xx.txt", edited);
+    EXPECT_FALSE(loadWordlists(&err));
+    EXPECT_NE(err.find("does not match the SHA-256"), std::string::npos) << err;
+    EXPECT_NE(err.find("xx"), std::string::npos) << err;
+    MnemonicError merr = MnemonicError::OK;
+    EXPECT_TRUE(mnemonicFromEntropy(fromHex(kat128().entropyHex), "xx", &merr).empty());
+    EXPECT_EQ(merr, MnemonicError::WORDLIST_LOAD_FAILED);
+
+    // A release list must be pinned; a malformed pin is refused; placeholders may go unpinned.
+    dir.write("xx.txt", syntheticLatinList());
+    dir.write("manifest.json", manifest("release", ""));
+    EXPECT_FALSE(loadWordlists(&err));
+    EXPECT_NE(err.find("no \"sha256\" pin"), std::string::npos) << err;
+    dir.write("manifest.json", manifest("release", ",\"sha256\":\"" + std::string(64, 'Z') + "\""));
+    EXPECT_FALSE(loadWordlists(&err));
+    dir.write("manifest.json", manifest("dev", ""));
+    ASSERT_TRUE(loadWordlists(&err)) << err;
+    EXPECT_FALSE(findWordlist("xx")->pinned);
 }
 
 // ---------------------------------------------------------------------------
@@ -514,9 +611,9 @@ TEST_F(MultiLanguage, AutoDetectAndIdenticalSeeds) {
     EXPECT_EQ(validateMnemonic(kat128().phrase, nullptr, "ar-dev"), MnemonicError::OK);
 }
 
-TEST_F(MnemonicDir, AmbiguousLanguageIsAnError) {
-    // Two lists with the same words: a phrase valid in both must be refused
-    // unless the language is given explicitly.
+TEST_F(MnemonicDir, ListsThatAgreeOnTheEntropyAreOneMatch) {
+    // Two lists with the same words at the same indices: a phrase valid in both is the same wallet either
+    // way, so it is not ambiguous (gate WORDLIST-2). The first list in manifest order is reported.
     TempDir two;
     two.write("a.txt", syntheticLatinList());
     two.write("b.txt", syntheticLatinList());
@@ -527,16 +624,64 @@ TEST_F(MnemonicDir, AmbiguousLanguageIsAnError) {
     setWordlistDir(two.str());
     std::string phrase = latinPhrase(kat128().indices);
     std::vector<uint8_t> entropy;
-    EXPECT_EQ(mnemonicToEntropy(phrase, entropy), MnemonicError::AMBIGUOUS_LANGUAGE);
-    EXPECT_TRUE(entropy.empty());
-    EXPECT_EQ(mnemonicToEntropy(phrase, entropy, nullptr, "bb"), MnemonicError::OK);
+    std::string lang;
+    EXPECT_EQ(mnemonicToEntropy(phrase, entropy, &lang), MnemonicError::OK);
+    EXPECT_EQ(lang, "aa");
     EXPECT_EQ(hexStr(entropy), kat128().entropyHex);
-    // Upper case is only valid under the latin list, so it is unambiguous.
+    EXPECT_EQ(mnemonicToEntropy(phrase, entropy, &lang, "bb"), MnemonicError::OK);
+    EXPECT_EQ(lang, "bb");
+    EXPECT_EQ(hexStr(entropy), kat128().entropyHex);
+    // Restricting the candidates reports the list that was allowed.
+    EXPECT_EQ(mnemonicToEntropyAmong(phrase, {"bb"}, entropy, &lang), MnemonicError::OK);
+    EXPECT_EQ(lang, "bb");
+    EXPECT_EQ(mnemonicToEntropyAmong(phrase, {"zz"}, entropy, &lang), MnemonicError::INVALID_WORD);
+    EXPECT_TRUE(entropy.empty());
+    // Upper case is only valid under the latin list.
     std::string upper = phrase;
     std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
-    std::string lang;
     EXPECT_EQ(mnemonicToEntropy(upper, entropy, &lang), MnemonicError::OK);
     EXPECT_EQ(lang, "aa");
+}
+
+TEST_F(MnemonicDir, ListsThatDisagreeOnTheEntropyAreAmbiguous) {
+    // The same words in reverse order: a phrase whose checksum happens to hold under both lists means two
+    // different wallets, so auto-detection must refuse it.
+    std::string reversed;
+    for (int i = 2047; i >= 0; --i) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "w%04d\n", i);
+        reversed += buf;
+    }
+    TempDir two;
+    two.write("a.txt", syntheticLatinList());
+    two.write("b.txt", reversed);
+    two.write("manifest.json",
+        "{\"version\":2,\"lists\":["
+        "{\"lang\":\"aa\",\"file\":\"a.txt\",\"normalizer\":\"latin\",\"status\":\"dev\"},"
+        "{\"lang\":\"bb\",\"file\":\"b.txt\",\"normalizer\":\"latin\",\"status\":\"dev\"}]}");
+    setWordlistDir(two.str());
+
+    // About one entropy in 2^15 gives such a phrase; search deterministically.
+    std::string phrase;
+    std::vector<uint8_t> entropy;
+    for (uint32_t i = 0; i < 2000000 && phrase.empty(); ++i) {
+        const std::vector<uint8_t> seed{uint8_t(i), uint8_t(i >> 8), uint8_t(i >> 16), uint8_t(i >> 24)};
+        const Hash256 h = sha256(seed);
+        const std::vector<uint8_t> candidate(h.begin(), h.begin() + 16);
+        const std::string p = mnemonicFromEntropy(candidate, "aa");
+        if (validateMnemonic(p, nullptr, "bb") == MnemonicError::OK) phrase = p;
+    }
+    ASSERT_FALSE(phrase.empty());
+    EXPECT_EQ(mnemonicToEntropy(phrase, entropy), MnemonicError::AMBIGUOUS_LANGUAGE);
+    EXPECT_TRUE(entropy.empty());
+    std::vector<uint8_t> a, b;
+    EXPECT_EQ(mnemonicToEntropy(phrase, a, nullptr, "aa"), MnemonicError::OK);
+    EXPECT_EQ(mnemonicToEntropy(phrase, b, nullptr, "bb"), MnemonicError::OK);
+    EXPECT_NE(a, b);
+    std::string lang;
+    EXPECT_EQ(mnemonicToEntropyAmong(phrase, {"bb"}, entropy, &lang), MnemonicError::OK);
+    EXPECT_EQ(lang, "bb");
+    EXPECT_EQ(entropy, b);
 }
 
 TEST(MnemonicErrors, StringsNeverEmpty) {

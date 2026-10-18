@@ -4,14 +4,67 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#endif
+
 namespace fs = std::filesystem;
 
 namespace Bucks {
+
+std::string executableDir() {
+    std::string path;
+#if defined(__APPLE__)
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> buf(size + 1, '\0');
+    if (size == 0 || _NSGetExecutablePath(buf.data(), &size) != 0) return "";
+    path.assign(buf.data());
+#elif defined(_WIN32)
+    char buf[MAX_PATH];
+    DWORD n = GetModuleFileNameA(nullptr, buf, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return "";
+    path.assign(buf, n);
+#elif defined(__linux__)
+    char buf[4096];
+    ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n <= 0) return "";
+    path.assign(buf, static_cast<size_t>(n));
+#else
+    return "";
+#endif
+    std::error_code ec;
+    fs::path p = fs::weakly_canonical(fs::path(path), ec);
+    if (ec) p = fs::absolute(fs::path(path), ec);
+    if (ec) return "";
+    return p.parent_path().string();
+}
+
+std::vector<std::string> bundledDirCandidates(const std::string& name, const std::string& sourceDir,
+                                              const std::string& exeDir) {
+    std::vector<std::string> out;
+    if (!sourceDir.empty()) out.push_back((fs::path(sourceDir) / name).string());
+    if (!exeDir.empty())
+        out.push_back((fs::path(exeDir) / ".." / "share" / "bucks" / name).lexically_normal().string());
+    return out;
+}
+
+std::vector<std::string> bundledDirCandidates(const std::string& name) {
+#ifdef BUCKS_SOURCE_DIR
+    const std::string sourceDir = BUCKS_SOURCE_DIR;
+#else
+    const std::string sourceDir;
+#endif
+    return bundledDirCandidates(name, sourceDir, executableDir());
+}
 
 bool readWholeFile(const std::string& path, std::string& out) {
     std::ifstream in(path, std::ios::binary);
