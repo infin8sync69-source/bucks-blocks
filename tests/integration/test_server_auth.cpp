@@ -969,7 +969,7 @@ TEST_F(ServerAuthTest, CreateRecordsTheWordlistAndDefaultMatchesLanguages) {
     ASSERT_TRUE(r);
     ASSERT_EQ(r->status, 200) << r->body;
     EXPECT_TRUE(json::parse(r->body)["existing"].get<bool>());
-    r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", phrase}, {"language", "en-draft"}}.dump(), "application/json");
+    r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", phrase}, {"language", "en-v1"}}.dump(), "application/json");
     ASSERT_TRUE(r);
     EXPECT_EQ(r->status, 400) << r->body;
     r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", phrase}, {"language", "zz"}}.dump(), "application/json");
@@ -978,15 +978,15 @@ TEST_F(ServerAuthTest, CreateRecordsTheWordlistAndDefaultMatchesLanguages) {
 
     // A restored wallet records the list its phrase was read with.
     std::string english;
-    Bucks::Wallet::createNew(&english, "en-draft");
+    Bucks::Wallet::createNew(&english, "en-v1");
     r = cli.Post("/api/wallets/restore", tokenHeader, json{{"mnemonic", english}}.dump(), "application/json");
     ASSERT_TRUE(r);
     ASSERT_EQ(r->status, 200) << r->body;
-    EXPECT_EQ(json::parse(r->body)["detectedLanguage"], "en-draft");
+    EXPECT_EQ(json::parse(r->body)["detectedLanguage"], "en-v1");
     doc = json::parse(readFile(server.walletFile()));
     ASSERT_EQ(doc["wallets"].size(), 2u);
-    EXPECT_EQ(doc["wallets"][1]["wordlist"], "en-draft");
-    EXPECT_EQ(doc["wallets"][1]["wordlistSha256"], Bucks::findWordlist("en-draft")->sha256);
+    EXPECT_EQ(doc["wallets"][1]["wordlist"], "en-v1");
+    EXPECT_EQ(doc["wallets"][1]["wordlistSha256"], Bucks::findWordlist("en-v1")->sha256);
     server.stop();
 }
 

@@ -1,7 +1,9 @@
-# Bucks DRAFT English meaning list (en-draft). Entry i has the meaning of entry i of ar-quran-draft.
-# Written by hand, one word per Arabic entry, from the review sheet's english_meaning column
-# (tools/make_en_list.py). Meanings are approximate: an Arabic form with a person, number or attached
-# particle carries only its dictionary meaning. NOT reviewed by a translator or an Arabic linguist.
+# Bucks English meaning list, version 1 (en-v1). FROZEN: never edit this file.
+# Entry i has the meaning of entry i of ar-quran-v1. A recovery phrase decodes only with exactly these 2048 words in
+# exactly this order; an improvement ships as a new list (en-v2) next to this one.
+# Written by hand, one word per Arabic entry, from the review sheet's english_meaning column (tools/make_en_list.py).
+# Meanings are approximate: an Arabic form with a person, number or attached particle carries only its dictionary
+# meaning. Frozen on the owner's decision of 2026-10-18 without a translator or Arabic linguist review.
 flocks
 seeking
 test

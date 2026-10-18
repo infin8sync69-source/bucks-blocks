@@ -18,7 +18,8 @@ Rules (reports/Quranic unique meaning word list.md, table A1-A11)
 Selection: all words that pass; if more than 2048 remain, the most frequent in the Quran first.
 The spelling is the corpus lemma without diacritics (dagger alef dropped, as in modern spelling).
 
-This is a DRAFT for scholar and linguist review, not a release list.
+This script produced the draft that was frozen as wordlists/ar-quran-v1-2048.txt (2026-10-18). Never commit its output
+over a frozen list: a change to the words ships as a new list (ar-quran-v2).
 
 Modes
   default      dictionary forms (lemmas), e.g. verbs in the past tense for "he"

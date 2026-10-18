@@ -1,5 +1,5 @@
 {"version":2,"lists":[
   {"lang":"ar-dev","file":"ar-dev-2048.txt","normalizer":"arabic","status":"dev","sha256":"7baca1b6349143ab762e087adfbd89bbe449ac7a7eace398c7c40992a7a2a737"},
-  {"lang":"ar-quran-draft","file":"ar-quran-draft-2048.txt","normalizer":"arabic","status":"draft","sha256":"6989ca74814ed2308aab5f85b8d96ee15f4d62d8bc501fae721e85c12a5914de"},
-  {"lang":"en-draft","file":"en-draft-2048.txt","normalizer":"latin","status":"draft","sha256":"089125a9c1e4e15804951cf146e5b1f6ed96a4c550a5e3ad3017bf279bb24159"}
+  {"lang":"ar-quran-v1","file":"ar-quran-v1-2048.txt","normalizer":"arabic","status":"release","sha256":"12cf4af85af6118d6d95a8fa696da5fb7ae29fcf8513ec77870052dca24c25c5"},
+  {"lang":"en-v1","file":"en-v1-2048.txt","normalizer":"latin","status":"release","sha256":"fbcd6d8136454478d454737290143d6df714a15e5f9e78e94dc531c4f3b9af0a"}
 ]}

@@ -1,6 +1,6 @@
 # Arabic word list: questions for the scholar
 
-List under review: `wordlists/ar-quran-draft-2048.txt` (2048 words, each exactly as written in the Quran, modern spelling). The review sheet is `wordlists/review/ar-quran-draft-review.csv`: every entry with its dictionary form, root, count in the Quran, and a notes column.
+The list was frozen as `ar-quran-v1` on 2026-10-18 (`wordlists/ar-quran-v1-2048.txt`) without this review; any change the scholar asks for ships as a new list, `ar-quran-v2`, never as an edit. List under review (word for word the frozen list): `wordlists/ar-quran-v1-2048.txt` (2048 words, each exactly as written in the Quran, modern spelling). The review sheet is `wordlists/review/ar-quran-draft-review.csv`: every entry with its dictionary form, root, count in the Quran, and a notes column.
 
 ## What has already been done
 
@@ -11,7 +11,7 @@ An internal review of all 2048 entries removed divine names and attributes, acts
 1. **The 137 words below were kept on purpose** and need a yes or no: each is ordinary vocabulary taken from one context in the Quran (a named story, or a hell, paradise or Last-Day scene). Keep, or remove? Removing a word means the builder pulls the next most frequent clean word in; the tool and the review process handle that.
 2. Whether a phrase of random words, written on paper and kept as a wallet backup, raises any concern of its own (disposal of paper, the words appearing next to each other by chance).
 3. Whether the list may be described as "Classical Arabic words attested in the Quran" in the product, and which wording is acceptable. The research note advises against "Quranic words", "Quran seed" and "holy words".
-4. Anything else in the full list (`ar-quran-draft-2048.txt`) that should go. Add comments to the `reviewer_notes` column of the sheet.
+4. Anything else in the full list (`ar-quran-v1-2048.txt`) that should go. Add comments to the `reviewer_notes` column of the sheet.
 
 The sheet also lists about 270 further entries the internal review marked "consider" (ordinary words with a strong association); they are in `wordlists/review/arabic-proposed-changes.csv` if you want to see them.
 

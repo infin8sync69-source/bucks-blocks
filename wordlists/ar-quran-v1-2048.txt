@@ -1,7 +1,10 @@
-# Bucks DRAFT Arabic word list (ar-quran-draft): 2048 words exactly as written in the Quran (one per dictionary word, its most frequent form),
-# modern spelling, no diacritics. Built by tools/make_ar_quran_list.py from the
-# Quranic Arabic Corpus (http://corpus.quran.com). NOT reviewed: scholar and linguist sign-off
-# (research_notes/.../religious_considerations.md) is still required.
+# Bucks Arabic word list, version 1 (ar-quran-v1). FROZEN: never edit this file.
+# A recovery phrase decodes only with exactly these 2048 words in exactly this order; any change would make every
+# phrase made with the list unrestorable. An improvement ships as a new list (ar-quran-v2) next to this one.
+# 2048 words exactly as written in the Quran (one per dictionary word, its most frequent form), modern spelling, no
+# diacritics. Built by tools/make_ar_quran_list.py from the Quranic Arabic Corpus (http://corpus.quran.com).
+# Frozen on the owner's decision of 2026-10-18 without the scholar and linguist sign-off; the words the scholar would
+# have been asked about are listed in docs/SCHOLAR_REVIEW_PACKET.md.
 أبابيل
 ابتغاء
 ابتلى

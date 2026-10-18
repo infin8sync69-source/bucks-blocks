@@ -24,5 +24,5 @@ regtest run today.
 
 ## Known gaps the auditors should expect
 Threading rework and lock-ranking layer, crash-injection harness and read-pool/backups from the storage spec are not
-done; the wallet file is not encrypted at rest; word lists are unreviewed drafts; release checkpoints and
+done; the wallet file is not encrypted at rest; word lists are frozen (version 1) without a scholar or translator review; release checkpoints and
 `minimumChainWork` are empty. See `docs/MAINNET_INPUTS.md` and the findings list from the last run of `/code-review`.

@@ -11,8 +11,9 @@ lists, a token-authenticated REST API and a web console that the node serves its
   not configured in this build") until a release carries the mainnet genesis. Use the test network
   (`--network=test`) or a private regtest chain until then. What is still open before launch is in
   [docs/MAINNET_INPUTS.md](docs/MAINNET_INPUTS.md); the launch procedure is [docs/LAUNCH.md](docs/LAUNCH.md).
-- **No external audit yet.** The word lists are drafts until their review is finished; phrases made
-  now may not restore with the final lists.
+- **No external audit yet.** The word lists (`ar-quran-v1`, `en-v1`) are frozen: a phrase made with them
+  restores with exactly these lists for ever, and an improvement ships as a new list next to them. They were
+  frozen without the scholar and translator reviews.
 - **No gold backing.** BUCKS are not backed by or redeemable for gold. The gold-reserve module is a
   design proposal ([docs/design/GOLD_STANDARD.md](docs/design/GOLD_STANDARD.md)) and is not part of
   the first launch.

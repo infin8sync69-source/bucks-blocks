@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Build wordlists/en-draft-2048.txt from the review sheet (wordlists/review/ar-quran-draft-review.csv).
+"""Build the English list (frozen as wordlists/en-v1-2048.txt on 2026-10-18: never commit output over it).
+
+Originally: wordlists/en-draft-2048.txt from the review sheet (wordlists/review/ar-quran-draft-review.csv).
 
 Entry i of the English list means what entry i of the Arabic list means (index alignment), so the sheet's
 `english_meaning` column, read in `index` order, IS the list. This script only checks and writes it:
