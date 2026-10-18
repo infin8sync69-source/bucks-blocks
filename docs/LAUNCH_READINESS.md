@@ -36,11 +36,12 @@ Everything in this table was run against the integrated branch `claude/mainnet-l
 | Web console in real Chromium (desktop and phone width, keyboard only): sign-in, create and back up a wallet (Arabic and English lists), receive and QR code, mining, send (address, amount and fee checks), restore, no-peers status, console errors | Every flow works, no blocker. Two medium defects found and fixed (mining rewards shown as "1 confirmation"; mining rewards could be sent to a wallet whose phrase was never confirmed). Six low-severity items remain (see the pull request) [Certain] |
 | Web unit tests (`node --test web/test/*.mjs`) | 8 of 8 pass [Certain] |
 | Independent adversarial review of each of the seven fix branches, then a fix-up round | Done; every must-fix item closed. Four findings that the review summaries had dropped were re-checked in the merged code and fixed with regression tests (deep-reorg message after a partial move, genesis verifier and punctuation in the inscription, word-list pins on Windows line endings, per-address header budget) [Certain] |
+| **GitHub Actions** on pull request #1 (head `a1c4ca0`): Ubuntu build and test, **macOS** build and test, AddressSanitizer + UBSan, ThreadSanitizer, fuzz (1 min per target), three-node soak | All six jobs green, in both workflow runs of that commit [Certain] |
 | Hashrate of the development VM (`tools/hashrate_bench.sh`) | 5.3 MH/s per thread, 21.1 MH/s on 4 threads [Certain] |
 
-**Not checked**, so do not read them as covered: GitHub Actions on this branch (it runs when the pull request
-opens); macOS and Windows builds of this branch; a run across different machines and networks; ASERT under
-real hashpower; anything on mainnet itself.
+**Not checked**, so do not read them as covered: a Windows build (the PowerShell scripts at the repository root
+are legacy and untested); a run across different machines and networks; ASERT under real hashpower; anything on
+mainnet itself.
 
 ## 3. Risks you accepted by launching now
 
