@@ -16,15 +16,12 @@ mainnet wallets):
       or choose another limit, using a hashrate measured on the launch hardware (audit-consensus NEW-1,
       mining-launch ML-1). 10-minute blocks at `0x1d00ffff` need about 7.2 MH/s in total; below that,
       blocks are slower and stay that way, because the target never gets easier than the limit.
-- [ ] **Owner decision: difficulty algorithm.** Keep Bitcoin's retarget every 2016 blocks (limited to 4x
-      per period), or adopt a per-block rule such as ASERT before the genesis (audit-consensus NEW-2: a
-      large miner that raises the difficulty and leaves can stall the chain for years). A change is a
-      consensus change and restarts the testnet soak.
+- [x] **Difficulty algorithm: decided 2026-10-18, ASERT** (`docs/MAINNET_INPUTS.md`). Nothing to do here.
 - [ ] **Owner decision: HD coin type** in the derivation path (gate WALLET-COINTYPE): keep the placeholder
       `1` deliberately or choose another value. Every phrase made after launch depends on it, including the
       mining payout wallet of step 7.
-- [ ] **Owner decision: final word lists** and the default list (scholar and translator review, then frozen
-      with their SHA-256 pins).
+- [ ] **Owner decision: final word lists.** Decided 2026-10-18: freeze the current drafts as version 1
+      (final ids, status `release`, SHA-256 pins; `docs/LAUNCH_READINESS.md`, "Launch commit"). Tick when done.
 - [ ] **Owner decision: genesis inscription**: printable ASCII, at most 96 bytes (for example a dated news
       headline of launch day).
 - [ ] **Owner decision: seed nodes**: at least one host name or address with port 8733 that will run a
@@ -192,7 +189,7 @@ The launch is done when this node, the seed and the miner report the same tip af
 
 ## After launch
 
-- Mined coins can be spent after 100 more blocks. The first difficulty retarget comes after block 2016.
+- Mined coins can be spent after 100 more blocks. The difficulty (ASERT) adjusts on every block; at the minimum it cannot get easier.
 - `bucks-healthcheck` (every 5 minutes) fails on a stopped miner, a stale tip or a fork alert; a fork
   deeper than 100 blocks waits for an operator decision (`POST /api/node/approve-reorg`).
 - Configure the encrypted backups (`deploy/README.md`) on any node that holds wallets.
