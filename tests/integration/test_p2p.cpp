@@ -7,7 +7,9 @@
 #include <thread>
 
 #include <arpa/inet.h>
+#include <cerrno>
 #include <fcntl.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -342,31 +344,61 @@ size_t readSome(int s, size_t want, int ms) {
     return got;
 }
 
+// macOS starts processes with 256 descriptors; four black holes can need more.
+void raiseDescriptorLimit() {
+    rlimit lim{};
+    if (getrlimit(RLIMIT_NOFILE, &lim) != 0) return;
+    const rlim_t want = 4096;
+    lim.rlim_cur = lim.rlim_max == RLIM_INFINITY ? want : std::min(want, lim.rlim_max);
+    setrlimit(RLIMIT_NOFILE, &lim);
+}
+
 // A listener that never accepts, with its accept queue full: the kernel drops further SYNs, so a dial to it
 // neither succeeds nor fails until the dialler gives up (an address behind a firewall that drops packets).
+// Linux queues one or two connections for listen(fd, 0); BSD kernels (macOS) size the queue from somaxconn, 128,
+// so the fixture keeps connecting until one connect() hangs. `diag` says what the kernel did when none does.
 struct BlackHole {
     int listener = -1;
     std::vector<int> fillers;
     uint16_t port = 0;
+    std::string diag;
     BlackHole() {
         listener = socket(AF_INET, SOCK_STREAM, 0);
         sockaddr_in a{};
         a.sin_family = AF_INET;
         a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        if (bind(listener, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0 || listen(listener, 0) != 0) return;
+        if (bind(listener, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0 || listen(listener, 0) != 0) {
+            diag = "bind/listen failed, errno " + std::to_string(errno);
+            return;
+        }
         socklen_t len = sizeof(a);
         getsockname(listener, reinterpret_cast<sockaddr*>(&a), &len);
-        for (int i = 0; i < 8; ++i) {
+        for (int i = 0; i < 140; ++i) {
             int s = socket(AF_INET, SOCK_STREAM, 0);
+            if (s < 0) {
+                diag += " socket() failed after " + std::to_string(i) + " fillers, errno " + std::to_string(errno);
+                return;
+            }
             fcntl(s, F_SETFL, O_NONBLOCK);
-            connect(s, reinterpret_cast<sockaddr*>(&a), sizeof(a));
+            const int rc = connect(s, reinterpret_cast<sockaddr*>(&a), sizeof(a));
+            const int err = errno;
             fillers.push_back(s);
             pollfd p{s, POLLOUT, 0};
-            if (poll(&p, 1, 300) == 0) {   // this SYN went unanswered: the queue is full
+            const int ready = poll(&p, 1, 300);
+            if (ready == 0) {   // this SYN went unanswered: the queue is full
                 port = ntohs(a.sin_port);
                 return;
             }
+            int soerr = 0;
+            socklen_t sl = sizeof(soerr);
+            getsockopt(s, SOL_SOCKET, SO_ERROR, &soerr, &sl);
+            if (i < 3 || soerr != 0) {   // the first answers, and any refusal
+                diag += " [" + std::to_string(i) + ": connect " + std::to_string(rc) + " errno " + std::to_string(err) +
+                        ", revents " + std::to_string(p.revents) + ", SO_ERROR " + std::to_string(soerr) + "]";
+                if (soerr != 0) return;   // refused, not dropped: this kernel cannot make a black hole
+            }
         }
+        diag += " (140 connections accepted into the queue)";
     }
     ~BlackHole() {
         for (int s : fillers) close(s);
@@ -827,10 +859,11 @@ TEST(P2pAudit, UnreachableDialsDoNotStallTheNetworkThread) {
     NodeHarness h;
     ASSERT_TRUE(h.node) << h.error;
     Network net(*h.node);
+    raiseDescriptorLimit();
     std::vector<std::unique_ptr<BlackHole>> holes;
     for (int i = 0; i < 4; ++i) {
         holes.push_back(std::make_unique<BlackHole>());
-        ASSERT_NE(holes.back()->port, 0) << "could not build a black hole";
+        ASSERT_NE(holes.back()->port, 0) << "could not build a black hole:" << holes.back()->diag;
         ASSERT_TRUE(net.addSeedNode("127.0.0.1:" + std::to_string(holes.back()->port)));
     }
     const uint16_t port = freePort();
