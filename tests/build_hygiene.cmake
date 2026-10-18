@@ -54,6 +54,18 @@ foreach(flag -O2 -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie
     endif()
 endforeach()
 
+# --- sanitizer builds: the fuzz option may turn on ASan, so it must be decided before the FORTIFY
+#     flags are (audit SAN-7); GCC's TSan build needs -fno-ipa-icf (audit SAN-1) ---
+string(FIND "${cmake_text}" "option(BUCKS_FUZZ" fuzz_pos)
+string(FIND "${cmake_text}" "_FORTIFY_SOURCE" fortify_pos)
+if(fuzz_pos EQUAL -1 OR fortify_pos EQUAL -1 OR NOT fuzz_pos LESS fortify_pos)
+    list(APPEND errors "CMakeLists.txt must handle BUCKS_FUZZ before it adds _FORTIFY_SOURCE")
+endif()
+string(FIND "${cmake_text}" "-fno-ipa-icf" icf_pos)
+if(icf_pos EQUAL -1)
+    list(APPEND errors "CMakeLists.txt no longer passes -fno-ipa-icf to GCC ThreadSanitizer builds")
+endif()
+
 # --- vendored SQLite is built with the same definitions everywhere ---
 foreach(def SQLITE_THREADSAFE=1 SQLITE_DQS=0 SQLITE_OMIT_LOAD_EXTENSION)
     string(FIND "${cmake_text}" "${def}" in_cmake)
@@ -64,8 +76,8 @@ foreach(def SQLITE_THREADSAFE=1 SQLITE_DQS=0 SQLITE_OMIT_LOAD_EXTENSION)
 endforeach()
 
 # --- .gitignore keeps wallets, secrets and tool output out of git ---
-foreach(pattern wallets.json *.cookie .env .env.* !.env.example *.key *.pem
-                restore.json *.db *.sqlite build/ compile_commands.json .cache/
+foreach(pattern wallets.json wallets.json* *.tmp *.token secrets.* *.cookie .env .env.* !.env.example
+                *.key *.pem restore.json *.db *.sqlite build/ build*/ compile_commands.json .cache/
                 node_modules/ .bucks/)
     list(FIND gitignore_lines "${pattern}" idx)
     if(idx EQUAL -1)

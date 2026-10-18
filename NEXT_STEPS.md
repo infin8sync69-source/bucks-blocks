@@ -1,29 +1,23 @@
-# Bucks Blockchain - Production Roadmap
+# Bucks Blockchain - Roadmap
 
-## Current Production Status ✅
+## Where things stand
 
-### Phase 1-5: COMPLETE
-All core production features are implemented and operational:
-- ✅ Cryptographic functions (SHA-256, RIPEMD-160, Base58, ECDSA)
-- ✅ Block and Transaction data structures
-- ✅ Merkle Tree implementation
-- ✅ Proof of Work mining with difficulty adjustment
-- ✅ Blockchain with persistent UTXO and block storage (SQLite)
-- ✅ Wallet functionality with BIP-8192 HD wallet support
-- ✅ HTTP REST API Server
-- ✅ Web UI for blockchain management
-- ✅ Multi-threaded architecture
-- ✅ **P2P Networking with encrypted communication (ECDH + AES-256-CBC)**
-- ✅ **Production hardening** (DoS protection, mempool safety, consensus validation)
-- ✅ CMake build system (Windows, Linux, macOS)
+Mainnet has not launched, and nothing below has had an external audit. What must happen before
+launch, and what the owner still has to decide, is in [docs/MAINNET_INPUTS.md](docs/MAINNET_INPUTS.md);
+the launch itself is [docs/LAUNCH.md](docs/LAUNCH.md).
 
-### Security Features Implemented
-- ✅ Misbehavior scoring and IP banning
-- ✅ Connection limits (125 max peers, 8 per IP)
-- ✅ Mempool safety (50K tx cap, 300MB size limit)
-- ✅ Consensus validation (coinbase maturity, block size limits, SigOp tracking)
-- ✅ UTXO rollback for chain reorganization
-- ✅ P2P message encryption
+### Implemented in the code (tested, not audited)
+- Cryptographic functions (SHA-256, RIPEMD-160, Base58Check, ECDSA secp256k1)
+- Block and transaction data structures, Merkle root
+- Proof of work with Bitcoin's 2016-block difficulty retarget
+- Chain, coins (UTXO) and undo data in SQLite
+- HD wallets from 13- or 25-word phrases on 2048-word Arabic/English lists (the lists are drafts until the review is done)
+- REST API with token login, and the web console served by the node
+- P2P networking with encrypted sessions (ECDH + AES-256-GCM)
+- DoS limits: misbehaviour scoring and bans, connection limits (125 peers, 8 per IP), mempool caps (50K transactions, 300 MB)
+- Consensus checks: coinbase maturity, block size and sigop limits, reorganisations with undo data
+- CMake build (Linux, macOS, Windows/MinGW), test suites, sanitizer and fuzz CI jobs
+- A deployment kit for Ubuntu servers ([deploy/](deploy/README.md))
 
 ## Enhancement Roadmap
 
@@ -141,10 +135,8 @@ All core production features are implemented and operational:
   - Stable network connection
 
 - **Software Requirements:**
-  - Linux server (Ubuntu 22.04 LTS recommended)
-  - Systemd for service management
-  - Reverse proxy (nginx/Apache)
-  - SSL/TLS certificates
+  - Linux server (Ubuntu 22.04 or 24.04)
+  - Systemd for service management, nginx with TLS for the operator console: see [deploy/](deploy/README.md)
 
 ### High Availability
 - Load balancer for multiple nodes
