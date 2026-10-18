@@ -177,6 +177,13 @@ bool Node::knowsHeader(const Hash256& hash) const {
     return state_->find(hash) != nullptr;
 }
 
+std::optional<U256> Node::chainWorkOf(const Hash256& hash) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    const BlockIndex* e = state_->find(hash);
+    if (!e) return std::nullopt;
+    return e->chainWork;
+}
+
 std::vector<Hash256> Node::locator() const {
     std::lock_guard<std::mutex> lock(mu_);
     return state_->locator();

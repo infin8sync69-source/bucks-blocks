@@ -57,7 +57,7 @@ static void printUsage() {
         "  --port <n>                API port (default: per network, 8080 on main)\n"
         "  --p2p-port <n>            P2P port (default: per network, 8733 on main)\n"
         "  --connect <host:port>     keep a connection to this peer (repeatable)\n"
-        "  --seed <host:port>        seed node, dialled while there are fewer than 3 peers (repeatable)\n"
+        "  --seed <host:port>        seed node, redialled while it is missing and outbound slots are free (repeatable)\n"
         "  --web-root <dir>          static UI directory (default: the source tree's web/, else\n"
         "                            <exe dir>/../share/bucks/web)\n"
         "  --wordlist-dir <dir>      mnemonic word lists (default: $BUCKS_WORDLIST_DIR, the source tree's\n"
@@ -305,17 +305,10 @@ int main(int argc, char* argv[]) {
     Bucks::logOut() << "✓ Chain opened at " << networkDir << "\n";
     Bucks::logOut() << "✓ Current height: " << node.height() << "\n";
 
-    // Start P2P network
+    // P2P network. Seeds and --connect peers are registered before the network thread starts,
+    // so its first round already dials them (audit NET-NEW-8).
     Network network(node);
-    try {
-        network.start(p2pPort);
-    } catch (const std::exception& e) {
-        Bucks::logErr() << "FATAL: " << e.what() << "\n";
-        node.shutdown();
-        return 5;
-    }
-    Bucks::logOut() << "✓ P2P network started on port " << p2pPort << "\n";
-
+    network.setAddressFile(networkDir + "/peers.dat");   // addresses learned from peers, kept across restarts
     auto splitHostPort = [](const std::string& hp, std::string& host, uint16_t& port) {
         const size_t colon = hp.rfind(':');
         if (colon == std::string::npos || colon == 0) return false;
@@ -328,24 +321,31 @@ int main(int argc, char* argv[]) {
     for (const std::string& hp : seedPeers) {
         std::string host;
         uint16_t p = 0;
-        if (!splitHostPort(hp, host, p)) {
+        if (!splitHostPort(hp, host, p) || !network.addSeedNode(hp)) {
             Bucks::logErr() << "FATAL: --seed expects host:port, got '" << hp << "'\n";
-            network.stop();
+            node.shutdown();
             return 2;
         }
-        network.addSeedNode(hp);
     }
     for (const std::string& hp : connectPeers) {
         std::string host;
         uint16_t p = 0;
         if (!splitHostPort(hp, host, p)) {
             Bucks::logErr() << "FATAL: --connect expects host:port, got '" << hp << "'\n";
-            network.stop();
+            node.shutdown();
             return 2;
         }
         network.addPersistentPeer(host, p);
         Bucks::logOut() << "✓ Keeping a connection to peer " << hp << "\n";
     }
+    try {
+        network.start(p2pPort);
+    } catch (const std::exception& e) {
+        Bucks::logErr() << "FATAL: " << e.what() << "\n";
+        node.shutdown();
+        return 5;
+    }
+    Bucks::logOut() << "✓ P2P network started on port " << p2pPort << "\n";
 
     Server* server = nullptr;
     if (startServer) {

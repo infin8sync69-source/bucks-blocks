@@ -3,6 +3,8 @@
 #include "node.h"
 #include "serialize.h"
 #include "consensus.h"
+#include "fsutil.h"
+#include "pow.h"
 #include <iostream>
 #include <cerrno>
 #include <cstring>
@@ -27,15 +29,13 @@
 namespace Bucks {
 
 // ------------------------------------------------------------
-// Local / LAN address whitelist helper
-// Returns true for addresses that must never be banned:
-//   127.0.0.1, ::1, 192.168.x.x, 10.x.x.x
+// Loopback (127/8, ::1): the only addresses never banned, because several local nodes share them.
+// LAN addresses are banned like any other: a seed in a cloud VPC or behind NAT must still be able
+// to shut out a misbehaving peer (audit NET-NEW-5, NET-13).
 // ------------------------------------------------------------
-static bool isLocalAddress(const std::string& ip) {
-    if (ip == "127.0.0.1" || ip == "::1") return true;
-    if (ip.find("192.168.") == 0)          return true;
-    if (ip.find("10.")      == 0)          return true;
-    return false;
+static bool isLoopbackAddress(const std::string& ip) {
+    if (ip == "::1") return true;
+    return ip.compare(0, 4, "127.") == 0;
 }
 
 // Extra bytes an encrypted payload may carry (IV, tag).
@@ -94,12 +94,23 @@ MessageType NetMessageHeader::commandToType(const char* cmd) {
 }
 
 uint32_t NetMessageHeader::maxPayload(MessageType type) {
+    // The small messages are capped near their real size: a 4 MiB ping used to be echoed in full,
+    // under the peer lock (audit NET-14, NET-5).
     switch (type) {
         case MessageType::BLOCK:      return 1'000'000 + ENCRYPTION_OVERHEAD;
         case MessageType::TX:         return 100'000 + ENCRYPTION_OVERHEAD;
         case MessageType::HEADERS:    return 168'003 + ENCRYPTION_OVERHEAD;
         case MessageType::GETHEADERS: return 3'269 + ENCRYPTION_OVERHEAD;
         case MessageType::ENCINIT:    return 33;
+        case MessageType::VERSION:    return 64 + ENCRYPTION_OVERHEAD;        // height, listen port, nonce
+        case MessageType::VERACK:
+        case MessageType::GETADDR:    return ENCRYPTION_OVERHEAD;             // empty
+        case MessageType::PING:
+        case MessageType::PONG:       return 8 + ENCRYPTION_OVERHEAD;         // a nonce
+        case MessageType::ADDR:       return 4 + 1000 * (2 + 21) + ENCRYPTION_OVERHEAD;
+        case MessageType::GETDATA:    return 4 + 1000 * 36 + ENCRYPTION_OVERHEAD;
+        case MessageType::INV:        return 4 + 50'000 * 36 + ENCRYPTION_OVERHEAD;
+        case MessageType::REJECT:     return 1'024 + ENCRYPTION_OVERHEAD;     // never sent; ignored
         default:                      return MAX_MESSAGE_PAYLOAD;
     }
 }
@@ -226,11 +237,316 @@ NetMessage NetMessage::deserialize(const std::vector<uint8_t>& data, const std::
 }
 
 // ------------------------------------------------------------
+// NetAddress, AddrMan
+// ------------------------------------------------------------
+
+namespace {
+
+int64_t unixNow() {
+    return std::chrono::duration_cast<std::chrono::seconds>(
+               std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+bool inNet(uint32_t ip, uint32_t net, int bits) {
+    const uint32_t mask = bits == 0 ? 0 : ~uint32_t(0) << (32 - bits);
+    return (ip & mask) == (net & mask);
+}
+
+constexpr uint32_t ipv4(uint32_t a, uint32_t b, uint32_t c, uint32_t d) { return a << 24 | b << 16 | c << 8 | d; }
+
+} // namespace
+
+bool NetAddress::parseIP(const std::string& ip, uint32_t& out) {
+    in_addr a{};
+    if (ip.size() > 15 || inet_pton(AF_INET, ip.c_str(), &a) != 1) return false;
+    out = ntohl(a.s_addr);
+    return true;
+}
+
+bool NetAddress::parse(const std::string& s, NetAddress& out) {
+    const size_t colon = s.find(':');
+    if (colon == std::string::npos || s.size() > 21) return false;
+    const std::string portText = s.substr(colon + 1);
+    if (portText.empty() || portText.size() > 5) return false;
+    uint32_t port = 0;
+    for (char c : portText) {
+        if (c < '0' || c > '9') return false;
+        port = port * 10 + uint32_t(c - '0');
+    }
+    if (port < 1 || port > 65535) return false;
+    uint32_t ip = 0;
+    if (!parseIP(s.substr(0, colon), ip)) return false;
+    out.ip = ip;
+    out.port = uint16_t(port);
+    return true;
+}
+
+std::string NetAddress::ipString() const {
+    return std::to_string(ip >> 24) + "." + std::to_string((ip >> 16) & 0xFF) + "." +
+           std::to_string((ip >> 8) & 0xFF) + "." + std::to_string(ip & 0xFF);
+}
+
+std::string NetAddress::toString() const { return ipString() + ":" + std::to_string(port); }
+
+bool NetAddress::isLoopback() const { return inNet(ip, ipv4(127, 0, 0, 0), 8); }
+
+bool NetAddress::isPrivate() const {
+    return inNet(ip, ipv4(10, 0, 0, 0), 8) || inNet(ip, ipv4(172, 16, 0, 0), 12) ||
+           inNet(ip, ipv4(192, 168, 0, 0), 16) || inNet(ip, ipv4(100, 64, 0, 0), 10) ||
+           inNet(ip, ipv4(169, 254, 0, 0), 16);
+}
+
+bool NetAddress::isValid() const {
+    return port != 0 && !inNet(ip, 0, 8) && !inNet(ip, ipv4(224, 0, 0, 0), 4) && !inNet(ip, ipv4(240, 0, 0, 0), 4);
+}
+
+bool NetAddress::isRoutable() const {
+    // Also not the documentation and benchmark ranges.
+    return isValid() && !isLoopback() && !isPrivate() && !inNet(ip, ipv4(192, 0, 2, 0), 24) &&
+           !inNet(ip, ipv4(198, 51, 100, 0), 24) && !inNet(ip, ipv4(203, 0, 113, 0), 24) &&
+           !inNet(ip, ipv4(198, 18, 0, 0), 15);
+}
+
+bool NetAddress::acceptableFrom(uint32_t source) const {
+    if (!isValid()) return false;
+    if (isRoutable()) return true;
+    const NetAddress src{source, 1};
+    if (isLoopback()) return src.isLoopback();
+    if (isPrivate()) return src.isLoopback() || src.isPrivate();
+    return false;
+}
+
+namespace {
+
+// Retry delay after `attempts` dials without a handshake: 30 s, doubling up to an hour.
+int64_t retryDelay(int attempts) {
+    if (attempts <= 0) return 0;
+    return std::min<int64_t>(int64_t(30) << std::min(attempts - 1, 7), 3600);
+}
+
+constexpr int kMaxFailedAttempts = 10;   // an address never reached after this many dials is dropped
+
+} // namespace
+
+AddrMan::AddrMan() : rng_(std::random_device{}()) {}
+
+bool AddrMan::isTerrible(const Entry& e, int64_t now) const {
+    if (now - e.lastSeen > 30 * 86400) return true;                          // not heard of for a month
+    if (e.lastSuccess == 0 && e.attempts >= 3) return true;                  // never reached
+    if (e.attempts >= kMaxFailedAttempts && now - e.lastSuccess > 7 * 86400) return true;
+    return false;
+}
+
+// Makes room for one more new entry from `sourceGroup`: drops a terrible entry of that source,
+// else its oldest one, if the source is at its share; otherwise (the table is full) a terrible
+// entry, else the oldest entry of the source with the most entries.
+void AddrMan::evictNew(uint32_t sourceGroup, int64_t now) {
+    const auto share = newPerSource_.find(sourceGroup);
+    const bool sourceFull = share != newPerSource_.end() && share->second >= MAX_NEW_PER_SOURCE_GROUP;
+    if (!sourceFull && newCount_ < MAX_NEW) return;
+    uint32_t victimSource = sourceGroup;
+    if (!sourceFull) {
+        size_t most = 0;
+        for (const auto& [g, n] : newPerSource_) {
+            if (n > most) { most = n; victimSource = g; }
+        }
+    }
+    auto victim = entries_.end();
+    for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+        const Entry& e = it->second;
+        if (e.tried) continue;
+        if (sourceFull && e.sourceGroup != sourceGroup) continue;
+        if (isTerrible(e, now)) { victim = it; break; }
+        if (e.sourceGroup != victimSource) continue;
+        if (victim == entries_.end() || e.lastSeen < victim->second.lastSeen) victim = it;
+    }
+    if (victim == entries_.end()) return;
+    if (--newPerSource_[victim->second.sourceGroup] == 0) newPerSource_.erase(victim->second.sourceGroup);
+    --newCount_;
+    entries_.erase(victim);
+}
+
+void AddrMan::evictTried() {
+    auto victim = entries_.end();
+    for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+        if (!it->second.tried) continue;
+        if (victim == entries_.end() || it->second.lastSuccess < victim->second.lastSuccess) victim = it;
+    }
+    if (victim == entries_.end()) return;
+    --triedCount_;
+    entries_.erase(victim);
+}
+
+bool AddrMan::add(const NetAddress& a, uint32_t sourceGroup, int64_t now) {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = entries_.find(a);
+    if (it != entries_.end()) {
+        it->second.lastSeen = std::max(it->second.lastSeen, now);
+        return false;
+    }
+    evictNew(sourceGroup, now);
+    const auto share = newPerSource_.find(sourceGroup);
+    if ((share != newPerSource_.end() && share->second >= MAX_NEW_PER_SOURCE_GROUP) || newCount_ >= MAX_NEW)
+        return false;
+    Entry e;
+    e.addr = a;
+    e.sourceGroup = sourceGroup;
+    e.lastSeen = now;
+    entries_.emplace(a, e);
+    ++newPerSource_[sourceGroup];
+    ++newCount_;
+    return true;
+}
+
+void AddrMan::attempt(const NetAddress& a, int64_t now) {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = entries_.find(a);
+    if (it == entries_.end()) return;
+    it->second.lastTry = now;
+    ++it->second.attempts;
+}
+
+void AddrMan::good(const NetAddress& a, int64_t now) {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = entries_.find(a);
+    const bool wasTried = it != entries_.end() && it->second.tried;
+    if (!wasTried && triedCount_ >= MAX_TRIED) evictTried();   // `a` is not tried, so not the victim
+    if (it == entries_.end()) {
+        Entry e;
+        e.addr = a;
+        e.sourceGroup = a.group();
+        it = entries_.emplace(a, e).first;
+    } else if (!wasTried) {
+        if (--newPerSource_[it->second.sourceGroup] == 0) newPerSource_.erase(it->second.sourceGroup);
+        --newCount_;
+    }
+    Entry& e = it->second;
+    e.lastSeen = e.lastSuccess = e.lastTry = now;
+    e.attempts = 0;
+    if (!wasTried) {
+        e.tried = true;
+        ++triedCount_;
+    }
+}
+
+void AddrMan::remove(const NetAddress& a) {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = entries_.find(a);
+    if (it == entries_.end()) return;
+    if (it->second.tried) {
+        --triedCount_;
+    } else {
+        if (--newPerSource_[it->second.sourceGroup] == 0) newPerSource_.erase(it->second.sourceGroup);
+        --newCount_;
+    }
+    entries_.erase(it);
+}
+
+std::optional<NetAddress> AddrMan::select(int64_t now, const std::function<bool(const NetAddress&)>& skip,
+                                          const std::function<bool(const NetAddress&)>& prefer) {
+    std::lock_guard<std::mutex> lock(mu_);
+    // [preferred][tried]
+    std::vector<NetAddress> pool[2][2];
+    for (auto it = entries_.begin(); it != entries_.end();) {
+        const Entry& e = it->second;
+        if (!e.tried && e.lastSuccess == 0 && e.attempts >= kMaxFailedAttempts) {
+            if (--newPerSource_[e.sourceGroup] == 0) newPerSource_.erase(e.sourceGroup);
+            --newCount_;
+            it = entries_.erase(it);
+            continue;
+        }
+        if (now - e.lastTry >= retryDelay(e.attempts) && !(skip && skip(e.addr)))
+            pool[!prefer || prefer(e.addr)][e.tried].push_back(e.addr);
+        ++it;
+    }
+    for (int p = 1; p >= 0; --p) {
+        std::vector<NetAddress>* from = nullptr;
+        if (!pool[p][0].empty() && !pool[p][1].empty()) from = &pool[p][rng_() & 1];
+        else if (!pool[p][1].empty()) from = &pool[p][1];
+        else if (!pool[p][0].empty()) from = &pool[p][0];
+        if (from) return (*from)[rng_() % from->size()];
+    }
+    return std::nullopt;
+}
+
+std::vector<NetAddress> AddrMan::sample(size_t max, int64_t now) {
+    std::lock_guard<std::mutex> lock(mu_);
+    std::vector<NetAddress> out;
+    for (const auto& [a, e] : entries_) {
+        if (!isTerrible(e, now)) out.push_back(a);
+    }
+    std::shuffle(out.begin(), out.end(), rng_);
+    if (out.size() > max) out.resize(max);
+    return out;
+}
+
+std::optional<AddrMan::Entry> AddrMan::find(const NetAddress& a) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = entries_.find(a);
+    if (it == entries_.end()) return std::nullopt;
+    return it->second;
+}
+
+size_t AddrMan::size() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return entries_.size();
+}
+
+size_t AddrMan::triedCount() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return triedCount_;
+}
+
+std::string AddrMan::serialize() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    std::ostringstream out;
+    out << "bucks-addresses 1\n";
+    for (const auto& [a, e] : entries_) {
+        out << a.toString() << ' ' << (e.tried ? 1 : 0) << ' ' << e.lastSeen << ' ' << e.lastTry << ' '
+            << e.lastSuccess << ' ' << e.attempts << ' ' << e.sourceGroup << '\n';
+    }
+    return out.str();
+}
+
+size_t AddrMan::load(const std::string& text) {
+    std::istringstream in(text);
+    std::string line;
+    if (!std::getline(in, line) || line != "bucks-addresses 1") return 0;
+    size_t taken = 0;
+    while (std::getline(in, line)) {
+        std::istringstream fields(line);
+        std::string addr;
+        Entry e;
+        int tried = 0;
+        if (!(fields >> addr >> tried >> e.lastSeen >> e.lastTry >> e.lastSuccess >> e.attempts >> e.sourceGroup))
+            continue;
+        if (!NetAddress::parse(addr, e.addr) || !e.addr.isValid() || e.attempts < 0) continue;
+        std::lock_guard<std::mutex> lock(mu_);
+        if (entries_.count(e.addr)) continue;
+        if (tried == 1 && e.lastSuccess > 0) {
+            if (triedCount_ >= MAX_TRIED) continue;
+            e.tried = true;
+            ++triedCount_;
+        } else {
+            const auto share = newPerSource_.find(e.sourceGroup);
+            if (newCount_ >= MAX_NEW || (share != newPerSource_.end() && share->second >= MAX_NEW_PER_SOURCE_GROUP))
+                continue;
+            e.tried = false;
+            ++newPerSource_[e.sourceGroup];
+            ++newCount_;
+        }
+        entries_.emplace(e.addr, e);
+        ++taken;
+    }
+    return taken;
+}
+
+// ------------------------------------------------------------
 // Peer implementation
 // ------------------------------------------------------------
 
-Peer::Peer(Network& net, int socket, const std::string& ip, uint16_t port)
-    : network(net), socket_fd(socket), ip(ip), port(port), connected(true),
+Peer::Peer(Network& net, int socket, const std::string& ip, uint16_t port, ConnKind kind)
+    : network(net), socket_fd(socket), ip(ip), port(port), kind_(kind), connected(true),
       state(PeerState::HANDSHAKE), misbehaviorScore(0), encryptionNegotiated(false) {
 
 #ifndef _WIN32
@@ -238,6 +554,9 @@ Peer::Peer(Network& net, int socket, const std::string& ip, uint16_t port)
     fcntl(socket_fd, F_SETFL, fcntl(socket_fd, F_GETFL, 0) | O_NONBLOCK);
 #endif
     connectionTime = std::chrono::steady_clock::now();
+    addrTokensAt = connectionTime;
+    lastReceived = lastPingSent = connectionTime;
+    if (outbound()) listenPort_ = port;
     lastBlockRequestTime = connectionTime;
     lastHeadersRequestTime = connectionTime - std::chrono::seconds(60);
 
@@ -255,11 +574,8 @@ void Peer::misbehavior(int penalty) {
               << " (total: " << misbehaviorScore << ")" << std::endl;
 
     if (misbehaviorScore >= 100) {
-        if (isLocalAddress(ip)) {
-            Bucks::logOut() << "WARNING: Peer " << ip << " exceeded misbehavior threshold but is a local/LAN address — skipping ban and disconnect." << std::endl;
-            return;
-        }
-        Bucks::logOut() << "DEBUG: Peer " << ip << " exceeded misbehavior threshold. Banning IP." << std::endl;
+        // Always disconnected; banned unless it is a loopback peer (banIP refuses those).
+        Bucks::logOut() << "DEBUG: Peer " << ip << " exceeded misbehavior threshold. Disconnecting." << std::endl;
         network.banIP(ip);
         disconnect();
     }
@@ -372,6 +688,7 @@ void Peer::processBuffer() {
 
         try {
             NetMessage msg = NetMessage::deserialize(raw, magic);
+            lastReceived = std::chrono::steady_clock::now();
             handleMessage(msg);
         } catch (const NetIncomplete&) {
             return;   // cannot happen: the frame is complete
@@ -388,6 +705,52 @@ void Peer::requestHeaders() {
     headersInFlight = true;
     lastHeadersRequestTime = now;
     sendMsg(NetMessage(MessageType::GETHEADERS, makeGetHeaders(network.getNode().locator())));
+}
+
+namespace {
+constexpr double kAddrTokensPerSecond = 0.1;
+constexpr double kMaxAddrTokens = 1000;
+constexpr size_t kMaxAddrPerMessage = 1000;
+constexpr size_t kGetAddrReplySize = 250;
+} // namespace
+
+void Peer::askForAddresses() {
+    addrTokens = std::min(addrTokens + kMaxAddrTokens, 2 * kMaxAddrTokens);
+    sendMsg(NetMessage(MessageType::GETADDR, {}));
+}
+
+// Counts the headers of a batch that we do not know yet and that do not lead to more work than our
+// active tip, and refuses the batch once this peer's total would pass lowWorkHeaderBudget. Such
+// headers are stored for ever and a fork from genesis can be replayed to every node, so one
+// connection may not make us store an unlimited number of them (audit NET-NEW-3). A batch that
+// does lead past the tip resets the count: an honest peer on a heavier branch is never limited,
+// and an attacker would need more work than the whole chain. Which headers are valid and which
+// chain is best do not change; a refused batch is simply not stored.
+bool Peer::withinHeaderBudget(const std::vector<BlockHeader>& headers) {
+    Node& node = network.getNode();
+    const std::optional<U256> parentWork = node.chainWorkOf(headers.front().prevBlockHash);
+    if (!parentWork) return true;   // unknown parent: nothing is stored (MISSING_PARENT)
+    U256 work = *parentWork;
+    uint32_t lastBits = 0;
+    U256 proof;
+    for (const BlockHeader& h : headers) {
+        if (h.bits != lastBits) proof = Pow::blockProof(lastBits = h.bits);   // bits change once per 2016 at most
+        work += proof;
+    }
+    if (work > node.tip().chainWork) {
+        lowWorkHeaders_ = 0;
+        return true;
+    }
+    size_t fresh = 0;
+    for (const BlockHeader& h : headers)
+        if (!node.knowsHeader(h.hash())) ++fresh;
+    if (lowWorkHeaders_ + fresh > network.options().lowWorkHeaderBudget) {
+        Bucks::logErr() << "DEBUG: Peer " << ip << " sent " << fresh << " more headers that lead nowhere ("
+                        << lowWorkHeaders_ << " already); not storing them" << std::endl;
+        return false;
+    }
+    lowWorkHeaders_ += fresh;
+    return true;
 }
 
 void Peer::requestMissingBlocks() {
@@ -452,9 +815,12 @@ void Peer::handleMessage(const NetMessage& msg) {
                      encryptionNegotiated = true;
                      Bucks::logOut() << "DEBUG: P2P Encryption established with Peer " << ip << std::endl;
 
-                     // Now send our VERSION message (it will be encrypted)
+                     // Now send our VERSION message (it will be encrypted): height, the port we
+                     // accept connections on (0 = none) and our nonce, which shows a dial to ourselves.
                      Writer w;
                      w.u32(node.height());
+                     w.u16(network.listenPort);
+                     w.u64(network.localNonce());
                      sendMsg(NetMessage(MessageType::VERSION, w.take()));
                  }
             }
@@ -465,6 +831,23 @@ void Peer::handleMessage(const NetMessage& msg) {
                 Reader r(decrypted.payload);
                 const uint32_t peerHeight = r.u32();
                 Bucks::logOut() << "DEBUG: Peer " << ip << " version: height=" << peerHeight << std::endl;
+                if (r.remaining() >= 10 && !versionSeen_) {
+                    const uint16_t peerListenPort = r.u16();
+                    remoteNonce_ = r.u64();
+                    versionSeen_ = true;
+                    if (remoteNonce_ == network.localNonce()) {
+                        Bucks::logOut() << "DEBUG: Connected to ourselves through " << address() << "; dropping it" << std::endl;
+                        if (outbound()) network.markSelf(address());
+                        disconnect();
+                        break;
+                    }
+                    // An inbound peer that listens: its address is worth knowing and passing on.
+                    if (!outbound() && peerListenPort != 0 && listenPort_ == 0) {
+                        listenPort_ = peerListenPort;
+                        if (auto a = listenAddress()) network.learnAddress(*a, ip, socket_fd);
+                    }
+                    if (network.dropDuplicate(*this)) break;
+                }
                 if (peerHeight > node.height()) requestHeaders();
             } else {
                 misbehavior(10); // Penalty for invalid VERSION payload
@@ -472,10 +855,18 @@ void Peer::handleMessage(const NetMessage& msg) {
             sendMsg(NetMessage(MessageType::VERACK, {}));
             break;
         }
-        case MessageType::VERACK:
+        case MessageType::VERACK: {
+            if (state == PeerState::ACTIVE) break;
             state = PeerState::ACTIVE;
             Bucks::logOut() << "DEBUG: Peer " << ip << " is now ACTIVE" << std::endl;
+            // An address we dialled and shook hands with is worth keeping and passing on; ask it
+            // for more (audit NET-NEW-2: before, getaddr went out every 30 minutes only).
+            if (outbound()) {
+                if (auto a = listenAddress()) network.addresses().good(*a, unixNow());
+                askForAddresses();
+            }
             break;
+        }
         case MessageType::INV: {
             std::vector<Inventory> invs;
             if (!parseInvs(decrypted.payload, 50000, invs)) {
@@ -529,6 +920,10 @@ void Peer::handleMessage(const NetMessage& msg) {
                 break;
             }
             if (headers.empty()) break;
+            if (!withinHeaderBudget(headers)) {
+                misbehavior(20);
+                break;
+            }
             // Headers must connect to each other; the first one's parent must be known.
             const ValidationState st = node.submitHeaders(headers);
             if (st.result == ValidationResult::MISSING_PARENT) {
@@ -549,9 +944,18 @@ void Peer::handleMessage(const NetMessage& msg) {
                 misbehavior(20);
                 break;
             }
+            // Each item once, and at most a window of blocks per request (we ask for 16 at a time):
+            // 1000 copies of one block hash used to be answered with 1000 blocks (audit NET-5).
+            std::set<Hash256> seen;
+            size_t blocks = 0;
             for (const Inventory& inv : invs) {
+                if (!seen.insert(inv.hash).second) continue;
                 if (inv.type == InvType::BLOCK) {
-                    if (auto b = node.blockByHash(inv.hash)) sendMsg(NetMessage(MessageType::BLOCK, b->serialize()));
+                    if (blocks >= MAX_BLOCKS_IN_FLIGHT) continue;
+                    if (auto b = node.blockByHash(inv.hash)) {
+                        ++blocks;
+                        sendMsg(NetMessage(MessageType::BLOCK, b->serialize()));
+                    }
                 } else if (auto tx = node.mempoolTransaction(inv.hash)) {
                     sendMsg(NetMessage(MessageType::TX, tx->serialize()));
                 }
@@ -569,6 +973,11 @@ void Peer::handleMessage(const NetMessage& msg) {
             }
             const Hash256 hash = b.getHash();
             const bool requested = requestedBlocks.erase(hash) > 0;
+            // An unrequested block stores its header even when the block itself is dropped.
+            if (!requested && !withinHeaderBudget({b.header})) {
+                misbehavior(20);
+                break;
+            }
             const ValidationState st = node.submitBlock(b, requested);
             if (st.valid() || st.result == ValidationResult::DUPLICATE) node.noteBlockAvailable(hash, bestKnownBlock);
             if (st.valid()) {
@@ -607,37 +1016,24 @@ void Peer::handleMessage(const NetMessage& msg) {
             sendMsg(NetMessage(MessageType::PONG, decrypted.payload));
             break;
         case MessageType::GETADDR: {
-            // Peer is requesting our known peer addresses. This handler already runs under
-            // peersMutex (Network::handleSocketIO), so it must not lock it again.
+            // A sample of the address table, once per connection and only to peers that dialled
+            // us (as Bitcoin Core does), so the table cannot be scraped; the peer's own entry is
+            // left out.
+            if (outbound() || answeredGetAddr_) break;
+            answeredGetAddr_ = true;
             Bucks::logOut() << "DEBUG: Peer " << ip << " requested peer addresses" << std::endl;
-
+            const std::optional<NetAddress> self = listenAddress();
             std::vector<std::string> addresses;
-            for (const auto& [fd, peer] : network.peers) {
-                if (peer->getState() == PeerState::ACTIVE && peer->getIP() != ip) {
-                    addresses.push_back(peer->getIP() + ":" + std::to_string(network.listenPort));
-                }
+            for (const NetAddress& a : network.addresses().sample(kGetAddrReplySize, unixNow())) {
+                if (!self || !(a == *self)) addresses.push_back(a.toString());
             }
-            for (const auto& addr : network.knownPeers) {
-                if (addresses.size() >= 100) break;  // Limit to 100 addresses
-                addresses.push_back(addr);
+            Writer w;
+            w.u32(uint32_t(addresses.size()));
+            for (const std::string& addr : addresses) {
+                w.u16(uint16_t(addr.size()));
+                w.bytes(reinterpret_cast<const uint8_t*>(addr.data()), addr.size());
             }
-
-            std::vector<uint8_t> payload;
-            uint32_t count = static_cast<uint32_t>(std::min(addresses.size(), size_t(100)));
-            payload.push_back(count & 0xFF);
-            payload.push_back((count >> 8) & 0xFF);
-            payload.push_back((count >> 16) & 0xFF);
-            payload.push_back((count >> 24) & 0xFF);
-
-            for (size_t i = 0; i < count; ++i) {
-                const auto& addr = addresses[i];
-                uint16_t addrLen = static_cast<uint16_t>(addr.size());
-                payload.push_back(addrLen & 0xFF);
-                payload.push_back((addrLen >> 8) & 0xFF);
-                payload.insert(payload.end(), addr.begin(), addr.end());
-            }
-
-            sendMsg(NetMessage(MessageType::ADDR, payload));
+            sendMsg(NetMessage(MessageType::ADDR, w.take()));
             break;
         }
         case MessageType::ADDR: {
@@ -646,14 +1042,20 @@ void Peer::handleMessage(const NetMessage& msg) {
             uint32_t count = decrypted.payload[0] | (decrypted.payload[1] << 8) |
                             (decrypted.payload[2] << 16) | (decrypted.payload[3] << 24);
 
-            if (count > 1000) {
+            if (count > kMaxAddrPerMessage) {
                 misbehavior(20);  // Penalty for excessive addresses
                 break;
             }
 
+            // Token bucket: what is beyond this peer's allowance is dropped unread.
+            const auto now = std::chrono::steady_clock::now();
+            addrTokens = std::min(kMaxAddrTokens * 2, addrTokens + kAddrTokensPerSecond *
+                                  std::chrono::duration<double>(now - addrTokensAt).count());
+            addrTokensAt = now;
+
             std::vector<std::string> addresses;
             size_t pos = 4;
-            for (uint32_t i = 0; i < count && pos + 1 < decrypted.payload.size(); ++i) {
+            for (uint32_t i = 0; i < count && pos + 1 < decrypted.payload.size() && addrTokens >= 1; ++i) {
                 uint16_t addrLen = decrypted.payload[pos] | (decrypted.payload[pos+1] << 8);
                 pos += 2;
 
@@ -662,11 +1064,16 @@ void Peer::handleMessage(const NetMessage& msg) {
                 std::string addr(decrypted.payload.begin() + pos,
                                 decrypted.payload.begin() + pos + addrLen);
                 addresses.push_back(addr);
+                addrTokens -= 1;
                 pos += addrLen;
             }
-
-            // Connecting takes peersMutex, which is held here: hand them to the network thread.
-            network.queueAddresses(addresses);
+            std::vector<NetAddress> fresh;
+            network.addAddresses(addresses, ip, &fresh);
+            // A short unsolicited ADDR is news (a node announcing itself): pass on what we did
+            // not know yet. Known addresses are not relayed again, so this dies out.
+            if (count <= 10) {
+                for (const NetAddress& a : fresh) network.relayAddress(a, socket_fd);
+            }
             break;
         }
         default:
@@ -678,21 +1085,32 @@ std::string Peer::address() const {
     return ip + ":" + std::to_string(port);
 }
 
+std::optional<NetAddress> Peer::listenAddress() const {
+    NetAddress a;
+    if (listenPort_ == 0 || !NetAddress::parse(ip + ":" + std::to_string(listenPort_), a)) return std::nullopt;
+    return a;
+}
+
 // ------------------------------------------------------------
 // Network implementation
 // ------------------------------------------------------------
 
-Network::Network(Node& n)
-    : listenPort(0), node(n), magic_(n.params().netMagic), running(false), listenSocket(-1) {
+Network::Network(Node& n, const NetworkOptions& options)
+    : listenPort(0), node(n), options_(options), magic_(n.params().netMagic), running(false), listenSocket(-1) {
 #ifdef _WIN32
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
 #endif
     
     // Initialize peer discovery
-    lastDiscoveryTime = std::chrono::steady_clock::now() - std::chrono::minutes(31);   // first discovery at once
-    lastMaintain_ = std::chrono::steady_clock::now();
-    loadSeedNodes();
+    std::random_device rd;
+    localNonce_ = uint64_t(rd()) << 32 | rd();
+    relayRng_.seed(rd());
+    lastMaintain_ = std::chrono::steady_clock::now() - std::chrono::seconds(1);   // first round at once
+    for (const std::string& seed : node.params().seedNodes) {
+        if (!addSeedNode(seed)) Bucks::logErr() << "WARNING: ignoring malformed seed node '" << seed << "'" << std::endl;
+    }
+    Bucks::logOut() << "DEBUG: Loaded " << node.params().seedNodes.size() << " seed nodes" << std::endl;
 
     // New tips and accepted transactions are announced to every peer. The listeners only
     // queue the message: they run on arbitrary threads and the peer lock is not theirs.
@@ -720,12 +1138,21 @@ void Network::start(uint16_t port) {
 
     setupListenSocket();
     networkThread = std::thread(&Network::run, this);
+    dnsThread_ = std::thread(&Network::resolverLoop, this);
 }
 
 void Network::stop() {
-    if (!running) return;
-    running = false;
-    if (networkThread.joinable()) networkThread.join();
+    if (running) {
+        running = false;
+        {
+            // The resolver checks `running` under dnsMutex_, so it cannot miss this wake-up.
+            std::lock_guard<std::mutex> lock(dnsMutex_);
+        }
+        dnsCv_.notify_all();
+        if (networkThread.joinable()) networkThread.join();
+        if (dnsThread_.joinable()) dnsThread_.join();   // waits for a lookup in progress
+    }
+    saveAddresses();
 
     std::lock_guard<std::mutex> lock(peersMutex);
     peers.clear();
@@ -786,124 +1213,308 @@ bool resolveIPv4(const std::string& host, std::string& out) {
     return ok;
 }
 
+bool isIPv4Literal(const std::string& host) {
+    uint32_t ip = 0;
+    return NetAddress::parseIP(host, ip);
+}
+
+void closeSocket(int s) {
+#ifdef _WIN32
+    closesocket(s);
+#else
+    close(s);
+#endif
+}
+
+// How long a dial may take before it counts as failed. The network thread never waits for it.
+constexpr auto kConnectTimeout = std::chrono::seconds(5);
+// A host name is looked up again after this long (after a failed lookup: sooner).
+constexpr auto kDnsTtl = std::chrono::minutes(10);
+constexpr auto kDnsRetry = std::chrono::seconds(30);
+
 } // namespace
 
 bool Network::connectToPeer(const std::string& host, uint16_t port) {
     std::string ip;
-    if (!resolveIPv4(host, ip)) return false;
+    if (!resolveIPv4(host, ip)) return false;   // on the caller's thread, never the network thread
+    std::lock_guard<std::mutex> lock(queueMutex);
+    dialQueue_.push_back({ip, port, ConnKind::MANUAL});
+    return true;
+}
 
+// Network thread only. Starts a non-blocking connect; run() watches it in its poll() set and
+// completeConnects() finishes it, so a dial to an address that never answers costs the thread
+// nothing (audit NET-4, NET-11). Before, each dial waited up to 3 s inline.
+bool Network::startConnect(const std::string& ip, uint16_t port, ConnKind kind) {
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if (port == 0 || inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) != 1) return false;
     {
+        // Outbound connections have their own slots, which inbound peers cannot fill (audit NET-6).
         std::lock_guard<std::mutex> lock(peersMutex);
-        if (peers.size() >= MAX_PEERS) return false;   // outbound dials respect the same cap (audit NET-6)
+        size_t outbound = pending_.size();
+        for (const auto& [fd, peer] : peers)
+            if (peer->outbound()) ++outbound;
+        if (outbound >= MAX_OUTBOUND_PEERS + MAX_MANUAL_PEERS) return false;
     }
 
     int s = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
     if (s == -1) return false;
-
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    inet_pton(AF_INET, ip.c_str(), &addr.sin_addr);
-
-#ifndef _WIN32
-    // Non-blocking connect with a 3 s bound, so an unreachable host cannot hold the network thread (audit NET-4).
-    fcntl(s, F_SETFL, fcntl(s, F_GETFL, 0) | O_NONBLOCK);
-    if (connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1) {
-        if (errno != EINPROGRESS) {
-            close(s);
-            return false;
-        }
-        struct pollfd pfd = {s, POLLOUT, 0};
-        int soErr = 0;
-        socklen_t soLen = sizeof(soErr);
-        if (::poll(&pfd, 1, 3000) <= 0 || getsockopt(s, SOL_SOCKET, SO_ERROR, &soErr, &soLen) != 0 || soErr != 0) {
-            close(s);
-            return false;
-        }
-    }
+#ifdef _WIN32
+    u_long mode = 1;
+    ioctlsocket(s, FIONBIO, &mode);
 #else
-    if (connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1) {
-        int err = WSAGetLastError();
-        if (err != WSAEWOULDBLOCK) {
-            closesocket(s);
-            return false;
-        }
-    }
+    fcntl(s, F_SETFL, fcntl(s, F_GETFL, 0) | O_NONBLOCK);
 #endif
-
-    std::lock_guard<std::mutex> lock(peersMutex);
-    peers[s] = std::make_unique<Peer>(*this, s, ip, port);
-    
+    if (connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
+        std::lock_guard<std::mutex> lock(peersMutex);
+        peers[s] = std::make_unique<Peer>(*this, s, ip, port, kind);
+        return true;
+    }
+#ifdef _WIN32
+    const bool inProgress = WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+    const bool inProgress = errno == EINPROGRESS;
+#endif
+    if (!inProgress) {
+        closeSocket(s);
+        return false;
+    }
+    pending_.push_back({s, ip, port, kind, std::chrono::steady_clock::now() + kConnectTimeout});
     return true;
 }
 
+// Network thread only, right after poll(): `revents` holds the poll results of pending_, in order.
+void Network::completeConnects(const std::vector<short>& revents) {
+    const auto now = std::chrono::steady_clock::now();
+    std::vector<PendingConnect> still;
+    for (size_t i = 0; i < pending_.size(); ++i) {
+        const PendingConnect& pc = pending_[i];
+        const short ev = i < revents.size() ? revents[i] : 0;
+        if (!(ev & (POLLOUT | POLLERR | POLLHUP))) {
+            if (now < pc.deadline) {
+                still.push_back(pc);
+                continue;
+            }
+            Bucks::logOut() << "DEBUG: cannot reach " << pc.ip << ":" << pc.port << " (timeout)" << std::endl;
+            closeSocket(pc.fd);
+            continue;
+        }
+        int soErr = 0;
+        socklen_t soLen = sizeof(soErr);
+        if (getsockopt(pc.fd, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soErr), &soLen) != 0 || soErr != 0) {
+            Bucks::logOut() << "DEBUG: cannot reach " << pc.ip << ":" << pc.port << ": " << strerror(soErr) << std::endl;
+            closeSocket(pc.fd);
+            continue;
+        }
+        std::lock_guard<std::mutex> lock(peersMutex);
+        peers[pc.fd] = std::make_unique<Peer>(*this, pc.fd, pc.ip, pc.port, pc.kind);
+    }
+    pending_.swap(still);
+}
+
+// Non-blocking: an IPv4 literal, or the last answer of the resolver thread. A name that has no
+// answer yet (or an old one) is queued for it; getaddrinfo never runs on the network thread or
+// under peersMutex (audit NET-4).
+bool Network::lookupHost(const std::string& host, std::string& ip) {
+    if (isIPv4Literal(host)) {
+        ip = host;
+        return true;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(dnsMutex_);
+    DnsEntry& e = dnsCache_[host];
+    const bool fresh = e.asked && now - e.at < (e.ok ? kDnsTtl : kDnsRetry);
+    if (!fresh && !e.queued) {
+        e.queued = true;
+        dnsQueue_.push_back(host);
+        dnsCv_.notify_one();
+    }
+    if (e.ip.empty()) return false;
+    ip = e.ip;   // possibly stale while a new lookup runs
+    return true;
+}
+
+void Network::resolverLoop() {
+    std::unique_lock<std::mutex> lock(dnsMutex_);
+    while (true) {
+        dnsCv_.wait(lock, [&] { return !running || !dnsQueue_.empty(); });
+        if (!running) return;
+        const std::string host = dnsQueue_.front();
+        dnsQueue_.erase(dnsQueue_.begin());
+        lock.unlock();
+        std::string ip;
+        const bool ok = resolveIPv4(host, ip);   // may take seconds; no lock held
+        lock.lock();
+        DnsEntry& e = dnsCache_[host];
+        e.asked = true;
+        e.queued = false;
+        e.ok = ok;
+        e.at = std::chrono::steady_clock::now();
+        if (ok) e.ip = ip;                       // a failed lookup keeps the last good answer
+        else Bucks::logOut() << "DEBUG: cannot resolve " << host << std::endl;
+    }
+}
+
+namespace {
+
+// First retry delay. A seed starts above the 5 s per-address accept throttle, so its first
+// retry is not refused for coming too soon after the first try.
+int initialBackoffSeconds(ConnKind kind) { return kind == ConnKind::SEED ? 6 : 5; }
+constexpr int kMaxBackoffSeconds = 300;
+// A connection that lasted this long resets the backoff, so its loss is redialled at once.
+constexpr auto kStableConnection = std::chrono::seconds(60);
+
+} // namespace
+
+void Network::addDialTarget(const std::string& host, uint16_t port, ConnKind kind) {
+    std::lock_guard<std::mutex> lock(peersMutex);
+    for (const auto& t : dialTargets_)
+        if (t.host == host && t.port == port) return;
+    dialTargets_.push_back({host, port, kind, std::chrono::steady_clock::now(), initialBackoffSeconds(kind)});
+}
+
 void Network::addPersistentPeer(const std::string& host, uint16_t port) {
-    std::lock_guard<std::mutex> lock(peersMutex);
-    for (const auto& p : persistentPeers_)
-        if (p.host == host && p.port == port) return;
-    persistentPeers_.push_back({host, port, std::chrono::steady_clock::now(), 5});
+    addDialTarget(host, port, ConnKind::MANUAL);
 }
 
-void Network::addSeedNode(const std::string& hostPort) {
-    std::lock_guard<std::mutex> lock(peersMutex);
-    if (std::find(seedNodes.begin(), seedNodes.end(), hostPort) == seedNodes.end())
-        seedNodes.push_back(hostPort);
+bool Network::addSeedNode(const std::string& hostPort) {
+    const size_t colon = hostPort.rfind(':');
+    if (colon == std::string::npos || colon == 0) return false;
+    int port = 0;
+    try { port = std::stoi(hostPort.substr(colon + 1)); } catch (...) { return false; }
+    if (port < 1 || port > 65535) return false;
+    addDialTarget(hostPort.substr(0, colon), uint16_t(port), ConnKind::SEED);
+    return true;
 }
 
-// Called from the network thread about once a second.
+// Called from the network thread about once a second. A --connect peer is dialled whenever it
+// is missing; a seed whenever it is missing and outbound slots are free. Before, seeds were tried
+// once at start and then every 30 minutes, so a seed restart cut seed-only nodes off for that
+// long (audit NET-NEW-1).
 void Network::maintainConnections() {
+    // Dials other threads asked for (connectToPeer) start at once.
+    std::vector<QueuedDial> asked;
+    {
+        std::lock_guard<std::mutex> lock(queueMutex);
+        asked.swap(dialQueue_);
+    }
+    for (const QueuedDial& d : asked) startConnect(d.ip, d.port, d.kind);
+
     const auto now = std::chrono::steady_clock::now();
     if (now - lastMaintain_ < std::chrono::seconds(1)) return;
     lastMaintain_ = now;
 
-    struct Dial { size_t index; };
-    std::vector<size_t> due;
+    // Every connection with the address it listens on (port 0: an inbound peer that has not
+    // said), so an address is never dialled while it is connected in either direction.
+    struct Link { std::string ip; uint16_t port; bool outbound; std::chrono::steady_clock::duration age; };
+    std::vector<DialTarget> targets;
+    std::vector<Link> links;
+    size_t outbound = 0;
     {
         std::lock_guard<std::mutex> lock(peersMutex);
-        for (size_t i = 0; i < persistentPeers_.size(); ++i) {
-            auto& pp = persistentPeers_[i];
-            std::string ip;
-            bool connected = false;
-            if (resolveIPv4(pp.host, ip)) {
-                for (const auto& [fd, peer] : peers) {
-                    // Outbound entries carry the dialled port; an inbound socket from the same
-                    // host also means the link exists, whichever side opened it.
-                    if (peer->getIP() == ip && peer->getState() != PeerState::DISCONNECTED) {
-                        connected = true;
-                        break;
-                    }
-                }
-            }
-            if (connected) {
-                pp.backoffSeconds = 5;
-                pp.nextAttempt = now;
-            } else if (now >= pp.nextAttempt) {
-                due.push_back(i);
-            }
+        targets = dialTargets_;
+        for (const auto& [fd, peer] : peers) {
+            if (peer->getState() == PeerState::DISCONNECTED) continue;
+            const std::optional<NetAddress> listen = peer->listenAddress();
+            links.push_back({peer->getIP(), listen ? listen->port : uint16_t(0), peer->outbound(),
+                             now - peer->getConnectionTime()});
+            if (peer->kind() == ConnKind::SEED || peer->kind() == ConnKind::AUTO) ++outbound;
         }
     }
-    for (size_t i : due) {
-        std::string host;
-        uint16_t port;
-        {
-            std::lock_guard<std::mutex> lock(peersMutex);
-            host = persistentPeers_[i].host;
-            port = persistentPeers_[i].port;
+    for (const PendingConnect& pc : pending_) {
+        links.push_back({pc.ip, pc.port, true, std::chrono::steady_clock::duration::zero()});
+        if (pc.kind == ConnKind::SEED || pc.kind == ConnKind::AUTO) ++outbound;
+    }
+
+    for (size_t i = 0; i < targets.size(); ++i) {
+        const DialTarget& t = targets[i];
+        std::string ip;
+        if (!lookupHost(t.host, ip)) continue;   // the resolver thread is on it
+        NetAddress target;
+        if (NetAddress::parse(ip + ":" + std::to_string(t.port), target) && selfAddresses_.count(target)) continue;
+        const Link* link = nullptr;
+        for (const Link& l : links) {
+            // An inbound peer from that host that has not told its port yet counts too.
+            if (l.ip == ip && (l.port == t.port || l.port == 0)) { link = &l; break; }
         }
-        const bool ok = connectToPeer(host, port);
+        if (link) {
+            if (link->age >= kStableConnection) {
+                std::lock_guard<std::mutex> lock(peersMutex);
+                dialTargets_[i].backoffSeconds = initialBackoffSeconds(t.kind);
+                dialTargets_[i].nextAttempt = now;
+            }
+            continue;
+        }
+        if (now < t.nextAttempt) continue;
+        if (t.kind == ConnKind::SEED && outbound >= MAX_OUTBOUND_PEERS) continue;
+
+        if (t.kind == ConnKind::SEED) Bucks::logOut() << "DEBUG: Connecting to seed node " << t.host << ":" << t.port << std::endl;
+        const bool started = startConnect(ip, t.port, t.kind);
+        if (started) {
+            links.push_back({ip, t.port, true, std::chrono::steady_clock::duration::zero()});
+            if (t.kind == ConnKind::SEED) ++outbound;
+        }
         std::lock_guard<std::mutex> lock(peersMutex);
-        auto& pp = persistentPeers_[i];
-        // Even a connect that succeeded is re-checked next round; back off either way so a peer
-        // that accepts and then drops us is not hammered.
-        pp.nextAttempt = now + std::chrono::seconds(pp.backoffSeconds);
-        pp.backoffSeconds = std::min(pp.backoffSeconds * 2, 300);
-        if (!ok) Bucks::logOut() << "DEBUG: cannot reach " << host << ":" << port
-                                 << ", retrying in " << pp.backoffSeconds / 2 << " s" << std::endl;
+        auto& dt = dialTargets_[i];
+        // Back off even after a connect that succeeds, so a peer that accepts and then drops
+        // us is not hammered.
+        dt.nextAttempt = now + std::chrono::seconds(dt.backoffSeconds);
+        if (!started) Bucks::logOut() << "DEBUG: cannot dial " << t.host << ":" << t.port
+                                      << ", retrying in " << dt.backoffSeconds << " s" << std::endl;
+        dt.backoffSeconds = std::min(dt.backoffSeconds * 2, kMaxBackoffSeconds);
     }
+
+    std::set<NetAddress> linked(selfAddresses_.begin(), selfAddresses_.end());
+    std::map<uint32_t, size_t> outboundGroups;
+    for (const Link& l : links) {
+        NetAddress a;
+        if (!NetAddress::parse(l.ip + ":" + std::to_string(l.port), a)) continue;
+        linked.insert(a);
+        if (l.outbound) ++outboundGroups[a.group()];
+    }
+    dialFromAddressTable(outbound, linked, outboundGroups);
+}
+
+bool Network::outboundGroupFull(const NetAddress& a, const std::map<uint32_t, size_t>& outboundGroups) {
+    if (!a.isRoutable()) return false;
+    const auto it = outboundGroups.find(a.group());
+    return it != outboundGroups.end() && it->second >= MAX_OUTBOUND_PER_GROUP;
+}
+
+namespace {
+constexpr size_t kMaxAutoDialsInFlight = 2;
+} // namespace
+
+// Fills free outbound slots from the address table, one dial a round (about a second) and at
+// most two in flight, so a table full of dead addresses costs little. Addresses from ADDR are
+// only ever dialled from here, never as they arrive (audit NET-11).
+void Network::dialFromAddressTable(size_t outbound, const std::set<NetAddress>& linked,
+                                   const std::map<uint32_t, size_t>& outboundGroups) {
+    if (outbound >= MAX_OUTBOUND_PEERS) return;
+    size_t inFlight = 0;
+    for (const PendingConnect& pc : pending_)
+        if (pc.kind == ConnKind::AUTO) ++inFlight;
+    if (inFlight >= kMaxAutoDialsInFlight) return;
+
+    const int64_t now = unixNow();
+    // Spread outbound peers over networks (audit NET-6): a /16 we have no outbound peer in comes
+    // first, and a public /16 never holds more than MAX_OUTBOUND_PER_GROUP of them.
+    const std::optional<NetAddress> pick = addrman_.select(
+        now,
+        [&](const NetAddress& a) {
+            return linked.count(a) > 0 || outboundGroupFull(a, outboundGroups) || isIPBanned(a.ipString());
+        },
+        [&](const NetAddress& a) { return outboundGroups.count(a.group()) == 0; });
+    if (!pick) return;
+    addrman_.attempt(*pick, now);
+    Bucks::logOut() << "DEBUG: Connecting to discovered peer " << pick->toString() << std::endl;
+    startConnect(pick->ipString(), pick->port, ConnKind::AUTO);
 }
 
 // A peer that was disconnected from inside one of its own handlers (oversized frame, write timeout) still
-// has an entry here with a closed descriptor. Remove those before the next select() (audit NET-1).
+// has an entry here with a closed descriptor. Remove those before the next poll() (audit NET-1).
 void Network::reapDisconnectedPeers() {
     std::lock_guard<std::mutex> lock(peersMutex);
     for (auto it = peers.begin(); it != peers.end();) {
@@ -913,47 +1524,44 @@ void Network::reapDisconnectedPeers() {
 }
 
 void Network::run() {
+    // poll(), not select(): an fd_set holds descriptors below FD_SETSIZE (1024) only, and a node
+    // with a raised descriptor limit would write past it (audit NET-NEW-9).
+    std::vector<pollfd> fds;
     while (running) {
         reapDisconnectedPeers();
-        fd_set readFds;
-        FD_ZERO(&readFds);
-        FD_SET(listenSocket, &readFds);
-
-        int maxFd = static_cast<int>(listenSocket);
+        fds.clear();
+        fds.push_back({listenSocket, POLLIN, 0});
         {
             std::lock_guard<std::mutex> lock(peersMutex);
-            for (auto const& [fd, peer] : peers) {
-                FD_SET(fd, &readFds);
-                if (fd > maxFd) maxFd = fd;
-            }
+            for (auto const& [fd, peer] : peers) fds.push_back({fd, POLLIN, 0});
         }
+        const size_t firstPending = fds.size();
+        for (const PendingConnect& pc : pending_) fds.push_back({pc.fd, POLLOUT, 0});
 
-        timeval tv{0, 100000}; 
-        int activity = select(maxFd + 1, &readFds, nullptr, nullptr, &tv);
-
+        int activity = ::poll(fds.data(), nfds_t(fds.size()), 100);
         if (activity < 0) {
-#ifdef _WIN32
-            if (WSAGetLastError() == WSAEINTR) continue;
-#else
             if (errno == EINTR) continue;
-#endif
-            // Any other error (EBADF from a stale descriptor, ...): clean up and back off, never spin.
+            // Any other error: clean up and back off, never spin.
             reapDisconnectedPeers();
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
 
+        std::vector<short> dialEvents;
+        for (size_t i = firstPending; i < fds.size(); ++i) dialEvents.push_back(fds[i].revents);
+        completeConnects(dialEvents);
         pruneZombiePeers();
-        maintainConnections();
         update();
 
-        if (FD_ISSET(listenSocket, &readFds)) {
+        if (fds[0].revents & POLLIN) {
             acceptNewConnection();
         }
 
         handleSocketIO();
         flushQueues();
     }
+    for (const PendingConnect& pc : pending_) closeSocket(pc.fd);
+    pending_.clear();
 }
 
 size_t Network::peerCount() const {
@@ -969,18 +1577,11 @@ void Network::queueBroadcast(const NetMessage& msg, int exceptFd) {
     if (relayQueue.size() < 1000) relayQueue.emplace_back(msg, exceptFd);
 }
 
-void Network::queueAddresses(const std::vector<std::string>& addresses) {
-    std::lock_guard<std::mutex> lock(queueMutex);
-    if (addrQueue.size() < 100) addrQueue.push_back(addresses);
-}
-
 void Network::flushQueues() {
     std::vector<std::pair<NetMessage, int>> relay;
-    std::vector<std::vector<std::string>> addrs;
     {
         std::lock_guard<std::mutex> lock(queueMutex);
         relay.swap(relayQueue);
-        addrs.swap(addrQueue);
     }
     if (!relay.empty()) {
         std::lock_guard<std::mutex> lock(peersMutex);
@@ -990,7 +1591,6 @@ void Network::flushQueues() {
             }
         }
     }
-    for (const auto& list : addrs) handleAddrMessage(list);   // takes peersMutex itself
 }
 
 void Network::acceptNewConnection() {
@@ -1003,8 +1603,7 @@ void Network::acceptNewConnection() {
     inet_ntop(AF_INET, &addr.sin_addr, ip, INET_ADDRSTRLEN);
     
     {
-        std::lock_guard<std::mutex> lock(securityMutex);
-        if (bannedIPs.count(ip) > 0) {
+        if (isIPBanned(ip)) {
             Bucks::logOut() << "DEBUG: Dropping connection from banned IP " << ip << std::endl;
 #ifdef _WIN32
             closesocket(s);
@@ -1014,8 +1613,15 @@ void Network::acceptNewConnection() {
             return;
         }
 
+        // The throttle slows one remote host's reconnect loop. Loopback connections come from this
+        // machine (several local nodes discovering each other) and are not throttled.
+        std::lock_guard<std::mutex> lock(securityMutex);
         auto now = std::chrono::steady_clock::now();
-        if (lastConnectionTimes.count(ip) > 0) {
+        if (lastConnectionTimes.size() > 4096) {   // forget addresses that are no longer throttled
+            for (auto it = lastConnectionTimes.begin(); it != lastConnectionTimes.end();)
+                it = now - it->second >= std::chrono::seconds(5) ? lastConnectionTimes.erase(it) : std::next(it);
+        }
+        if (!isLoopbackAddress(ip) && lastConnectionTimes.count(ip) > 0) {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastConnectionTimes[ip]).count();
             if (elapsed < 5) {
                 Bucks::logOut() << "DEBUG: Throttling connection attempt from " << ip << " (too fast)" << std::endl;
@@ -1052,8 +1658,11 @@ void Network::acceptNewConnection() {
         return;
     }
 
-    if (peers.size() >= MAX_PEERS) {
-        Bucks::logOut() << "DEBUG: Max peers reached (" << MAX_PEERS << "). Dropping connection from " << ip << std::endl;
+    size_t inbound = 0;
+    for (auto const& [fd, p] : peers)
+        if (!p->outbound()) ++inbound;
+    if (inbound >= options_.maxInbound) {
+        Bucks::logOut() << "DEBUG: Inbound slots full (" << inbound << "). Dropping connection from " << ip << std::endl;
 #ifdef _WIN32
         closesocket(s);
 #else
@@ -1080,6 +1689,13 @@ void Network::pruneZombiePeers() {
             }
         }
 
+        // Nothing received (not even a pong) for inactivityTimeout: the slot goes to someone else.
+        if (now - peer->lastReceived > options_.inactivityTimeout) {
+            Bucks::logOut() << "DEBUG: Pruning silent peer " << peer->address() << " (inactivity timeout)" << std::endl;
+            it = peers.erase(it);
+            continue;
+        }
+
         // Round 4: Sync Stall Detection
         if (!peer->requestedBlocks.empty()) {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - peer->lastBlockRequestTime).count();
@@ -1094,22 +1710,32 @@ void Network::pruneZombiePeers() {
 }
 
 void Network::banIP(const std::string& ip) {
-    // Bug 1 fix: localhost and LAN peers must never be banned.
-    // All three pilot nodes share 127.0.0.1; banning that address
-    // would cut off the entire local network.
-    if (isLocalAddress(ip)) {
-        Bucks::logOut() << "WARNING: Refusing to ban local/LAN address " << ip
-                  << " — local peers are whitelisted from the ban list." << std::endl;
+    // Local nodes share 127.0.0.1; banning it would cut off the whole local network.
+    if (isLoopbackAddress(ip)) {
+        Bucks::logOut() << "WARNING: Not banning loopback address " << ip << std::endl;
         return;
     }
+    const auto now = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock(securityMutex);
-    bannedIPs.insert(ip);
-    Bucks::logOut() << "DEBUG: IP " << ip << " added to ban list." << std::endl;
+    // Bans end (before: never, until a restart), and the list is bounded: when full, the ban
+    // closest to its end makes room.
+    if (bannedUntil_.size() >= kMaxBans && !bannedUntil_.count(ip)) {
+        auto soonest = bannedUntil_.begin();
+        for (auto it = bannedUntil_.begin(); it != bannedUntil_.end(); ++it)
+            if (it->second < soonest->second) soonest = it;
+        bannedUntil_.erase(soonest);
+    }
+    bannedUntil_[ip] = now + options_.banDuration;
+    Bucks::logOut() << "DEBUG: IP " << ip << " banned for " << options_.banDuration.count() << " s." << std::endl;
 }
 
 bool Network::isIPBanned(const std::string& ip) const {
     std::lock_guard<std::mutex> lock(securityMutex);
-    return bannedIPs.count(ip) > 0;
+    auto it = bannedUntil_.find(ip);
+    if (it == bannedUntil_.end()) return false;
+    if (std::chrono::steady_clock::now() < it->second) return true;
+    bannedUntil_.erase(it);
+    return false;
 }
 
 void Network::handleSocketIO() {
@@ -1170,120 +1796,118 @@ void Network::broadcast(const NetMessage& msg) {
     }
 }
 
+// Periodic work of the network thread.
 void Network::update() {
-    // Run periodic peer discovery
-    discoverPeers();
+    maintainConnections();
+    sendPings();
+    if (std::chrono::steady_clock::now() - lastAddressSave_ > std::chrono::minutes(15)) saveAddresses();
+}
+
+void Network::setAddressFile(const std::string& path) {
+    addressFile_ = path;
+    lastAddressSave_ = std::chrono::steady_clock::now();
+    std::string text;
+    if (!readWholeFile(path, text)) return;   // none yet: normal on a first start
+    Bucks::logOut() << "DEBUG: Loaded " << addrman_.load(text) << " peer addresses from " << path << std::endl;
+}
+
+void Network::saveAddresses() {
+    lastAddressSave_ = std::chrono::steady_clock::now();
+    if (addressFile_.empty()) return;
+    std::string err;
+    if (!writePrivateFileAtomic(addressFile_, addrman_.serialize(), &err))
+        Bucks::logErr() << "WARNING: cannot write " << addressFile_ << ": " << err << std::endl;
+}
+
+// Every active peer gets a ping (8 random bytes) each pingInterval, so a peer that went away
+// without closing the connection is noticed by pruneZombiePeers (audit NET-12).
+void Network::sendPings() {
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(peersMutex);
+    for (auto& [fd, peer] : peers) {
+        if (peer->getState() != PeerState::ACTIVE || now - peer->lastPingSent < options_.pingInterval) continue;
+        peer->lastPingSent = now;
+        Writer w;
+        w.u64(relayRng_());
+        peer->sendMsg(NetMessage(MessageType::PING, w.take()));
+    }
 }
 
 // Peer Discovery Implementation (Phase 6)
 
-void Network::loadSeedNodes() {
-    seedNodes = node.params().seedNodes;
-    Bucks::logOut() << "DEBUG: Loaded " << seedNodes.size() << " seed nodes" << std::endl;
+size_t Network::addAddresses(const std::vector<std::string>& addresses, const std::string& sourceIp,
+                             std::vector<NetAddress>* fresh) {
+    uint32_t source = 0;
+    if (!NetAddress::parseIP(sourceIp, source)) return 0;
+    const int64_t now = unixNow();
+    size_t added = 0;
+    for (const std::string& s : addresses) {
+        NetAddress a;
+        if (!NetAddress::parse(s, a) || !a.acceptableFrom(source) || selfAddresses_.count(a)) continue;
+        if (!addrman_.add(a, source >> 16, now)) continue;
+        ++added;
+        if (fresh) fresh->push_back(a);
+    }
+    if (!addresses.empty())
+        Bucks::logOut() << "DEBUG: " << added << " new of " << addresses.size() << " addresses from " << sourceIp << std::endl;
+    return added;
 }
 
-void Network::discoverPeers() {
-    auto now = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::minutes>(now - lastDiscoveryTime).count();
-    
-    // Run discovery every 30 minutes
-    if (elapsed < 30) return;
-    
-    lastDiscoveryTime = now;
-    Bucks::logOut() << "DEBUG: Running peer discovery..." << std::endl;
-    
-    // FIX: Same deadlock fix as handleAddrMessage — Bucks v1 security patch
-    // Collect seed peers to connect under the lock, then connect outside the lock.
-    std::vector<std::pair<std::string, uint16_t>> seedsToConnect;
-    {
-        std::lock_guard<std::mutex> lock(peersMutex);
-        if (peers.size() < 3) {
-            for (const auto& seed : seedNodes) {
-                size_t colonPos = seed.find(':');
-                if (colonPos == std::string::npos) continue;
-                std::string ip  = seed.substr(0, colonPos);
-                int portNum = 0;
-                try { portNum = std::stoi(seed.substr(colonPos + 1)); } catch (...) { continue; }
-                if (portNum < 1 || portNum > 65535) continue;
-                uint16_t   port = static_cast<uint16_t>(portNum);
-
-                bool alreadyConnected = false;
-                for (const auto& [fd, peer] : peers) {
-                    if (peer->getIP() == ip) { alreadyConnected = true; break; }
-                }
-                if (!alreadyConnected && !isIPBanned(ip))
-                    seedsToConnect.emplace_back(ip, port);
-            }
-        }
-    }  // peersMutex released
-
-    for (auto& [ip, port] : seedsToConnect) {
-        Bucks::logOut() << "DEBUG: Connecting to seed node " << ip << ":" << port << std::endl;
-        connectToPeer(ip, port);
-    }
-
-    // FIX: Log clearly if no peers connected after seed attempts — Bucks v1 security patch
-    {
-        std::lock_guard<std::mutex> lock(peersMutex);
-        if (!seedsToConnect.empty() && peers.empty()) {
-            Bucks::logErr() << "Cannot connect to Bucks network. "
-                      << "Check your internet connection or run a local node." << std::endl;
-        }
-    }
-    
-    // Send GETADDR to all active peers to discover more peers
-    {
-        std::lock_guard<std::mutex> lock(peersMutex);
-        for (auto& [fd, peer] : peers) {
-            if (peer->getState() == PeerState::ACTIVE) {
-                Bucks::logOut() << "DEBUG: Sending GETADDR to " << peer->getIP() << std::endl;
-                peer->sendMsg(NetMessage(MessageType::GETADDR, {}));
-            }
-        }
-    }
+void Network::learnAddress(const NetAddress& a, const std::string& sourceIp, int fromFd) {
+    std::vector<NetAddress> fresh;
+    addAddresses({a.toString()}, sourceIp, &fresh);
+    for (const NetAddress& f : fresh) relayAddress(f, fromFd);
 }
 
-void Network::handleAddrMessage(const std::vector<std::string>& addresses) {
-    // FIX: Deadlock prevention — Bucks v1 security patch
-    // The old code called connectToPeer() while holding peersMutex.
-    // connectToPeer() also acquires peersMutex → deadlock → node hangs.
-    // Fix: collect the (ip, port) pairs to connect inside the mutex, release the
-    // lock, then call connectToPeer() for each pair outside the critical section.
-    Bucks::logOut() << "DEBUG: Received " << addresses.size() << " peer addresses" << std::endl;
-
-    for (const auto& addr : addresses)
-        knownPeers.insert(addr);
-
-    std::vector<std::pair<std::string, uint16_t>> toConnect;
-    {
-        std::lock_guard<std::mutex> lock(peersMutex);
-        for (const auto& addr : addresses) {
-            if (peers.size() + toConnect.size() >= MAX_PEERS / 2) break;
-
-            size_t colonPos = addr.find(':');
-            if (colonPos == std::string::npos) continue;
-
-            std::string ip  = addr.substr(0, colonPos);
-            int portNum = 0;
-            // The address comes from a peer: never let a bad port throw out of the network thread (audit NET-2).
-            try { portNum = std::stoi(addr.substr(colonPos + 1)); } catch (...) { continue; }
-            if (portNum < 1 || portNum > 65535 || ip.empty() || ip.size() > 253) continue;
-            uint16_t port = static_cast<uint16_t>(portNum);
-
-            bool alreadyConnected = false;
-            for (const auto& [fd, peer] : peers) {
-                if (peer->getIP() == ip) { alreadyConnected = true; break; }
-            }
-
-            if (!alreadyConnected && !isIPBanned(ip))
-                toConnect.emplace_back(ip, port);
-        }
-    }  // peersMutex released before any connectToPeer() call
-
-    for (auto& [ip, port] : toConnect) {
-        Bucks::logOut() << "DEBUG: Connecting to discovered peer " << ip << ":" << port << std::endl;
-        connectToPeer(ip, port);
+// Called by message handlers, under peersMutex: the address goes to two random active peers.
+void Network::relayAddress(const NetAddress& a, int exceptFd) {
+    std::vector<Peer*> to;
+    for (auto& [fd, peer] : peers) {
+        if (fd != exceptFd && peer->getState() == PeerState::ACTIVE) to.push_back(peer.get());
     }
+    std::shuffle(to.begin(), to.end(), relayRng_);
+    if (to.size() > 2) to.resize(2);
+    if (to.empty()) return;
+    const std::string s = a.toString();
+    Writer w;
+    w.u32(1);
+    w.u16(uint16_t(s.size()));
+    w.bytes(reinterpret_cast<const uint8_t*>(s.data()), s.size());
+    const NetMessage msg(MessageType::ADDR, w.take());
+    for (Peer* p : to) p->sendMsg(msg);
+}
+
+// Called by the VERSION handler, under peersMutex, once `p` has said who it is. When two nodes dial
+// each other at the same moment (both learned the other's address together), each has two
+// connections to the other. Both ends keep the one dialled by the node with the larger nonce, so
+// they drop the same connection. True if `p` itself was dropped.
+// A node is told apart by its nonce, not by the port it says it listens on: two users behind one
+// NAT address both run the default port. The address must match as well, so a peer that has seen
+// someone else's nonce cannot get that node's connection to us closed by quoting it from elsewhere.
+bool Network::dropDuplicate(Peer& p) {
+    for (auto& [fd, other] : peers) {
+        if (other.get() == &p || !other->versionSeen() || other->getState() == PeerState::DISCONNECTED) continue;
+        if (other->remoteNonce() != p.remoteNonce() || other->getIP() != p.getIP()) continue;
+        Peer* drop = &p;   // the same direction twice: the newer one goes
+        if (p.outbound() != other->outbound()) {
+            Peer* out = p.outbound() ? &p : other.get();
+            Peer* in = p.outbound() ? other.get() : &p;
+            drop = localNonce_ > p.remoteNonce() ? in : out;
+        }
+        Bucks::logOut() << "DEBUG: Second connection to " << p.getIP() << "; closing "
+                        << (drop->outbound() ? "ours" : "theirs") << std::endl;
+        drop->disconnect();
+        return drop == &p;
+    }
+    return false;
+}
+
+// Our own address, learned by dialling it: never dialled or passed on again.
+void Network::markSelf(const std::string& hostPort) {
+    NetAddress a;
+    if (!NetAddress::parse(hostPort, a)) return;
+    selfAddresses_.insert(a);
+    addrman_.remove(a);
 }
 
 } // namespace Bucks
